@@ -413,7 +413,11 @@ static int disc_open(Disc *d, const WCHAR *image, WCHAR *err, size_t errn)
     memset(d, 0, sizeof *d);
     d->f = CreateFileW(image, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (d->f == INVALID_HANDLE_VALUE) {
-        swprintf_s(err, errn, L"The disc image could not be opened (error %lu).", GetLastError());
+        DWORD e = GetLastError();
+        if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND)
+            swprintf_s(err, errn, L"The disc image is not there any more: %s", image);
+        else
+            swprintf_s(err, errn, L"The disc image could not be opened (error %lu).", e);
         return 0;
     }
     for (i = 0; i < 4; i++) {
@@ -430,8 +434,8 @@ static int disc_open(Disc *d, const WCHAR *image, WCHAR *err, size_t errn)
             return 1;
         }
     }
-    swprintf_s(err, errn, L"This is not an Xbox disc image. (A PlayStation 2 or GameCube image of the game "
-                          L"will not work; the port needs the Xbox version.)");
+    swprintf_s(err, errn, L"This file is not an Xbox disc image. Choose the .iso (xiso) made from your "
+                          L"Xbox disc of " GAME_TITLE L".");
     return 0;
 }
 
