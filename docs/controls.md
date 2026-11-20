@@ -260,7 +260,8 @@ time, so no real pad state has been seen.
 Not verified:
 
 - **In the game**: nothing yet. The game does not boot to its main loop (see `docs/graphics.md`), and
-  the XAPI replacements need a regen. Stack layouts and return values in `btvs_input_xapi.c` were
+  the XAPI replacements need a regen. `btvs_input_xapi.c` compiles (`build.sh btvs_input_xapi_check`)
+  and the game links with the rest of the layer, but its stack layouts and return values were
   written from the disassembly of the callers, not run.
 - Real hardware: an Xbox pad, a DualSense through SDL, rumble on either, hot-plug, keyboard and mouse
   in the window. The SDL functions are declared by hand from the SDL3 ABI.
