@@ -72,6 +72,7 @@ int  btvs_menu_no_capture_state(void) { return -1; }
 void btvs_menu_no_void(void) {}
 void btvs_menu_no_binding_clear(int a, int s) { (void)a; (void)s; }
 int  btvs_menu_no_gpu_info(struct btvs_gpu_info *o) { (void)o; return 0; }
+void btvs_menu_no_quit(void) { btvs_settings_save(); exit(0); }
 
 #pragma comment(linker, "/alternatename:btvs_log=btvs_menu_no_log")
 #pragma comment(linker, "/alternatename:btvs_trail=btvs_menu_no_trail")
@@ -87,6 +88,7 @@ int  btvs_menu_no_gpu_info(struct btvs_gpu_info *o) { (void)o; return 0; }
 #pragma comment(linker, "/alternatename:btvs_input_binding_clear=btvs_menu_no_binding_clear")
 #pragma comment(linker, "/alternatename:btvs_input_bindings_reset=btvs_menu_no_void")
 #pragma comment(linker, "/alternatename:btvs_gpu_info=btvs_menu_no_gpu_info")
+#pragma comment(linker, "/alternatename:btvs_quit=btvs_menu_no_quit")
 
 /* ── the game (guest addresses, XDK 4432 retail; names from final.map) ──── */
 
@@ -98,6 +100,7 @@ void GUI_TMenuMain_OnMessage_002226B0(void);
 void GUI_TMenuPause_OnLoad_00223760(void);
 void GUI_TMenuPause_OnMessage_00223A60(void);
 void GUI_TBuffyMenu_OnUpdate_00219480(void);
+void GUI_TMenuNameSession_OnUpdate_00222F00(void);
 void GUI_TBuffyMenu_OnBuffyCommand_00218C20(void);
 void GUI_TCanvas_GotoControl_001EA460(void);
 void GUI_TTextButton_SetText_001EE0A0(void);          /* SetText(char *) */
@@ -113,6 +116,7 @@ void Z_YAPAXI_op2_002BC1A0(void);                     /* operator new(size) */
 #define VA_PAUSE_ONLOAD       0x00223760u
 #define VA_PAUSE_ONMESSAGE    0x00223A60u
 #define VA_BUFFYMENU_ONUPDATE 0x00219480u
+#define VA_NAMESESSION_ONUPDATE 0x00222F00u
 
 #define G_MANAGER        0x007E6BD0u    /* GUI::g_lpManager */
 #define G_FADE_MODE      0x007F041Cu    /* TBuffyMenu::s_fadeMode: commands are ignored while it is set */
@@ -226,6 +230,8 @@ static char s_rep_text[96];
 static const char k_charset[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?-'";
 static const char *const k_category[] = {
     "Crash or freeze", "Graphics", "Sound", "Controls", "Stuck in the game", "Something else" };
+
+static void pc_wording(void);
 
 /* ── controls ────────────────────────────────────────────────────────── */
 
@@ -746,6 +752,7 @@ static void hook_options_onload(void)
 {
     uint32_t menu = g_ecx;
     GUI_TMenuOptions_OnLoad_00223230();
+    pc_wording();
     options_setup(menu);
     if (s_options != menu) return;
     if (s_page != PG_NONE) set_page(PG_NONE);
@@ -861,12 +868,140 @@ static void hook_buffymenu_onupdate(void)
     }
 }
 
+/* ── PC wording ──────────────────────────────────────────────────────────
+ * The game's texts that name the Xbox, its hard disk or its "blocks" are
+ * overwritten where they lie (the new text is never longer): the strings of
+ * the menu file, the copies the menus' controls made of them, and the
+ * messages in the game's own data. */
+
+static const struct { const char *from, *to; int shift_x; } k_word[] = {
+    { "Launch a New Game on your Xbox Hard Disk called", "Launch a New Game on this PC called", 0 },
+    { "Hard Disk", "This PC", 0 },
+    { "Total Blocks", "", 0 },
+    { "Free Blocks", "", 0 },
+    { "- 50,000+", "", 0 },
+};
+static const struct { uint32_t va; const char *from, *to; } k_message[] = {
+    { 0x0061B278u, "There's a problem with the disc",
+      "There's a problem with the game's files.  They may be missing or damaged." },
+    { 0x0061B2C8u, "There's a problem with the disc",
+      "There's a problem with the game's files.  They may be missing or damaged.  Press A to continue" },
+    { 0x0068D4DCu, "Deleting saved game.  Please don't turn off",
+      "Deleting saved game.  Please don't close the game." },
+    { 0x0068D600u, "Your Xbox doesn't have enough free blocks to save options",
+      "There isn't enough free disk space to save options. Press A to continue without saving." },
+    { 0x0068D6E8u, "Buffy The Vampire Slayer only allows %i saved games on your Xbox",
+      "Buffy The Vampire Slayer only allows %i saved games.  Please delete one to start a new game.  Press A to continue." },
+    { 0x0068D778u, "Your Xbox Hard Disk has too many",
+      "There are too many saved games.  Press A to continue." },
+    { 0x0068D7C8u, "Your Xbox Hard Disk doesn't have enough",
+      "There isn't enough free disk space to save games (%i blocks are required). Press A to continue without saving." },
+    { 0x0068DD38u, "Your Xbox has too many Buffy",
+      "There are too many Buffy saved games.\nPress A to continue." },
+    { 0x0068DDCCu, "Your Xbox has too many saved",
+      "There are too many saved games.\nPress A to continue." },
+    { 0x0068DE58u, "Your Xbox doesn't have enough free blocks to save games",
+      "There isn't enough free disk space to save games. Press A to continue without saving." },
+};
+
+/* Is guest memory [va, va+len) there to read and write? */
+static int gok(uint32_t va, uint32_t len)
+{
+    MEMORY_BASIC_INFORMATION mi;
+    const void *p;
+    if (va < 0x10000u || va >= 0x10000000u) return 0;
+    p = (const void *)XBOX_PTR(va);
+    if (!VirtualQuery(p, &mi, sizeof mi) || mi.State != MEM_COMMIT) return 0;
+    if (!(mi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_WRITECOPY))) return 0;
+    return (const char *)p + len <= (const char *)mi.BaseAddress + mi.RegionSize;
+}
+
+/* If `va` is one of the texts to reword, reword it; returns its shift_x + 1, else 0. */
+static int reword_at(uint32_t va)
+{
+    int i;
+    char *s;
+    if (!gok(va, 64)) return 0;
+    s = (char *)XBOX_PTR(va);
+    for (i = 0; i < (int)(sizeof k_word / sizeof k_word[0]); i++)
+        if (s[0] == k_word[i].from[0] && !strcmp(s, k_word[i].from)) {
+            strcpy(s, k_word[i].to);
+            return k_word[i].shift_x + 1;
+        }
+    return 0;
+}
+
+static void pc_wording(void)
+{
+    static int messages_done;
+    uint32_t mgr = MEM32(G_MANAGER), arr, n, i, off;
+    int strings = 0, controls = 0, messages = 0;
+
+    if (!messages_done) {
+        messages_done = 1;
+        for (i = 0; i < sizeof k_message / sizeof k_message[0]; i++) {
+            char *s;
+            if (!gok(k_message[i].va, 160)) continue;
+            s = (char *)XBOX_PTR(k_message[i].va);
+            if (strncmp(s, k_message[i].from, strlen(k_message[i].from)) ||
+                strlen(k_message[i].to) > strlen(s)) continue;
+            strcpy(s, k_message[i].to);
+            messages++;
+        }
+        btvs_log("menu", "PC wording: %d of %d game messages", messages, (int)(sizeof k_message / sizeof k_message[0]));
+    }
+    if (!mgr || !gok(mgr, 0x60)) return;
+    /* the menu file's strings (resource type 0) */
+    arr = MEM32(mgr + 0x20); n = MEM32(mgr + 0x2C);
+    if (n <= 512 && gok(arr, n * 4))
+        for (i = 0; i < n; i++) {
+            uint32_t r = MEM32(arr + i * 4);
+            if (!gok(r, 0x20)) continue;
+            for (off = 0; off < 0x20; off += 4)
+                if (reword_at(MEM32(r + off))) strings++;
+        }
+    /* the copies in the menus' controls */
+    arr = MEM32(mgr + 0x48);
+    if (gok(arr, 15 * 4))
+        for (i = 0; i < 15; i++) {
+            uint32_t menu = MEM32(arr + i * 4), node;
+            int guard = 0;
+            if (!gok(menu, 0x50)) continue;
+            for (node = MEM32(menu + M_HEAD); gok(node, 12) && guard < 256; node = MEM32(node + 4), guard++) {
+                uint32_t c = MEM32(node);
+                if (!gok(c, 0x44)) continue;
+                for (off = 0x24; off < 0x44; off += 4) {
+                    int r = reword_at(MEM32(c + off));
+                    if (r) { MEM32(c + C_X) += (uint32_t)(r - 1); controls++; }
+                }
+            }
+        }
+    if (strings || controls)
+        btvs_log("menu", "PC wording: %d menu strings, %d control texts", strings, controls);
+}
+
+/* The "Start Game" page (TMenuNameSession): no count of free "blocks" on a
+ * PC, and the reworded first line is shorter, so it is centred again. */
+static void hook_namesession_onupdate(void)
+{
+    uint32_t menu = g_ecx, eax0, c;
+    static const uint32_t k_blocks[] = { 267, 268, 269, 270 };
+    int i;
+    GUI_TMenuNameSession_OnUpdate_00222F00();
+    eax0 = g_eax;
+    for (i = 0; i < 4; i++)
+        if ((c = find_control(menu, k_blocks[i])) != 0) MEM32(c + C_STATE) = 3;
+    if ((c = find_control(menu, 115)) != 0 && MEM32(c + C_X) == 113) MEM32(c + C_X) = 165;
+    g_eax = eax0;
+}
+
 /* ── hooks: main menu ────────────────────────────────────────────────── */
 
 static void hook_main_onload(void)
 {
     uint32_t menu = g_ecx, like;
     GUI_TMenuMain_OnLoad_00222470();
+    pc_wording();
     if (find_control(menu, ID_EXIT)) return;
     like = find_control(menu, ID_MAIN_STARTGAME);
     if (!like) { btvs_log("menu", "main menu: no line to copy, Exit not added"); return; }
@@ -882,6 +1017,7 @@ static void hook_main_onmessage(void)
         btvs_log("menu", "Exit chosen on the main menu");
         btvs_trail("menu", "exit=1");
         btvs_settings_save();
+        btvs_quit();        /* Graphics: closes the window and device in order, then ends the process */
         exit(0);
     }
     GUI_TMenuMain_OnMessage_002226B0();
@@ -894,6 +1030,7 @@ static void hook_pause_onload(void)
     uint32_t menu = g_ecx, like, f_off, f_on;
     btvs_report_prepare();      /* the screenshot, while the game picture is still up */
     GUI_TMenuPause_OnLoad_00223760();
+    pc_wording();
     if (find_control(menu, ID_PAUSE_REPORT)) return;
     like = find_control(menu, ID_PAUSE_RESUME);
     if (!like) { btvs_log("menu", "pause menu: no line to copy, Report a Problem not added"); return; }
@@ -930,6 +1067,7 @@ recomp_func_t btvs_menu_lookup(uint32_t va)
     case VA_OPTIONS_ONCOMMAND:  return hook_options_oncommand;
     case VA_BUFFYMENU_ONUPDATE: return hook_buffymenu_onupdate;
     case VA_MAIN_ONLOAD:        return hook_main_onload;
+    case VA_NAMESESSION_ONUPDATE: return hook_namesession_onupdate;
     case VA_MAIN_ONMESSAGE:     return hook_main_onmessage;
     case VA_PAUSE_ONLOAD:       return hook_pause_onload;
     case VA_PAUSE_ONMESSAGE:    return hook_pause_onmessage;
