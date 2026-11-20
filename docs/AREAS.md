@@ -77,3 +77,7 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 - **Controls -> anyone who finds them**: the points where the main menu is ready and where a level
   starts (for `btvs_input_script_mark`), and how to tell menu / pause / cutscene from play (for
   `btvs_input_allow_mouse_look`).
+- **Audio → whoever regenerates next (main checkout)**: `port/src/manual_functions.json` now lists the
+  38 DSOUND entry points replaced by `port/src/btvs_audio_dsound.c`. Sound is linked in by the next
+  `bash port/tools/regen.sh` + `bash port/tools/build.sh` in the main checkout; until then the build
+  still links (the old bodies win) and the port is simply silent. Details: `docs/audio.md`.

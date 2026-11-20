@@ -435,6 +435,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         fprintf(stderr, "[BOOT] flat dispatch unavailable; "
                         "indirect calls will use the binary search\n");
 
+    /* Audio self-test: BTVS_WMA_TEST=<file.wma> decodes one music file with
+     * the game's own (translated) WMA decoder, writes BTVS_AUDIO_DUMP and
+     * exits without starting the game. See btvs_wma.c. */
+    if (getenv("BTVS_WMA_TEST")) {
+        extern int btvs_wma_selftest(void);
+        int r = btvs_wma_selftest();
+        fflush(NULL);
+        ExitProcess((UINT)r);
+    }
+
     /* Arm the hang watchdog. Does nothing unless RECOMP_WATCHDOG_SECS is set,
      * and must be called from this thread -- the guest registers it samples are
      * thread-local, so it has to be handed the copies belonging to the thread

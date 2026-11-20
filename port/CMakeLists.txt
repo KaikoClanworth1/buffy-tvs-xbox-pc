@@ -68,6 +68,9 @@ set(GAME_SOURCES
     src/recomp_manual.c
     src/btvs_settings.c
     src/btvs_menu.c
+    src/btvs_audio.c
+    src/btvs_audio_dsound.c
+    src/btvs_wma.c
 )
 # Graphics area. Its files hook functions named in src/manual_functions.json,
 # so they join the build once the generated code has those hooks (after the
@@ -166,3 +169,5 @@ if(EXISTS "${BTVS_SDL_DIR}/SDL3.dll")
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${BTVS_SDL_DIR}/SDL3.dll" "$<TARGET_FILE_DIR:${_t}>")
     endforeach()
 endif()
+# -- Audio: stand-alone mixer test (game sound data -> WAV, no game running) ---
+add_executable(btvs_audio_test src/btvs_audio_test.c src/btvs_audio.c)

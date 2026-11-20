@@ -101,6 +101,16 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
         recomp_func_t f = btvs_menu_lookup(xbox_va);
         if (f) return f;
     }
+
+    /* Audio: the WMA self-test's file-read callback (btvs_wma.c). Zero, and so
+     * never matched, outside that test. */
+    {
+        extern uint32_t btvs_wma_test_cb_va;
+        extern void btvs_wma_test_cb(void);
+        if (btvs_wma_test_cb_va && xbox_va == btvs_wma_test_cb_va)
+            return btvs_wma_test_cb;
+    }
+
     return (recomp_func_t)0;
 }
 
