@@ -301,6 +301,7 @@ static void dev_seen(int kind, uint32_t id, const in_host_pad *pad, const char *
         if (!d)
             return;
         memset(d, 0, sizeof *d);
+        d->port = -1;
         d->kind = kind;
         d->id = id;
         strncpy_s(d->name, sizeof d->name, name, _TRUNCATE);

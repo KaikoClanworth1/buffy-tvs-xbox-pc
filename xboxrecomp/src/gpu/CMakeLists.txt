@@ -4,7 +4,12 @@
 # HLSL to SPIR-V with glslang. spirv_check runs that over dumped shaders.
 
 get_filename_component(XBOXRECOMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
-set(GLSLANG_DIR "${XBOXRECOMP_ROOT}/third_party/glslang")
+# The submodules; a project may point XBOXRECOMP_THIRD_PARTY at another copy
+# (a git worktree has them empty and uses its main checkout's).
+if(NOT XBOXRECOMP_THIRD_PARTY)
+    set(XBOXRECOMP_THIRD_PARTY "${XBOXRECOMP_ROOT}/third_party")
+endif()
+set(GLSLANG_DIR "${XBOXRECOMP_THIRD_PARTY}/glslang")
 
 # glslang: the library only (no tools, tests or optimizer), HLSL front end on.
 set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
@@ -19,9 +24,9 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(${GLSLANG_DIR} ${CMAKE_CURRENT_BINARY_DIR}/glslang EXCLUDE_FROM_ALL)
 
 # Vulkan: headers, volk (the loader, at run time) and VMA (memory); no SDK needed.
-set(VK_HEADERS_DIR "${XBOXRECOMP_ROOT}/third_party/Vulkan-Headers/include")
-set(VOLK_DIR "${XBOXRECOMP_ROOT}/third_party/volk")
-set(VMA_DIR "${XBOXRECOMP_ROOT}/third_party/VulkanMemoryAllocator/include")
+set(VK_HEADERS_DIR "${XBOXRECOMP_THIRD_PARTY}/Vulkan-Headers/include")
+set(VOLK_DIR "${XBOXRECOMP_THIRD_PARTY}/volk")
+set(VMA_DIR "${XBOXRECOMP_THIRD_PARTY}/VulkanMemoryAllocator/include")
 
 # Direct3D 11 on Windows only; elsewhere (Android) gpu.c sends every call to
 # Vulkan. (Linux runs the Windows build under Proton.)

@@ -24,6 +24,13 @@ add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS BTV
 
 set(XBOXRECOMP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../xboxrecomp" CACHE PATH
     "Path to the xboxrecomp toolkit root directory")
+# A git worktree has the toolkit's submodules (glslang, Vulkan headers, volk,
+# VMA) empty: use the main checkout's copies.
+set(BTVS_MAIN "" CACHE PATH "The main checkout, when building in a git worktree")
+if(BTVS_MAIN AND NOT EXISTS "${XBOXRECOMP_DIR}/third_party/glslang/CMakeLists.txt"
+        AND EXISTS "${BTVS_MAIN}/xboxrecomp/third_party/glslang/CMakeLists.txt")
+    set(XBOXRECOMP_THIRD_PARTY "${BTVS_MAIN}/xboxrecomp/third_party")
+endif()
 add_subdirectory(${XBOXRECOMP_DIR} ${CMAKE_BINARY_DIR}/xboxrecomp)
 
 # -- The translated game code: btvs_recomp.lib ---------------------------------
