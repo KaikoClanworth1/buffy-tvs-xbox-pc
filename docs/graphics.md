@@ -7,8 +7,8 @@ Updated as the work goes; the newest facts are at the top of each section.
 
 | Item | State |
 |---|---|
-| Boot to the game's main loop | reached (`TGame::ExecFrame`) after ten fixes: see "Boot log"; the first game frame waits for the second library rebuild |
-| Game's Direct3D 8 drawn natively (no NV2A emulation) | movies and the disc-error screen drawn right (640x480 frame dumps); 3D and menus **not seen yet** |
+| Boot to the game's main loop | works: title screen and menus, driven by `BTVS_PAD_SCRIPT` (see "Boot log") |
+| Game's Direct3D 8 drawn natively (no NV2A emulation) | movies, title screen, main menu (with the 3D Buffy model), Start Game and Difficulty menus drawn right at 640x480, 60 fps (frame dumps in `port/runs/shots/`). Known fault: the highlighted menu item has a dark double. No level seen yet: a new game stays black after the difficulty menu |
 | Logo movies (WMV) | play through the game's own decoder (YUY2 texture, one quad a frame), steady 60 presents a second; sound not checked (Audio's) |
 | Window: windowed / borderless / fullscreen, Alt+Enter, F11 | from the runtime; settings wired; **not checked** |
 | Resolutions to 4K, internal rendering at that size | wired (`[display] width/height`); **not checked** |
@@ -150,9 +150,15 @@ All found and checked with muted, hidden test runs (`bash port/tools/run.sh boot
     follows 8192 and then starts an unnamed function in the middle, so the switch could not reach its last
     cases. `port/tools/fix_bounds.py` drops that split.
 
+11. **Text and menu quads all drawn as the frame's last quad.** The backend caches vertex data by address
+    and looked at it once a frame; `Draw...UP` data is scratch memory reused for every quad. Such draws are
+    now looked at every time (`NativeDraw.scratch`).
+12. **Music never arrived.** The game copies a track to `Z:` as `x.wma_` and renames it; the runtime had no
+    rename (`NtSetInformationFile` class 10). Added (`kernel_file.c`).
+
 Reached so far: logos and the intro movie play (frame dumps in `port/runs/shots/`), the game starts, loads
-its first map and enters `TGame::ExecFrame`. Items 6, 8 (second half), 9 and 10 need the second regen and
-library rebuild (running at the time of writing).
+its first map, shows the title screen and the menus. Item 10 is not fixed yet: the four failed calls
+still appear after the second regen (the lifter still does not reach those cases).
 
 Debugging tools that found these (all in `btvs_boot.c`, off unless asked for):
 

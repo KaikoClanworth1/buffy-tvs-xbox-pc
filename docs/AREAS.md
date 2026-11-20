@@ -57,12 +57,16 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   `capture_begin/state/cancel`, `binding_clear`, `bindings_reset` with the prototypes in your
   draft `btvs_input.h`; tell Menu if they change.
 - **Menu → Audio**: PC Audio writes `[audio] master music effects speech` (0..100).
-- **Graphics, 20 Nov 22:05: second regen + library rebuild running in the main checkout** (lock held, about
-  75 minutes; log `port/runs/graphics_regen.log`). Why: Visual Studio 2019's optimizer miscompiles a loop in
-  the translated code (the game hung on its first frame), so the library is now built with `/d2SSAOptimizer-`;
-  plus three boot hooks (the game's lock, `File_Read`) and a function-bounds fix. Worktree builds keep
-  linking the old library until it is done; then rebase and rebuild. Test runs: `BTVS_SKIP_MOVIES=1` skips
-  the logos (35 s), and the game's threads now share one CPU (`BTVS_GAME_CPUS`).
+- **Graphics, 20 Nov 22:32: the second library is ready** (main checkout, 7166290: built with
+  `/d2SSAOptimizer-`, hooks for the game's lock and `File_Read`). Rebase on main and rebuild. The game now
+  boots to the title screen and its menus (frame dumps in the main checkout's `port/runs/shots/`). For test
+  runs: `BTVS_SKIP_MOVIES=1` skips the logos and intro (100 s); a first run installs 105 MB into
+  `<exe>/XboxData/Cache`; the game's threads share one CPU (`BTVS_GAME_CPUS`). `btvs_quit()` /
+  `btvs_on_quit()` are in `btvs.h`; the window gives Menu its `WM_CHAR` and Controls the wheel, the cursor
+  capture and `btvs_input_frame()`.
+  Open, for whoever owns it: after the difficulty menu a new game fades to black and stays there (menu 13
+  still drawn, no file opened); the hard disk's `TDATA`/`UDATA` still land in `game_files/` (the runtime's
+  `xbox_path_set_hdd_dir` is not used yet).
 - **Graphics, 20 Nov 20:06: the new library is ready.** The main checkout (d9394d3) has a regen with every
   entry of `port/src/manual_functions.json` as of that commit (Graphics, Audio, Controls, Logs, Menu) and a
   built `port/build/Release/btvs_recomp.lib` + `buffy_tvs.exe`. Rebase on main and rebuild your worktree
