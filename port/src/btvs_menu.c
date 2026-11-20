@@ -228,6 +228,30 @@ static int s_bind_top, s_bind_slot, s_bind_capture = -1;
 static int  s_rep_cat, s_rep_edit, s_rep_char;
 static char s_rep_text[96];
 static const char k_charset[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?-'";
+/* Reports are made on a helper thread: the maker waits for a frame to be
+ * shown (the screenshot) and looks at the game thread, so it must not run
+ * on the game thread, where the menus do. */
+static volatile LONG s_rep_busy;
+static int s_rep_was_busy;
+
+static DWORD WINAPI report_thread(LPVOID text)
+{
+    if (text) { btvs_report_create((const char *)text); free(text); }
+    else      btvs_report_prepare();
+    InterlockedExchange(&s_rep_busy, 0);
+    return 0;
+}
+
+static void report_start(const char *text)     /* NULL: only the picture, for a report to come */
+{
+    HANDLE h;
+    char *copy = text ? _strdup(text) : NULL;
+    if (InterlockedExchange(&s_rep_busy, 1)) { free(copy); return; }
+    h = CreateThread(NULL, 0, report_thread, copy, 0, NULL);
+    if (h) CloseHandle(h);
+    else { free(copy); InterlockedExchange(&s_rep_busy, 0); }
+}
+
 static const char *const k_category[] = {
     "Crash or freeze", "Graphics", "Sound", "Controls", "Stuck in the game", "Something else" };
 
@@ -514,7 +538,9 @@ static void build_rows(void)
     case PG_REPORT_DONE: {
         const char *p = btvs_report_last_path();
         size_t n = p ? strlen(p) : 0, o;
-        if (n) {
+        if (s_rep_busy) {
+            rowf(-1, "Saving the report...");
+        } else if (n) {
             rowf(-1, "Report saved in:");
             for (o = 0; o < n && s_nrows < 5; o += 46) rowf(-1, "%.46s", p + o);
             rowf(-1, "Nothing was sent anywhere.");
@@ -627,6 +653,7 @@ static void switch_page(int page)
 static int act(int item, int dir)
 {
     int step = dir ? dir : 1, i;
+    btvs_trail("menu", "page=%s line=%d %s", k_page_name[s_page], item, dir < 0 ? "left" : dir > 0 ? "right" : "press");
     switch (s_page) {
     case PG_GRAPHICS:
         switch (item) {
@@ -683,7 +710,8 @@ static int act(int item, int dir)
             char text[200];
             snprintf(text, sizeof text, "%s: %s", k_category[wrap(s_rep_cat, 6)], s_rep_text);
             btvs_log("menu", "report a problem: %s", text);
-            btvs_report_create(text);
+            report_start(text);
+            s_rep_was_busy = 1;
             s_rep_edit = 0; s_rep_text[0] = '\0';
             switch_page(PG_REPORT_DONE);
             return 1;
@@ -860,6 +888,16 @@ static void hook_buffymenu_onupdate(void)
         s_bind_capture = -1;
         s_next_refresh = 0;
     }
+    if (s_page == PG_REPORT_DONE && s_rep_was_busy && !s_rep_busy) {
+        /* the report is saved: show where, with the selection on Back again */
+        uint32_t eax0 = g_eax;
+        int i;
+        s_rep_was_busy = 0;
+        refresh();
+        if ((i = first_selectable()) >= 0) go_to(menu, ID_ROW0 + (uint32_t)i);
+        refresh();
+        g_eax = eax0;
+    }
     if (GetTickCount() >= s_next_refresh) {
         uint32_t eax0 = g_eax;
         s_next_refresh = GetTickCount() + (s_page == PG_MEMORY ? 500 : 200);
@@ -1028,7 +1066,7 @@ static void hook_main_onmessage(void)
 static void hook_pause_onload(void)
 {
     uint32_t menu = g_ecx, like, f_off, f_on;
-    btvs_report_prepare();      /* the screenshot, while the game picture is still up */
+    report_start(NULL);         /* the screenshot, while the game picture is still up */
     GUI_TMenuPause_OnLoad_00223760();
     pc_wording();
     if (find_control(menu, ID_PAUSE_REPORT)) return;
