@@ -1,0 +1,33 @@
+# The default keyboard and mouse bindings, one key at a time, as held keys ("K:<name>"):
+# they pass through the bindings table like real key presses. Run with BTVS_INPUT_VERIFY=1.
+after title
+hold 0.4
+2.0 K:Backspace        # B
++0.6 K:MouseMiddle     # B
++0.6 K:E               # X
++0.6 K:MouseLeft       # X
++0.6 K:Q               # Y
++0.6 K:MouseRight      # Y
++0.6 K:Z               # Black
++0.6 K:C               # White
++0.6 K:LShift          # left trigger
++0.6 K:F               # right trigger
++0.6 K:RShift          # right trigger
++0.6 K:Escape          # Back
++0.6 K:LCtrl           # left stick click
++0.6 K:V               # right stick click
++0.6 K:Up
++0.6 K:Down
++0.6 K:Left
++0.6 K:Right
++0.6 K:W               # left stick
++0.6 K:S
++0.6 K:A
++0.6 K:D
++0.6 K:W K:D           # diagonal
++0.6 K:I               # right stick
++0.6 K:K
++0.6 K:J
++0.6 K:L
++0.6 K:Enter           # Start
++0.6 K:Space           # A

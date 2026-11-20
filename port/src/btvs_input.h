@@ -83,6 +83,8 @@ int btvs_input_script_done(void);
 int  btvs_input_record_begin(const char *path);
 void btvs_input_record_end(void);
 int  btvs_input_recording(void);
+/* Write what has been recorded so far to the file (it stays open). */
+void btvs_input_record_flush(void);
 
 /* Feed the game a recording instead of the player until it runs out.
  * Returns 1 when the file was loaded. */

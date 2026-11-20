@@ -1,0 +1,20 @@
+# Title -> main menu -> Start Game -> back -> down the main menu and into whatever is there -> back.
+# The log shows the path as "[INPUT] game: menu id N" lines.
+after title
+hold 0.2
+3.0 START
+after menu
+2.0 A                  # first item: Start Game (menu 2)
+after menu2
+2.0 B                  # back to the main menu
++2.0 DOWN
++1.0 A
++3.0 B
++2.0 DOWN
++1.0 DOWN
++1.0 A
++3.0 B
++2.0 UP
++1.0 LSD               # the stick moves the selection too
++1.0 A
++3.0 B

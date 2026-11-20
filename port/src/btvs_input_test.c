@@ -183,6 +183,21 @@ static int selftest(void)
     CHECK(n > 10 && n < 40);                    /* changes only, not 1400 reads */
     DeleteFileA(rec);
 
+    /* 5b. keys held by a script go through the bindings, with no focus */
+    btvs_input__test_reset();
+    s_focus = 0;
+    s_t = 90000.0;
+    CHECK(btvs_input_script_load_text("0.1 K:Space K:W for 0.2; 0.5 K:MouseLeft K:J for 0.2") == 2);
+    CHECK(btvs_input_connected() == 1);
+    tick(&a, &b, NULL);
+    CHECK(a.analog[BTVS_AN_A] == 0 && a.ly == 0);
+    s_t += 160.0; tick(&a, &b, NULL);
+    CHECK(a.analog[BTVS_AN_A] == 255 && a.ly == 32767 && a.lx == 0 && a.buttons == 0);
+    s_t += 200.0; tick(&a, &b, NULL);
+    CHECK(a.analog[BTVS_AN_A] == 0 && a.ly == 0);
+    s_t += 200.0; tick(&a, &b, NULL);
+    CHECK(a.analog[BTVS_AN_X] == 255 && a.rx == -32767 && a.ry == 0);
+
     /* 6. rebinding a controller button: X's action onto the pad's Y */
     btvs_input__test_reset();
     s_focus = 1;

@@ -452,9 +452,19 @@ static int s_wheel_dir;
 static double s_wheel_until;
 static int s_capture_active, s_capture_release;
 
-static int key_value(int code, int mouse_ok)
+/* Keys a pad script holds down right now ("K:Space"): they go through the
+ * bindings like real keys, with or without focus. */
+static int s_script_key[16], s_script_nkey;
+
+static int key_value(int code, int mouse_ok, int hw)
 {
+    int i;
     if (!code)
+        return 0;
+    for (i = 0; i < s_script_nkey; i++)
+        if (s_script_key[i] == code)
+            return 1;
+    if (!hw)
         return 0;
     if (code == IN_KEY_WHEEL_UP)   return s_wheel_dir > 0;
     if (code == IN_KEY_WHEEL_DOWN) return s_wheel_dir < 0;
@@ -463,7 +473,9 @@ static int key_value(int code, int mouse_ok)
     return in_key_down(code);
 }
 
-static void live_pad(int port, btvs_pad *g)
+/* hw 0: the window has no focus, so no device, key or mouse is asked; only
+ * keys held by a pad script count. */
+static void live_pad(int port, btvs_pad *g, int hw)
 {
     float v[ACT_COUNT];
     float mlx = 0.0f, mly = 0.0f;               /* the mouse, as a look vector */
@@ -471,13 +483,18 @@ static void live_pad(int port, btvs_pad *g)
     int a;
 
     memset(v, 0, sizeof v);
-    devices_refresh();
-    d = dev_on_port(port);
+    if (hw)
+        devices_refresh();
+    d = hw ? dev_on_port(port) : NULL;
     if (d)
         for (a = 0; a < ACT_COUNT; a++)
             v[a] = source_value(&d->pad, C.pad[a]);
 
-    if (port == C.kb_port && !s_test_pad) {
+    if (port == C.kb_port && !hw) {
+        for (a = 0; a < ACT_COUNT; a++)
+            if (key_value(C.key[a][0], 1, 0) || key_value(C.key[a][1], 1, 0))
+                v[a] = 1.0f;
+    } else if (port == C.kb_port && !s_test_pad) {
         double t = now_ms();
         int cap, dx, dy;
         in_mouse_capture(C.mouse_look && s_allow_mouse_look && !s_capture_active);
@@ -490,7 +507,7 @@ static void live_pad(int port, btvs_pad *g)
             s_wheel_dir = 0;
         }
         for (a = 0; a < ACT_COUNT; a++)
-            if (key_value(C.key[a][0], cap) || key_value(C.key[a][1], cap))
+            if (key_value(C.key[a][0], cap, 1) || key_value(C.key[a][1], cap, 1))
                 v[a] = 1.0f;
         if (cap) {
             in_mouse_delta(&dx, &dy);
@@ -543,6 +560,7 @@ typedef struct {
     double at, dur, every;
     btvs_pad pad;
     int has_ls, has_rs;
+    int key[4], nkey;               /* "K:<key name>": keyboard keys held, through the bindings */
 } sc_event;
 typedef struct { char mark[24]; int fired; double t0; uint32_t f0; } sc_segment;
 
@@ -593,6 +611,13 @@ static int script_token(sc_event *e, char *tok)
         *eq++ = 0;
     if (!_stricmp(tok, "NONE"))
         return 1;
+    if ((tok[0] == 'K' || tok[0] == 'k') && tok[1] == ':') {
+        int code = in_key_code(tok + 2);
+        if (!code || e->nkey >= 4)
+            return 0;
+        e->key[e->nkey++] = code;
+        return 1;
+    }
     if (!_stricmp(tok, "LS") || !_stricmp(tok, "RS")) {
         double x, y;
         char *comma = eq ? strchr(eq, ',') : NULL;
@@ -696,7 +721,8 @@ static int script_load_locked(const char *text)
         prev_frames = frames;
         if (s_nev < SC_MAX_EV) {
             s_ev[s_nev++] = e;
-            s_script_ports |= 1u << e.port;
+            if (!e.nkey)
+                s_script_ports |= 1u << e.port;
         }
     }
     free(buf);
@@ -786,29 +812,54 @@ static void script_env_load(void)
         btvs_input_script_load_text(e);
 }
 
-static void script_apply(int port, btvs_pad *g)
+static void script_start(void)
 {
-    int i, a, cur;
     script_env_load();
-    if (!s_nev)
-        return;
-    if (!s_seg[0].fired) {                      /* the clock starts at the game's first read */
+    if (s_nev && !s_seg[0].fired) {             /* the clock starts at the game's first read */
         s_seg[0].fired = 1;
         s_seg[0].t0 = now_ms();
         s_seg[0].f0 = s_frame;
     }
+}
+
+static int script_event_on(const sc_event *e, int cur)
+{
+    double rel;
+    if (e->seg != cur)
+        return 0;
+    rel = (e->frames ? (double)(s_frame - s_seg[cur].f0) : now_ms() - s_seg[cur].t0) - e->at;
+    if (rel < 0.0)
+        return 0;
+    if (e->every > 0.0)
+        rel = fmod(rel, e->every);
+    return rel < e->dur;
+}
+
+/* The keys the script holds down now (they belong to the keyboard's player). */
+static void script_keys(void)
+{
+    int i, k, cur;
+    s_script_nkey = 0;
+    script_start();
+    if (!s_nev)
+        return;
+    cur = script_current();
+    for (i = 0; i < s_nev; i++)
+        if (s_ev[i].nkey && script_event_on(&s_ev[i], cur))
+            for (k = 0; k < s_ev[i].nkey && s_script_nkey < 16; k++)
+                s_script_key[s_script_nkey++] = s_ev[i].key[k];
+}
+
+static void script_apply(int port, btvs_pad *g)
+{
+    int i, a, cur;
+    script_start();
+    if (!s_nev)
+        return;
     cur = script_current();
     for (i = 0; i < s_nev; i++) {
         const sc_event *e = &s_ev[i];
-        double rel;
-        if (e->seg != cur || e->port != port)
-            continue;
-        rel = (e->frames ? (double)(s_frame - s_seg[cur].f0) : now_ms() - s_seg[cur].t0) - e->at;
-        if (rel < 0.0)
-            continue;
-        if (e->every > 0.0)
-            rel = fmod(rel, e->every);
-        if (rel >= e->dur)
+        if (e->nkey || e->port != port || !script_event_on(e, cur))
             continue;
         g->buttons |= e->pad.buttons;
         for (a = 0; a < 8; a++)
@@ -936,6 +987,17 @@ void btvs_input_record_end(void)
 {
     LOCK();
     record_end_locked();
+    UNLOCK();
+}
+
+/* Logs: put what has been recorded so far on disk (before copying the file). */
+void btvs_input_record_flush(void)
+{
+    LOCK();
+    if (R.f) {
+        fflush(R.f);
+        R.flushed = now_ms();
+    }
     UNLOCK();
 }
 
@@ -1396,9 +1458,12 @@ int btvs_input_poll(int port, btvs_pad *g)
     if (conn < 0) {                             /* no recording playing (or it just ended) */
         memset(g, 0, sizeof *g);
         f = focused();
+        script_keys();
+        if (!f && s_script_nkey)
+            live_pad(port, g, 0);
         if (f) {
             capture_step();
-            live_pad(port, g);
+            live_pad(port, g, 1);
             /* while a binding is being chosen, and until that key or button
              * is let go, the game sees a resting pad */
             if (s_capture_release && !kb_any_down() && !any_pad_source())
@@ -1412,7 +1477,7 @@ int btvs_input_poll(int port, btvs_pad *g)
             rumble_apply(f);
         s_was_focused = f;
         script_apply(port, g);
-        conn = port == 0 || (f && dev_on_port(port)) || (s_script_ports >> port & 1);
+        conn = port == 0 || (f && dev_on_port(port)) || (s_script_ports >> port & 1) || (port == C.kb_port && s_script_nkey);
         if (!conn)
             memset(g, 0, sizeof *g);
     }

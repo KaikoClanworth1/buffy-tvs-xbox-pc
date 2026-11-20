@@ -17,6 +17,7 @@
  */
 #include <windows.h>
 #include <stdint.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -56,6 +57,148 @@ void XGetDevices_006106BB(void)
         s_reported = mask;
     }
     ret_stdcall(mask, 4);                       /* memory units, keyboards, remotes: none */
+}
+
+static int guest_readable(uint32_t va)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    if (va < 0x10000u || !VirtualQuery((void *)XBOX_PTR(va), &mbi, sizeof mbi))
+        return 0;
+    return mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD));
+}
+
+/* BTVS_INPUT_VERIFY=1: check what the game made of the pads it was given.
+ *
+ * TInputDeviceController::Poll (the only caller of XInputGetState; `this` is in
+ * edi at the call, the handle at this+0x3C20) turns each read into a sample of
+ * 22 floats:
+ *   +0 LX +4 LY +0xC RX +0x10 RY (dead zone 0x618C78 taken out, scaled by
+ *   0x618C74, RX/RY negated), +0x18.. A B X Y Black White LT RT (value *
+ *   0x617270 when above 30), +0x38 Start Back L3 R3, +0x48 Up Down Left Right.
+ * Straight after the read TInputDevice::Process (0x24F60) copies the sample to
+ * the input system's table, which is where the game takes its input from:
+ *   [[this+4] + 0xC4 + [this+8]*12 + 8] + byte[this+0xC] * 0x100
+ * (the first sample of the update, for this kind of device and this port). A
+ * helper thread, started only in this mode, looks there 0.3 ms after each read
+ * and compares. It can look at a bad moment (the next read begun), so a
+ * difference only counts when it is seen after three reads running. One log
+ * line per pad value:
+ *   [INPUT] verify p1 ok: <the pad> -> <what the game stored>
+ * and "verify ... MISMATCH" when the game stored something else. */
+static float guest_float(uint32_t va)
+{
+    float f;
+    memcpy(&f, (void *)XBOX_PTR(va), 4);
+    return f;
+}
+
+static void verify_expect(const btvs_pad *g, float e[22])
+{
+    float dz = guest_float(0x00618C78u), k = guest_float(0x00618C74u), ak = guest_float(0x00617270u);
+    int16_t s[4];
+    int i, st;
+    memset(e, 0, 22 * sizeof(float));
+    s[0] = g->lx; s[1] = g->ly; s[2] = g->rx; s[3] = g->ry;
+    for (i = 0; i < 4; i++)
+        if (s[i] == -32768)
+            s[i] = -32767;
+    s[2] = (int16_t)-s[2]; s[3] = (int16_t)-s[3];
+    for (st = 0; st < 2; st++) {
+        float x = s[st * 2], y = s[st * 2 + 1], m = sqrtf(x * x + y * y);
+        if (m > dz) {
+            float sc = (m - dz) / m * k, fx = x * sc, fy = y * sc;
+            e[st * 3]     = fx < -1.0f ? -1.0f : fx > 1.0f ? 1.0f : fx;
+            e[st * 3 + 1] = fy < -1.0f ? -1.0f : fy > 1.0f ? 1.0f : fy;
+        }
+    }
+    for (i = 0; i < 8; i++)
+        if (g->analog[i] > 30)
+            e[6 + i] = g->analog[i] * ak;
+    if (g->buttons & BTVS_BTN_START)  e[14] = 1.0f;
+    if (g->buttons & BTVS_BTN_BACK)   e[15] = 1.0f;
+    if (g->buttons & BTVS_BTN_LSTICK) e[16] = 1.0f;
+    if (g->buttons & BTVS_BTN_RSTICK) e[17] = 1.0f;
+    if (g->buttons & BTVS_BTN_UP)     e[18] = 1.0f; else if (g->buttons & BTVS_BTN_DOWN)  e[19] = 1.0f;
+    if (g->buttons & BTVS_BTN_LEFT)   e[20] = 1.0f; else if (g->buttons & BTVS_BTN_RIGHT) e[21] = 1.0f;
+}
+
+static struct { uint32_t self; btvs_pad pad; int checked, bad, busy; } s_ver[BTVS_PORTS];
+
+static void verify_game(int port)
+{
+    const btvs_pad *prev = &s_ver[port].pad;
+    int *checked = &s_ver[port].checked;
+    uint32_t handle = PAD_HANDLE + (uint32_t)port;
+    static const char *const names[22] = { "LX", "LY", "?2", "RX", "RY", "?5", "A", "B", "X", "Y", "Black", "White", "LT", "RT",
+                                           "Start", "Back", "L3", "R3", "Up", "Down", "Left", "Right" };
+    uint32_t self = s_ver[port].self, owner, table, s;
+    float e[22], got[22];
+    char text[400];
+    int i, n = 0, bad = 0;
+
+    if (*checked || s_ver[port].busy)
+        return;
+    if (!guest_readable(self) || !guest_readable(self + 0x3C20u) || MEM32(self + 0x3C20u) != handle)
+        return;
+    owner = MEM32(self + 4u);
+    table = owner + 0xC4u + MEM32(self + 8u) * 12u + 8u;
+    if (!guest_readable(owner) || MEM32(self + 8u) > 2u || !guest_readable(table))
+        return;
+    s = MEM32(table) + (uint32_t)*(uint8_t *)XBOX_PTR(self + 0xCu) * 0x100u;
+    if (!guest_readable(s) || !guest_readable(s + 0x58u))
+        return;
+    verify_expect(prev, e);
+    text[0] = 0;
+    for (i = 0; i < 22; i++) {
+        got[i] = guest_float(s + 4u * (uint32_t)i);
+        if (fabsf(got[i] - e[i]) > 0.002f)
+            bad = 1;
+        if ((got[i] != 0.0f || e[i] != 0.0f) && n < (int)sizeof text - 40)
+            n += sprintf_s(text + n, sizeof text - (size_t)n, " %s=%.3f", names[i], got[i]);
+    }
+    if (bad && ++s_ver[port].bad < 3)
+        return;                                 /* perhaps half written: look again */
+    *checked = 1;
+    IN_LOG("verify p%d %s: btn %04X an %u %u %u %u %u %u %u %u L %d %d R %d %d ->%s", port + 1, bad ? "MISMATCH" : "ok",
+           prev->buttons, prev->analog[0], prev->analog[1], prev->analog[2], prev->analog[3], prev->analog[4],
+           prev->analog[5], prev->analog[6], prev->analog[7], prev->lx, prev->ly, prev->rx, prev->ry, n ? text : " (rest)");
+}
+
+static HANDLE s_ver_event;
+
+static DWORD WINAPI verify_thread(LPVOID arg)
+{
+    (void)arg;
+    for (;;) {
+        int p;
+        LARGE_INTEGER f, t0, t;
+        WaitForSingleObject(s_ver_event, INFINITE);
+        QueryPerformanceFrequency(&f);          /* Sleep is far too coarse: spin for 0.3 ms */
+        QueryPerformanceCounter(&t0);
+        do {
+            YieldProcessor();
+            QueryPerformanceCounter(&t);
+        } while ((t.QuadPart - t0.QuadPart) * 10000 < f.QuadPart * 3);
+        for (p = 0; p < BTVS_PORTS; p++)
+            if (s_ver[p].self)
+                verify_game(p);
+    }
+}
+
+static int verify_on(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *v = getenv("BTVS_INPUT_VERIFY");
+        on = v && *v && *v != '0';
+        if (on) {
+            HANDLE t;
+            s_ver_event = CreateEventA(NULL, FALSE, FALSE, NULL);
+            t = CreateThread(NULL, 0, verify_thread, NULL, 0, NULL);
+            if (t) CloseHandle(t); else on = 0;
+        }
+    }
+    return on;
 }
 
 /* BOOL XGetDeviceChanges(PXPP_DEVICE_TYPE type, PDWORD insertions, PDWORD removals) */
@@ -105,14 +248,6 @@ void XInputClose_006105E3(void)
 #define G_MENU_ID   0x007F0408u     /* GUI s_menuID: 1 main, 9 pause, 10 title, 15 resurrect (docs/menu.md) */
 #define G_GAME      0x007D0090u     /* gGame (TGame *) */
 #define GAME_PLAYER 0xF0u           /* TGO::GetPlayer() = [gGame + 0xF0] */
-
-static int guest_readable(uint32_t va)
-{
-    MEMORY_BASIC_INFORMATION mbi;
-    if (va < 0x10000u || !VirtualQuery((void *)XBOX_PTR(va), &mbi, sizeof mbi))
-        return 0;
-    return mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD));
-}
 
 static void game_probe(void)
 {
@@ -165,6 +300,10 @@ void XInputGetState_006105EF(void)
     int have = 0;
 
     memset(&g, 0, sizeof g);
+    if (port >= 0 && verify_on()) {
+        s_ver[port].busy = 1;
+        s_ver[port].self = g_edi;               /* TInputDeviceController::Poll's this */
+    }
     if (port == 0)
         game_probe();
     if (port >= 0)
@@ -173,9 +312,15 @@ void XInputGetState_006105EF(void)
         if (port >= 0 && memcmp(&g, &last[port], sizeof g)) {
             packet[port]++;
             last[port] = g;
+            s_ver[port].pad = g;
+            s_ver[port].checked = s_ver[port].bad = 0;
         }
         MEM32(out) = port >= 0 ? packet[port] : 0;
         memcpy((void *)XBOX_PTR(out + 4), &g, sizeof g);
+    }
+    if (port >= 0 && verify_on()) {
+        s_ver[port].busy = 0;
+        SetEvent(s_ver_event);
     }
     ret_stdcall(have ? ERROR_SUCCESS : ERROR_DEVICE_NOT_CONNECTED, 8);
 }
@@ -189,11 +334,18 @@ void XInputGetState_006105EF(void)
  * the header reads success, the result says pending. */
 void XInputSetState_0061065E(void)
 {
+    static uint32_t was[BTVS_PORTS] = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };
     int port = handle_port(MEM32(g_esp + 4));
     uint32_t fb = MEM32(g_esp + 8);
     if (fb) {
-        if (port >= 0)
+        if (port >= 0) {
+            uint32_t v = (uint32_t)MEM16(fb + 66) << 16 | MEM16(fb + 68);
+            if (v != was[port]) {
+                IN_LOG("rumble p%d left %u right %u", port + 1, v >> 16, v & 0xFFFFu);
+                was[port] = v;
+            }
             btvs_input_rumble(port, MEM16(fb + 66), MEM16(fb + 68));
+        }
         MEM32(fb) = ERROR_SUCCESS;
     }
     ret_stdcall(port >= 0 && fb ? ERROR_IO_PENDING : ERROR_DEVICE_NOT_CONNECTED, 8);
