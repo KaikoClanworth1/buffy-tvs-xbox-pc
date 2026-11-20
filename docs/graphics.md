@@ -7,14 +7,14 @@ Updated as the work goes; the newest facts are at the top of each section.
 
 | Item | State |
 |---|---|
-| Boot to the game's main loop | **not run yet**: see "Boot log" |
-| Game's Direct3D 8 drawn natively (no NV2A emulation) | code written, **not run yet** |
+| Boot to the game's main loop | reached (`TGame::ExecFrame`) after ten fixes: see "Boot log"; the first game frame waits for the second library rebuild |
+| Game's Direct3D 8 drawn natively (no NV2A emulation) | movies and the disc-error screen drawn right (640x480 frame dumps); 3D and menus **not seen yet** |
+| Logo movies (WMV) | play through the game's own decoder (YUY2 texture, one quad a frame), steady 60 presents a second; sound not checked (Audio's) |
 | Window: windowed / borderless / fullscreen, Alt+Enter, F11 | from the runtime; settings wired; **not checked** |
 | Resolutions to 4K, internal rendering at that size | wired (`[display] width/height`); **not checked** |
 | Widescreen | picture shape wired (4:3 bars, 16:9, stretch); a wider *view* needs the game's projection changed: not done |
 | VSync, frame limit | wired (`[display] vsync`, `fps_limit`); **not checked** |
-| Frame dumps (`BTVS_SHOT_AT`) | written; **not checked** |
-| Logo movies (WMV) | not started (hooks on the game's `CWMVPlayer` are in place, passing through) |
+| Frame dumps (`BTVS_SHOT_AT`, `BTVS_SHOT_EVERY`) | work (PNG, folder made if missing) |
 | `btvs_screenshot`, `btvs_gpu_info`, `btvs_fps` | in `btvs.h` |
 | Overlay text / rectangles for Menu and Logs | not done |
 
@@ -102,8 +102,69 @@ A change to that file needs a regen and a rebuild of the translated code, in the
 ## Boot log
 
 Each thing that stopped the game on the way to its main loop, and the fix. Newest last.
+All found and checked with muted, hidden test runs (`bash port/tools/run.sh boot <seconds> ...`).
 
-(none run yet: the first build of the translated code was still being made)
+1. **`memmove` copied nothing at its tail.** MSVC's hand-written `memmove` finishes through jump tables
+   indexed from the table's end; the lifter did not see a switch (`[ICALL] Failed to resolve VA 0x005804A4`).
+   Replaced by the host's `memmove` (`btvs_boot.c`).
+2. **The runtime's fixed areas lay inside the game.** Its fake TLS, kernel data and stack sat at
+   0x700000..0x780000, which here is the game's `.rdata`/`.data` (the image runs to 0x920D40). Moved above
+   the image (`xbox_memory_layout.h`: kernel data 0x930000, TLS 0x950000, stack 0x980000, 6 MB).
+3. **"Exit to dashboard" at start.** XAPI checks the hard disk's partitions; with `RECOMP_LAZY_DIRS` (my own
+   default, copied from Chaos Bleeds) the partition images were never made. Default removed.
+4. **"There's a problem with the disc you're using."** The game installs itself on a first start
+   (`xinstall.obj`: while the logos play, a thread copies files to the cache drive Z: and unpacks
+   `install.dat`: the `.cfg` files, the attract movie; 105 MB, not the whole disc). Two faults:
+   creating a file that exists answered `STATUS_UNSUCCESSFUL` where the console says "name collision" (the
+   one error the installer accepts), and a "format" of Z: left an interrupted install's files in place.
+   Fixed in `kernel_file.c`; the files in `<save folder>\Cache` are removed when the game asks to install
+   (`btvs_native_game.c`). `BTVS_NO_DISC_INSTALL=1` skips the install (Z: then reads from the game folder;
+   the game runs without its `.cfg` files).
+5. **Stack overflow in D3D when the game made its second device** (one for the logos, one for itself).
+   D3D's start-up acknowledges the GPU's interrupt registers by writing ones; in plain memory they then
+   read "pending" for ever and `ServiceGrInterrupt` / `HalGrLoadChannelContext` called each other until
+   the stack was gone. The four interrupt registers are zeroed around every device start
+   (`btvs_native_gpuwait.c`).
+6. **The C runtime zeroed 35 s in; `sprintf("%f")` never returned.** The chain, backwards: the jump table of
+   `_output` was zero ← `TSessionManager`'s constructor cleared 131 KB of game code ← `new` gave it an address
+   inside the code ← the heap's free list held that address ← `TConsole::LoadVariables` had freed it: with
+   no `vars.cfg` (a first start) `File_Read` sets no buffer and the caller frees whatever the stack held.
+   Now `File_Read` leaves a null buffer when it fails (`btvs_boot_hooks.c`, after the second regen); until
+   then an empty 24-byte `vars.cfg` is made before the game looks.
+7. **The first level load never finished: the main thread waited for the loader thread to end.**
+   `GetExitCodeThread` reads the thread object (`ObReferenceObjectByHandle`), which was a null pointer.
+   The runtime now hands out an object with the two fields XAPI reads; for anything but a thread the
+   object is the handle, which is what its `Ke*` waits expect (XAPI's multimedia-timer thread was
+   spinning at time-critical priority on a wait that failed at once). `kernel_bridge.c`.
+8. **Both threads waiting for the game's own lock.** `CLocker` is a counter taken in separate steps; it
+   only works on one CPU. The game's threads now share one CPU (`BTVS_GAME_CPUS`, default one CPU of the
+   process's; the renderer's and the audio's threads are not the game's and use the others), and the lock
+   itself is taken in one step (`btvs_boot_hooks.c`, after the second regen).
+9. **Hang on the first frame in `TManager_Object::QueryGroup`: a compiler bug.** Visual Studio 2019
+   (cl 19.29.30159) compiles the translated loop `eax <<= 1; esi++; if (!(edx & eax)) again` to
+   `bt eax, 1` on every round, at /O1 and /O2. With `/d2SSAOptimizer-` the code is right; the translated
+   library is built with it (`port/CMakeLists.txt`). Found by dumping the compiled function's bytes
+   (`BTVS_BREAK_CODE`) and reproduced on the one function alone.
+10. **Particle templates past the 451st missing** (`[ICALL] Failed to resolve VA 0x00282E9A` and others).
+    `TGBuffyInterface::ParticleTemplateSetup` is one 535-way switch, 10168 instructions; the disassembler
+    follows 8192 and then starts an unnamed function in the middle, so the switch could not reach its last
+    cases. `port/tools/fix_bounds.py` drops that split.
+
+Reached so far: logos and the intro movie play (frame dumps in `port/runs/shots/`), the game starts, loads
+its first map and enters `TGame::ExecFrame`. Items 6, 8 (second half), 9 and 10 need the second regen and
+library rebuild (running at the time of writing).
+
+Debugging tools that found these (all in `btvs_boot.c`, off unless asked for):
+
+| Variable | Effect |
+|---|---|
+| `BTVS_WATCH=<hex guest address>` | hardware write breakpoint on that DWORD, every thread: each write logged with the host call stack |
+| `BTVS_BREAK=<function>[,<function>[,<function>]]` | log each entry of those translated functions with the guest registers; `BTVS_BREAK_QUIET=1` keeps the last 96 and prints them when the last-named one is reached |
+| `BTVS_BREAK_HEAP=<hex size>`, `BTVS_BREAK_BADFREE=1` | with `RtlAllocateHeap` / `RtlFreeHeap` as the first function: the game heap at an allocation of that size; a free of something not in the heap |
+| `BTVS_BREAK_CODE=<bytes>` | the compiled machine code of the named functions (to disassemble) |
+| `BTVS_STACK_AT=<seconds>[,...]` | every thread's call stack at those times |
+| `BTVS_SKIP_MOVIES=1` | the game's movies are not played (the logos and intro take 100 s) |
+| `RECOMP_KERNEL_LOG_BUDGET=<n>` | the runtime's kernel-call log beyond its first calls |
 
 ## Not verified / not done
 
