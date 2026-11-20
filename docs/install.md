@@ -142,6 +142,9 @@ bytes), all without showing a window:
 - `--capture` of all four states (install, busy, wrong release, play): layout and text read
   correctly at 96 dpi; the header icon is decoded from `Default.xbe`'s `$$XTIMAGE`.
 - The launcher builds with no warnings.
+- `btvs_xbe_check` in the game exe (hidden, muted test runs): with `game_files/` the game goes on
+  past the check; with a copy of `Default.xbe` that has one bit changed it prints "the right
+  release ... changed or damaged" with both hashes and exits with code 1.
 - `deploy.sh`: made `GAME/` in the main checkout with the main checkout's `buffy_tvs.exe`/`.pdb`,
   the launcher, the Read Me, `SaveData\` and all 152 disc files as hard links (link count 2); a
   second run linked 0. A test run's `UDATA\` in `game_files/` was correctly left out.
@@ -166,6 +169,5 @@ Not checked:
   Chaos Bleeds launcher's, where they are proven; this game's only image here is a bare xiso.
 - **Another release** of this game: the message was drawn from a made-up certificate
   (`--capture error`), not from a real North American disc.
-- **`btvs_xbe_check` inside the game**: compiled into the build list, not yet run (the game exe
-  was not built in this worktree at the time). Its logic is the launcher's, which was run.
+- The `btvs_xbe_check` dialog itself (test runs suppress it; only the stderr text was seen).
 - The not-enough-space and disk-full paths.
