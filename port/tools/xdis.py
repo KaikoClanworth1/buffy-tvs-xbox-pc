@@ -14,8 +14,9 @@ import capstone
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-XBE = os.path.join(HERE, '..', '..', 'game_files', 'DEFAULT.XBE')
-GEN = os.path.join(HERE, '..', 'src', 'recomp', 'gen')
+MAIN = os.environ.get('BTVS_MAIN') or os.path.join(HERE, '..', '..')
+XBE = os.path.join(MAIN, 'game_files', 'Default.xbe')
+GEN = os.path.join(MAIN, 'port', 'src', 'recomp', 'gen')
 
 
 def load_xbe():

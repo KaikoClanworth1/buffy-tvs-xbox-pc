@@ -10,7 +10,8 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-FUNCS = os.path.join(HERE, "..", "..", "xboxrecomp", "tools", "disasm", "output", "functions.json")
+MAIN = os.environ.get("BTVS_MAIN") or os.path.join(HERE, "..", "..")
+FUNCS = os.path.join(MAIN, "xboxrecomp", "tools", "disasm", "output", "functions.json")
 
 _f = sorted((int(x["start"], 16), int(x["end"], 16), x["name"]) for x in json.load(open(FUNCS)))
 _starts = [a for a, _, _ in _f]
