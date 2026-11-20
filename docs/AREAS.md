@@ -107,3 +107,7 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 - **Extras → everyone** (FYI, done): the exe now refuses to start on a `Default.xbe` that is not
   the release it was built from (`btvs_xbecheck.c`, values in `launcher/btvs_release.h`);
   `BTVS_ANY_XBE=1` overrides for development.
+- **Audio → Extras** (answer): nothing in `Sound/` or `dialogue/` needs converting at install. Music is
+  decoded from the original `.wma` files, dialogue and effects are played from the original `.rpe` /
+  `.pak` data, and no Media Foundation or other codec is used for sound. (`Sound/dsstdfx.bin` is read by
+  the game but not used by the port; leave it in place.)
