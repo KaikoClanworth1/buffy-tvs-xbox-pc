@@ -20,13 +20,13 @@ mkdir -p "$DST" "$DST/SaveData"
 # The newest build of each program: this checkout's, else the main checkout's.
 pick() { if [ -f "$BIN/$1" ]; then echo "$BIN/$1"; elif [ -f "$MAINBIN/$1" ]; then echo "$MAINBIN/$1"; fi; }
 missing=0
-for f in "buffy_tvs.exe" "buffy_tvs.pdb" "Buffy Launcher.exe"; do
+for f in "buffy_tvs.exe" "buffy_tvs.pdb" "SDL3.dll" "Buffy Launcher.exe"; do
     p="$(pick "$f")"
     if [ -n "$p" ]; then
         cp -f "$p" "$DST/"
     else
         echo "not built yet: $f"
-        [ "$f" = "buffy_tvs.pdb" ] || missing=1
+        [ "$f" = "buffy_tvs.pdb" ] || [ "$f" = "SDL3.dll" ] || missing=1
     fi
 done
 cp -f "$PORT/launcher/Read Me.txt" "$DST/Read Me.txt"
