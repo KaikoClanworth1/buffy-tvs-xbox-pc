@@ -241,6 +241,11 @@ Verified (`btvs_input_test.exe` self-test, made-up clock and controller, no hard
   size (changes only);
 - capturing a controller binding, the resting pad during capture, save / reload / reset.
 
+Also run by hand on the dev PC: `btvs_input_test script "<text>" 5` plays a script in real time with
+`BTVS_NO_WINDOW=1` (no device is opened); `btvs_input_test live 3` loads `xinput1_4.dll`, finds and
+starts `SDL3.dll` (every function the backend uses resolves). No controller was plugged in at the
+time, so no real pad state has been seen.
+
 Not verified:
 
 - **In the game**: nothing yet. The game does not boot to its main loop (see `docs/graphics.md`), and
