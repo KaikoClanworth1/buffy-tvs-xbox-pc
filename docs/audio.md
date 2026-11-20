@@ -21,9 +21,13 @@ image, no legacy DirectSound.
 | XAudio2 device path | **works** | `btvs_audio_test device`: 15 of 15 runs keep time within 10 ms, no underruns, no XAudio2 glitches |
 | `BTVS_MUTE` (no device, same timing), `BTVS_AUDIO_DUMP` | **works** | `btvs_audio_test live`: 6 of 6 runs within 15 ms of the wall clock on a loaded PC, no device opened |
 | Game exe links with the audio layer | **works** | `bash port/tools/build.sh` |
-| WMA music through the game's own decoder | **blocked by a recompiler bug, fixed in the lifter, needs a regen** | `BTVS_WMA_TEST`: the decoder starts, reads the ASF header through the callback, then rejects the file (Results) |
-| DSOUND replacement inside the game | **written, not yet active**: needs a regen with `manual_functions.json` (requested in `docs/AREAS.md`) and a game that boots | - |
-| Music / effects / dialogue at the title screen and in a level | **not checked**: the game does not boot yet (`docs/graphics.md`) | - |
+| WMA music through the game's own decoder | **works** | `BTVS_WMA_TEST` on 4 tracks: right format, length within 0.1 s of the file's header, no gaps or clicks in the dump (In the game, below) |
+| DSOUND replacement inside the game | **active** (regen of 2026-11-20) | log line `DirectSound replaced by the port's mixer`; every sound below went through it |
+| Title / main-menu music | **works**; breaks up when the whole game hitches (not an audio fault, see below) | muted run, `BTVS_AUDIO_DUMP`: 95 s of music, 2 gaps (60 and 120 ms) at two frame hitches |
+| Menu effects (move, select, back) | **work** | same run: 10 effects started by the scripted pad, each in the log and in the dump |
+| Logo and intro movie sound | **present, but breaks up in test runs**: the movie decoder does not keep to real time there | dump has the sound of all five movies; 478-700 short gaps per run (below) |
+| Music looping, track changes | **not checked** (no run was longer than the 119 s title track) | - |
+| Dialogue, 3D sound, speech/effects split, clipping in a level | **not checked**: levels do not load yet (`docs/graphics.md`) | - |
 | PCM (non-ADPCM) buffers, stereo buffers | written, **not exercised**: every sound found on the disc so far is mono ADPCM; PCM is exercised only as a stream | - |
 
 ## How the game uses sound
@@ -93,7 +97,7 @@ is no longer reached.
 
 | Where | What |
 |---|---|
-| `Sound\Music\*.wma` (62 files, 95 MB) | WMA v2 (format tag 0x161), 44100 Hz stereo, 128 kbit/s, in ASF |
+| `Sound\Music\*.wma` (62 files, 95 MB) | WMA v2 (format tag 0x161), stereo, 44100 Hz (at least one track, `bela_short`, is 48000 Hz), 128 kbit/s, in ASF |
 | `dialogue\*.rpe` (8 files, 366 lines) | container: `u32 version (1)`, `u32 count`, 24 reserved bytes, then `count` × `{ char name[32]; u32 offset; u32 size; u32 stamp; }`; each entry is a RIFF/WAVE (Xbox ADPCM 22050 Hz mono) with lip-sync chunks `wrds` and `phon` after `data` (parsed by `ESound.obj`). Read by `TResourcePack::ReadIndex` (`StdRPE.obj`) |
 | `pak\*.pak` (65 files) | effects are whole RIFF/WAVE files inside the paks (137 in `res_null.pak`), same format, no lip-sync chunks |
 | `Sound\dsstdfx.bin` | DSP program for the console's effects processor: I3DL2 reverb, cross-talk filters. Not usable off the console; see below |
@@ -155,8 +159,8 @@ above. Reasons:
 - it only calls `malloc`/`free`, `pow`, and for the unused file-handle mode a few Win32 file
   functions.
 
-`BTVS_WMA_TEST` runs the translated decoder over a real music file to prove this. It does not pass
-yet (Results).
+`BTVS_WMA_TEST` runs the translated decoder over a real music file to prove this. It passes since
+the regen of 2026-11-20 (In the game, below).
 
 ### Not modelled
 
@@ -178,6 +182,7 @@ T=port/build/Release/btvs_audio_test.exe ; G=<main checkout>/game_files
 bash port/tools/limit.sh $T port/runs/dlg.wav   rpe   $G/dialogue/G00_Dialogue.rpe      # every line, one by one
 bash port/tools/limit.sh $T port/runs/sfx.wav   pak   $G/pak/res_null.pak              # every effect in a pak
 bash port/tools/limit.sh $T port/runs/scene.wav scene $G/dialogue/G00_Dialogue.rpe      # 3D circle, pitch sweep, fade, stream
+bash port/tools/limit.sh $T port/runs/late.wav  late  $G/dialogue/G00_Dialogue.rpe      # a stream that ran dry skips late sound, music does not
 bash port/tools/limit.sh $T port/runs/live.wav  live  $G/dialogue/G00_Dialogue.rpe 5    # real-time thread, BTVS_MUTE=1
 bash port/tools/limit.sh $T port/runs/dev.wav   device $G/dialogue/G00_Dialogue.rpe 5   # XAudio2 device, zero-volume mix
 bash port/tools/run.sh wma 120 BTVS_WMA_TEST=<G>\\Sound\\Music\\BFY_theme_shrt.wma BTVS_AUDIO_DUMP=<wav>
@@ -189,9 +194,17 @@ the looping sound keeps going. `live` checks that the mixer follows the wall clo
 device and that none is opened; `device` that the XAudio2 path keeps time with no underruns (the
 mix is at zero volume, so nothing is heard). None of these makes a sound.
 
+In the game (muted, hidden; give each run its own `BTVS_GAME_CPUS` while test games share a CPU):
+
+```bash
+bash port/tools/run.sh aud_menu 100 BTVS_SKIP_MOVIES=1 BTVS_GAME_CPUS=400 BTVS_AUDIO_DUMP=<wav> BTVS_AUDIO_LOG=1 BTVS_FPS_LOG=1   "BTVS_PAD_SCRIPT=after title; 12.0 START; after menu; 4.0 DOWN; +1.5 DOWN; +1.5 UP; +1.5 UP; +2 A; +5 B; +3 DOWN; +1 DOWN; +1 UP"
+bash port/tools/run.sh aud_movie 150 BTVS_GAME_CPUS=800 BTVS_AUDIO_DUMP=<wav> BTVS_AUDIO_LOG=1 BTVS_FPS_LOG=1   # logos, intro, title
+grep -E "^\[audio\]" port/runs/aud_menu.err      # buffer starts; per stream and second: packets in, queued, ran dry, late frames dropped
+```
+
 Results are below.
 
-## Results (2026-11-20)
+## Results before the game booted (2026-11-20)
 
 All runs: `btvs_audio_test` on CPUs 8-15 at low priority while other sessions were building (so
 the PC was busy), each with a timeout. **No run made a sound**: `rpe`, `pak` and `scene` use the
@@ -206,7 +219,7 @@ reported a mix peak of exactly 0.
 | `scene` | loop circling in 3D (left/right balance moves through the dump), pitch sweep, fade, one-shots, and a 44.1 kHz PCM stream: 62 of 62 packets completed. The scene clips on purpose (peak 1.28: full-scale dialogue plus a tone plus one-shots) to exercise the clamp |
 | `live` (muted, real-time thread) | 6 runs: mixed time within -9..+15 ms of the wall clock over 7-9 s; no device opened |
 | `device` (XAudio2, zero volume) | 15 runs after the fix below: within -5..+9 ms over 5-10 s, 0 underruns, 0 XAudio2 glitches, 0 ms stalled |
-| `BTVS_WMA_TEST doom_hit2.wma` | fails at start: see below |
+| `BTVS_WMA_TEST doom_hit2.wma` | failed at start then (see below); passes since the regen (In the game) |
 
 Two problems these runs found and fixed:
 
@@ -220,7 +233,7 @@ Two problems these runs found and fixed:
 - **The muted clock fell behind on a starved CPU** (it gave up after 0.5 s of lag). It now catches
   up after hold-ups of up to 3 s.
 
-**WMA self-test.** `XapiInitProcess` runs, the process heap comes up, the decoder object is
+**WMA self-test, as it failed before the regen.** `XapiInitProcess` runs, the process heap comes up, the decoder object is
 constructed, and it reads the file through the callback (30 bytes at 0, 24 bytes at 30: the ASF
 header and the first object header). Then it rejects the file with `0x80004005`. Cause: a
 recompiler bug, not the decoder. `WMA_ParseAsfHeader` compares each object's GUID with
@@ -239,15 +252,74 @@ Also seen in that run, outside Audio: `[ICALL] Failed to resolve VA 0x005804A4` 
 `XapiInitProcess` (a computed jump inside `memmove_00580200`). The Chaos Bleeds port replaced
 `memmove` with a host function for the same reason.
 
-## To do once the game boots
+## In the game (2026-11-20, after the regen)
 
-1. Regen with `manual_functions.json` and the lifter fix (requested in `docs/AREAS.md`), rebuild.
-   Then first: `BTVS_WMA_TEST` on a few music files (compare the dump's length with the file's).
-2. `bash port/tools/run.sh title 60 BTVS_AUDIO_DUMP=... BTVS_AUDIO_LOG=1`: the log should show
-   `DirectSound replaced by the port's mixer`, buffers starting, and the dump should hold the
-   title music.
-3. Check in a level: effects and dialogue present, speech/effects split right (`BTVS_AUDIO_LOG`
-   prints each voice's category), no clipping (`btvs_audio_stats`), music loops.
-4. Decide with Menu whether `[audio]` sliders drive the game's own three volumes instead of
+The game boots to its title screen and main menu; levels do not load yet. All runs through
+`port/tools/run.sh`: muted (`BTVS_MUTE=1`, no audio device opened), hidden, CPUs 8-15, with a time
+limit. **No run made a sound.** Sound was judged from the `BTVS_AUDIO_DUMP` WAV with a script
+(loudness per 10 s, silent spans, gaps of 10-200 ms inside sound, sample steps, clipped samples)
+and from `BTVS_AUDIO_LOG=1` (every buffer start; once a second per stream: packets in, queued,
+times run dry, late frames dropped).
+
+**WMA decoder self-test** (`BTVS_WMA_TEST`, no game running): passes.
+
+| Track | Decoder says | Decoded | File header | Dump |
+|---|---|---|---|---|
+| `bela_short.wma` | 48000 Hz stereo | 135.04 s | 135.12 s | no gaps, no clicks, 9 clipped samples (full-scale music) |
+| `theme_buffywaits02.wma` (title) | 44100 Hz stereo | 118.75 s | 118.84 s | no gaps, no clicks, no clipping |
+| `BFY_beauty1.wma` | - | 64.43 s | 64.47 s | not analysed |
+| `agnus_dei_1.wma` | - | 8.17 s | 8.14 s | not analysed |
+
+It decodes at 22-29 times real time on one CPU. Media Foundation is not needed.
+
+**Title and main menu** (`BTVS_SKIP_MOVIES=1`, pad script: Start at the title, then down, down,
+up, up, A, B, down, down, up; 100 s):
+
+- Music: the game opens a 44100 Hz stereo stream of 6 packets and feeds it about 22 packets
+  (180 KB) a second. The dump holds music from 3.4 s to the end at the level the game sets
+  (RMS 0.05-0.06, peak 0.34, nothing clipped).
+- Effects: 10 buffer starts, one per scripted press (Xbox ADPCM, mono, 22050 and 44100 Hz, volume
+  -1166 and -1666), all category "effects".
+- Faults: the music ran dry twice (60 ms and 120 ms of silence) in the best run, 7 times (up to
+  0.9 s) in another. Every gap sits on a frame hitch of the whole game (`BTVS_FPS_LOG`: worst
+  frames of 160-1000 ms at an idle menu). The game's music thread wakes every 20 ms and keeps only
+  0.28 s queued, and it shares the game's one CPU with a thread that spins on a kernel wait
+  (about a million `KeWaitForMultipleObjects` calls a second). That is in the runtime, not in the
+  audio code; reported to Graphics in `docs/AREAS.md`. The mixer did what the console's would: it
+  plays silence while the queue is empty and carries on with the next packet.
+
+**Logos and intro movie** (150 s): the sound of all five movies is in the dump, then the title
+music. It is **not clean**: 478-700 gaps of 10-200 ms and a dozen longer ones per run, because the
+movie decoder ran at a median of 21-25 frames a second with hitches up to a second and delivered
+its sound late. Two things in the test set-up make this worse than it would be for a player, and
+neither was removed: test games run at below-normal priority, and every test game puts the game's
+threads on the same CPU (CPU 8) unless `BTVS_GAME_CPUS` says otherwise (with two test games at
+once the movies ran at 7 frames a second). Whether movie sound is clean on an unloaded PC is
+**not known**.
+
+One audio fault was found there and fixed. The movie's picture follows the audio clock. When the
+decoder falls behind, the clock runs on, the player decodes faster to catch up, and its sound
+arrives in a burst: the queue filled to the mixer's limit of 128 packets, further packets were
+refused (sound lost, clicks), and the sound trailed the picture by seconds. Now a stream that ran
+dry for up to 2 s skips late sound once it is there, down to a reserve of 0.35 s, so picture and
+sound are back together after a hitch. Music never has more than 0.28 s queued, so it is never
+skipped and carries on where it stopped. Checked offline with `btvs_audio_test <wav> late <rpe>`:
+500 ms gap then a 1.86 s backlog: 501 ms skipped; then a 557 ms backlog: 207 ms skipped; then 6
+packets: nothing; a 3 s stop then a new piece: nothing; every packet completed in all four. In
+the game the case did not come up again after the fix (the queue stayed at 32 packets or under),
+so there it is **not confirmed**.
+
+The earlier offline tests (`rpe` 22 of 22, `pak` 137 of 137, `scene` 62 of 62 packets) still pass
+after these changes.
+
+## Still to do
+
+1. Movie sound and music on an unhitched game: rerun the two runs above once the spinning thread
+   and the shared test CPU are dealt with (`docs/AREAS.md`), and expect no gaps.
+2. A run longer than a track, to see the music loop (decoder `Flush`) and change.
+3. In a level, once one loads: effects and dialogue present, speech/effects split right
+   (`BTVS_AUDIO_LOG` prints each voice's category), 3D pan, no clipping.
+4. Audio lines still go to stderr; move them to `btvs_log` now that it exists.
+5. Decide with Menu whether `[audio]` sliders drive the game's own three volumes instead of
    sitting on top of them.
-5. Reverb from the I3DL2 parameters, if the levels sound too dry without it.
+6. Reverb from the I3DL2 parameters, if the levels sound too dry without it.

@@ -85,6 +85,11 @@ void btvs_audio_stream_flush(int id);
 void btvs_audio_stream_pause(int id, int paused);
 int  btvs_audio_stream_queued(int id);                   /* packets not yet played */
 uint64_t btvs_audio_stream_played(int id);               /* bytes played since creation */
+uint32_t btvs_audio_stream_starves(int id);              /* times it ran out of packets while playing */
+/* Source frames dropped because they arrived late: after a stream runs dry
+ * for up to 2 s, that much of what comes next is skipped, so it stays in step
+ * with the audio clock (a movie's picture follows that clock). */
+uint64_t btvs_audio_stream_skipped(int id);
 
 /* Counters for docs/tests and the debug overlay. */
 struct btvs_audio_stats {

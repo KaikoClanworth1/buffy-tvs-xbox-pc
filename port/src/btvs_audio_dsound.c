@@ -66,6 +66,8 @@ static uint8_t  s_slot_used[SLOTS];
 static uint32_t s_stream_max[SLOTS];
 static CRITICAL_SECTION s_cs;
 static int      s_ready, s_warned_event;
+static int      s_trace = -1;               /* BTVS_AUDIO_LOG: stream traffic, once a second */
+static struct { uint32_t packets, bytes, starves; uint64_t at; } s_tr[SLOTS];
 
 /* the listener as the game last set it, pushed to the mixer on commit */
 static float    s_lpos[3], s_lfront[3] = { 0, 0, 1 }, s_ltop[3] = { 0, 1, 0 };
@@ -467,6 +469,13 @@ HOOK(DirectSoundCreateStream_005A8D4E)
                 dlog("stream %08X wants a packet callback (%08X): not supported", va, MEM32(desc + 12));
             MEM32(pp) = va;
             hr = DS_OK;
+            if (s_trace < 0) { const char *e = getenv("BTVS_AUDIO_LOG"); s_trace = e && *e && *e != '0'; }
+            if (s_trace) {
+                uint32_t w = MEM32(desc + 8);
+                dlog("stream %08X: tag %u, %u Hz, %u ch, %u bits, %u packets max, flags %X", va,
+                     MEM16(w), MEM32(w + 4), MEM16(w + 2), MEM16(w + 14), MEM32(desc + 4), MEM32(desc));
+                memset(&s_tr[(va - s_pool) / SLOT_SIZE], 0, sizeof s_tr[0]);
+            }
         }
     }
     ret_stdcall(hr, 8);
@@ -532,6 +541,20 @@ HOOK(DirectSound_CDirectSoundStream_Process_005A756E)
                                       done ? (volatile uint32_t *)XBOX_PTR(done) : NULL)) {
             if (status) MEM32(status) = 0x80004005u;
             hr = 0x80004005u;
+            if (s_trace > 0) dlog("stream %08X: packet of %u bytes refused (%d queued)", arg(0), size,
+                                  btvs_audio_stream_queued(v));
+        } else if (s_trace > 0) {
+            uint32_t i = (arg(0) - s_pool) / SLOT_SIZE;
+            uint64_t now = btvs_audio_clock();
+            s_tr[i].packets++; s_tr[i].bytes += size;
+            if (now - s_tr[i].at >= BTVS_AUDIO_RATE) {
+                uint32_t st = btvs_audio_stream_starves(v);
+                dlog("stream %08X at %.1f s: %u packets, %u bytes in; %d queued; ran dry %u times; %llu late frames dropped so far",
+                     arg(0), (double)now / BTVS_AUDIO_RATE, s_tr[i].packets, s_tr[i].bytes,
+                     btvs_audio_stream_queued(v), st - s_tr[i].starves,
+                     (unsigned long long)btvs_audio_stream_skipped(v));
+                s_tr[i].packets = s_tr[i].bytes = 0; s_tr[i].starves = st; s_tr[i].at = now;
+            }
         }
     }
     ret_stdcall(hr, 12);
@@ -542,6 +565,7 @@ HOOK(DirectSound_CDirectSoundStream_Discontinuity_005A7483) { ret_stdcall(DS_OK,
 HOOK(DirectSound_CDirectSoundStream_Flush_005A74D0)
 {
     int v = voice_of(arg(0), MAGIC_STREAM);
+    if (v >= 0 && s_trace > 0) dlog("stream %08X: flush (%d queued)", arg(0), btvs_audio_stream_queued(v));
     if (v >= 0) btvs_audio_stream_flush(v);
     ret_stdcall(DS_OK, 4);
 }
@@ -557,6 +581,7 @@ HOOK(IDirectSoundStream_SetVolume_005A782B)
 HOOK(IDirectSoundStream_Pause_005A7830)
 {
     int v = voice_of(arg(0), MAGIC_STREAM);
+    if (v >= 0 && s_trace > 0) dlog("stream %08X: pause %u", arg(0), arg(1));
     if (v >= 0) btvs_audio_stream_pause(v, arg(1) != 0);
     ret_stdcall(DS_OK, 8);
 }

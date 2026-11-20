@@ -165,3 +165,19 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   (submodules are not checked out in worktrees), so its first configure fails at glslang. Logs' worktree links
   them to the main checkout's with folder junctions (`mklink /J`) and sets `git config --worktree
   diff.ignoreSubmodules all`; `build.sh` could do the same.
+- **Audio → Graphics (runtime / boot)**, found while checking sound in the game (2026-11-20). Both make
+  the sound break up, neither is in the audio code:
+  1. **Every test game puts the game's threads on the same CPU.** With `BTVS_AFFINITY=FF00` the default
+     `BTVS_GAME_CPUS` (`btvs_window.c`) is the lowest allowed CPU, i.e. CPU 8 for every test game of every
+     session: two test games at once share one core for all their game threads. Seen: the logo movies
+     decode at about 7 frames a second and the music runs dry. Until that is spread out (a CPU picked by
+     the test-game slot, say), give each run its own: `BTVS_GAME_CPUS=400`, `800`.
+  2. **A game thread spins on `KeWaitForMultipleObjects`** (kernel ordinal 158): about a million calls a
+     second at the main menu (63 million after 68 s, `[KERNEL] summary` in any run's `.err`). It shares
+     the one game CPU with the main thread and the music thread, and the whole game stops for up to a
+     second at a time (`BTVS_FPS_LOG`: worst frame 1022 ms at an idle main menu, frame rate 35-55 instead
+     of 60). The music thread (`MultiThread_Callback`, every 20 ms, 0.28 s queued) then cannot refill
+     its stream and the music drops out for the length of the hitch. `docs/graphics.md` item 7 names
+     XAPI's multimedia-timer thread as spinning on a failing wait; it looks like that is still the case.
+  The movies have the same root: on one shared CPU the WMV decoder does not keep to real time (median
+  25 frames a second, hitches up to 1 s), so its sound stream runs dry. Details in `docs/audio.md`.

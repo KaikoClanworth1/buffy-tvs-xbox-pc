@@ -220,6 +220,44 @@ static const Sound *longest(int skip)
     return best >= 0 ? &s_sounds[best] : NULL;
 }
 
+/* Late sound: a stream that runs dry and is then given a backlog (a movie
+ * catching up after a hitch) must skip what is late, down to its reserve; a
+ * stream that is only topped up again (music, 6 packets) must skip nothing. */
+static void late_one(const char *name, int gap_ms, int refill_packets, int64_t want_lo, int64_t want_hi)
+{
+    static int16_t pkt[2048 * 2];
+    static volatile uint32_t st[128];
+    int v = btvs_audio_voice_new(1), i, n = 0;
+    uint64_t skipped, total = 0;
+    btvs_audio_voice_format(v, BTVS_FMT_PCM, 2, 44100, 16, 4);
+    for (i = 0; i < 2048; i++) pkt[i * 2] = pkt[i * 2 + 1] = (int16_t)(8000.0 * sin(i * 0.0626));
+    for (i = 0; i < 6; i++, n++, total += sizeof pkt) btvs_audio_stream_submit(v, pkt, sizeof pkt, &st[n], NULL);
+    while (btvs_audio_stream_queued(v)) btvs_audio_render(BTVS_AUDIO_PERIOD);
+    btvs_audio_render(BTVS_AUDIO_RATE / 1000 * gap_ms);                     /* the hitch */
+    for (i = 0; i < refill_packets; i++, n++, total += sizeof pkt) btvs_audio_stream_submit(v, pkt, sizeof pkt, &st[n], NULL);
+    while (btvs_audio_stream_queued(v)) btvs_audio_render(BTVS_AUDIO_PERIOD);
+    skipped = btvs_audio_stream_skipped(v);
+    printf("late %-6s gap %4d ms, %2d packets after it: %llu frames skipped (%.0f ms), ran dry %u times, %llu of %llu bytes through\n",
+           name, gap_ms, refill_packets, (unsigned long long)skipped, skipped / 44.1,
+           btvs_audio_stream_starves(v), (unsigned long long)btvs_audio_stream_played(v), (unsigned long long)total);
+    if ((int64_t)skipped < want_lo || (int64_t)skipped > want_hi) { printf("  FAIL: expected %lld..%lld frames skipped\n", (long long)want_lo, (long long)want_hi); s_failures++; }
+    if (btvs_audio_stream_played(v) != total) { printf("  FAIL: packets left behind\n"); s_failures++; }
+    for (i = 0; i < n; i++) if (st[i] != 0) { printf("  FAIL: packet %d not completed\n", i); s_failures++; break; }
+    btvs_audio_voice_free(v);
+}
+
+static void late(void)
+{
+    /* movie: 500 ms gap, then 40 packets (1.86 s) at once: the whole gap is skipped */
+    late_one("movie", 500, 40, 22050 - 600, 22050 + 600);
+    /* movie, small backlog: 12 packets (557 ms) after a 500 ms gap: only what exceeds the 350 ms reserve */
+    late_one("small", 500, 12, 24576 - 15435 - 600, 24576 - 15435 + 600);
+    /* music: 6 packets (279 ms) after the gap: nothing skipped */
+    late_one("music", 500, 6, 0, 0);
+    /* a stop (3 s), then a new piece: played from its start */
+    late_one("stop", 3000, 40, 0, 0);
+}
+
 static void scene(void)
 {
     const Sound *loop = longest(-1), *shot = &s_sounds[0];
@@ -352,7 +390,7 @@ int main(int argc, char **argv)
     const char *mode, *path, *ext;
     int is_live, is_device;
     if (argc < 4) {
-        fprintf(stderr, "usage: btvs_audio_test <out.wav> rpe|pak|scene|live|device <file> [first|seconds] [count]\n");
+        fprintf(stderr, "usage: btvs_audio_test <out.wav> rpe|pak|scene|late|live|device <file> [first|seconds] [count]\n");
         return 2;
     }
     mode = argv[2]; path = argv[3];
@@ -373,7 +411,8 @@ int main(int argc, char **argv)
     if (!btvs_audio_init(is_live ? 0 : BTVS_AUDIO_OFFLINE)) return 2;
     if (is_device) btvs_audio_set_master(0.0f);
 
-    if (!strcmp(mode, "scene")) scene();
+    if (!strcmp(mode, "late")) late();
+    else if (!strcmp(mode, "scene")) scene();
     else if (is_live) live(argc > 4 ? atof(argv[4]) : 3.0, is_device);
     else play_sequence(argc > 4 ? atoi(argv[4]) : 0, argc > 5 ? atoi(argv[5]) : 1 << 30);
 

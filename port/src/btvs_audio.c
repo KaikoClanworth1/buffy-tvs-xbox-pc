@@ -31,6 +31,7 @@
 
 #define MAX_VOICES     384
 #define MAX_PACKETS    128
+#define SKIP_RESERVE   0.35         /* seconds a stream keeps queued when late sound is skipped */
 #define DEV_BUFFERS    8             /* ring of submit buffers */
 #define DEV_QUEUE      5             /* periods kept queued: 50 ms */
 
@@ -62,6 +63,13 @@ typedef struct {
     int      qhead, qcount;
     uint32_t qoff;                   /* bytes consumed of the head packet */
     uint64_t played;
+    uint32_t starves;                /* times the queue ran dry while playing */
+    uint64_t skipped;                /* late frames dropped after running dry */
+    int      fed;                    /* has had data since it last ran dry */
+    int      late;                   /* ran dry a moment ago: silence is being counted */
+    double   debt;                   /* source frames of silence played while dry */
+    uint32_t debt_age;               /* frames played since data came back */
+    uint32_t qbytes;                 /* bytes in the queue, counting the head packet whole */
 
     /* resampler: s0 is the frame being heard, s1 the next one */
     int      primed, ended;
@@ -203,6 +211,7 @@ static void pcm_frame(const Voice *v, const uint8_t *p, float out[2])
 static void packet_done(Voice *v, uint32_t status)
 {
     Packet *p = &v->q[v->qhead];
+    v->qbytes -= p->bytes;
     if (p->completed) *p->completed = (status == 0) ? p->bytes : v->qoff;
     if (p->status) *p->status = status;
     free(p->data);
@@ -220,7 +229,41 @@ static int voice_fetch(Voice *v, float out[2])
         uint32_t fb = frame_bytes(v);
         for (;;) {
             Packet *p;
-            if (!v->qcount) return 0;
+            if (!v->qcount) {
+                if (v->fed) { v->fed = 0; v->starves++; v->late = 1; v->debt_age = 0; }
+                return 0;
+            }
+            v->fed = 1;
+            /* Sound that arrives after the stream ran dry is late by the
+             * length of the gap. A movie's picture follows the audio clock,
+             * which did not stop: the player then decodes faster than real
+             * time to catch up and its sound piles up in the queue, trailing
+             * the picture for the rest of the movie. So what is queued beyond
+             * a reserve (SKIP_RESERVE) is skipped, up to the length of the
+             * gap. Music never has that much queued (6 packets, 0.28 s) and
+             * simply carries on where it stopped. */
+            v->late = 0;
+            if (v->debt >= 1.0) {
+                uint32_t reserve = (uint32_t)(SKIP_RESERVE * (double)v->rate) * fb;
+                uint32_t avail = v->qbytes - v->qoff;
+                if (++v->debt_age > (uint32_t)v->rate * 3u) {
+                    v->debt = 0.0;               /* no backlog came: forget it */
+                } else if (avail > reserve) {
+                    uint32_t want = (uint32_t)v->debt, have, can = (avail - reserve) / fb;
+                    p = &v->q[v->qhead];
+                    have = (p->bytes - v->qoff) / fb;
+                    if (have > want) have = want;
+                    if (have > can) have = can;
+                    if (have) {
+                        v->qoff += have * fb;
+                        v->played += (uint64_t)have * fb;
+                        v->skipped += have;
+                        v->debt -= (double)have;
+                        if (v->qoff + fb > p->bytes) packet_done(v, 0);
+                        continue;
+                    }
+                }
+            }
             p = &v->q[v->qhead];
             if (v->qoff + fb <= p->bytes) {
                 pcm_frame(v, p->data + v->qoff, out);
@@ -301,6 +344,17 @@ static void voice_gains(const Voice *v, float *gl, float *gr)
     *gl = l; *gr = r;
 }
 
+/* A stream had nothing for `frames` output frames. If it ran dry in the
+ * middle of playing, the gap is remembered so the late sound can be skipped
+ * (voice_fetch). A gap of more than 2 s is a stop, not a hitch: whatever
+ * comes next is played from its start. */
+static void stream_dry(Voice *v, int frames, double step)
+{
+    if (!v->is_stream || !v->late) return;
+    v->debt += (double)frames * step;
+    if (v->debt > 2.0 * (double)(v->freq > 0 ? v->freq : v->rate)) { v->debt = 0.0; v->late = 0; }
+}
+
 /* Add `frames` frames of voice v to acc (interleaved float stereo). */
 static void voice_mix(Voice *v, float *acc, int frames)
 {
@@ -321,6 +375,7 @@ static void voice_mix(Voice *v, float *acc, int frames)
     if (!v->primed) {
         if (!voice_fetch(v, v->s1)) {
             if (v->ended) { v->playing = 0; v->idx = 0; }
+            stream_dry(v, frames, step);
             return;
         }
         v->s0[0] = v->s1[0]; v->s0[1] = v->s1[1];
@@ -337,7 +392,10 @@ static void voice_mix(Voice *v, float *acc, int frames)
                 return;
             }
             if (!voice_fetch(v, n)) {
-                if (!v->ended) return;       /* stream ran dry: hold, resume later */
+                if (!v->ended) {             /* stream ran dry: hold, resume later */
+                    stream_dry(v, frames - i, step);
+                    return;
+                }
                 v->ended = 2;
                 n[0] = n[1] = 0.0f;
             }
@@ -931,6 +989,7 @@ int btvs_audio_stream_submit(int id, const void *data, uint32_t bytes,
             p->completed = completed;
             if (status) *status = PKT_PENDING;
             if (completed) *completed = 0;
+            v->qbytes += bytes;
             v->qcount++;
             ok = 1;
         }
@@ -939,11 +998,33 @@ int btvs_audio_stream_submit(int id, const void *data, uint32_t bytes,
     return ok;
 }
 
+uint32_t btvs_audio_stream_starves(int id)
+{
+    Voice *v;
+    uint32_t r = 0;
+    LOCK();
+    if ((v = vget(id)) != NULL && v->is_stream) r = v->starves;
+    UNLOCK();
+    return r;
+}
+
+uint64_t btvs_audio_stream_skipped(int id)
+{
+    Voice *v;
+    uint64_t r = 0;
+    LOCK();
+    if ((v = vget(id)) != NULL && v->is_stream) r = v->skipped;
+    UNLOCK();
+    return r;
+}
+
 void btvs_audio_stream_flush(int id)
 {
     Voice *v;
     LOCK();
     if ((v = vget(id)) != NULL && v->is_stream) {
+        v->fed = 0;                  /* running dry after a flush is not a starve */
+        v->late = 0; v->debt = 0.0;
         while (v->qcount) packet_done(v, PKT_FLUSHED);
         v->primed = 0; v->ended = 0;
     }
