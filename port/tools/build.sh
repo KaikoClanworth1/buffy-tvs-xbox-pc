@@ -18,6 +18,13 @@ for i in $(seq 1 360); do
 done
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
+IN_WORKTREE=0
+[ "$(cd "$BTVS_MAIN" && pwd)" != "$(cd "$PORT/.." && pwd)" ] && IN_WORKTREE=1
+if [ "$IN_WORKTREE" = 1 ] && [ ! -f "$BTVS_MAIN/port/build/Release/btvs_recomp.lib" ]; then
+    echo "The main checkout has not built btvs_recomp.lib yet (its first build takes about an hour)."
+    echo "Try again later; do not build the translated code in a worktree."
+    exit 2
+fi
 if [ ! -f build/CMakeCache.txt ]; then
     CFG=(-S . -B build -G "Visual Studio 16 2019" -A x64)   # MSVC 14.29, as the Chaos Bleeds port
     [ "$(cd "$BTVS_MAIN" && pwd)" != "$(cd "$PORT/.." && pwd)" ] && CFG+=("-DBTVS_MAIN=$(cd "$BTVS_MAIN" && pwd -W)")
