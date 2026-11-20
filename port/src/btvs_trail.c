@@ -333,12 +333,39 @@ static void note_level(const char *how)
         btvs_trail("level_left", "via=%s", how);
 }
 
+/* Menu ids seen on screen so far (the rest are numbers until someone meets them). */
+static const char *menu_name(uint32_t id)
+{
+    switch (id) {
+    case 0: return "none";
+    case 1: return "main";
+    case 4: return "options";
+    case 8: return "display";
+    case 9: return "pause";
+    case 10: return "title";
+    case 15: return "resurrect";
+    default: return "?";
+    }
+}
+
+/* SetMenu is asked for a screen some frames before s_menuID changes (the
+ * screens fade), so for a moment after a request the watcher still reads the
+ * old id: it leaves menus alone for that long. */
+static double s_menu_asked;
+
 static void note_menu(uint32_t id, const char *how)
 {
-    if (id == s_seen_menu || id > 0x1000u)
+    int watch = !strcmp(how, "watch");
+    if (id > 0x1000u)
+        return;
+    if (watch && btvs_uptime() - s_menu_asked < 3.0)
+        return;
+    if (!watch)
+        s_menu_asked = btvs_uptime();
+    if (id == s_seen_menu)
         return;
     s_seen_menu = id;
-    btvs_trail("menu", "screen=%u via=%s", id, how);
+    btvs_trail("menu", "screen=%u name=%s via=%s", id, menu_name(id), how);
 }
 
 static void sample_player(void)
@@ -382,7 +409,8 @@ static DWORD WINAPI watch_thread(LPVOID arg)
 
 /* The wrappers. Each calls the game's function untouched and reads afterwards
  * (or, for arguments, before): they change nothing the game can see. */
-void TGame_ExecFrame_0008AB80(void);
+void TGameManagerImplementation_Frame_000183A0(void);
+void xbox_HangMonitorBeat(void);
 void TManager_Buffy_Map_Loaded_0023D050(void);
 void TManager_Buffy_Map_Completed_0023CC20(void);
 void GUI_TManager_SetMenu_001EBE00(void);
@@ -399,11 +427,14 @@ static void first_time(volatile LONG *flag, const char *what)
         btvs_log("trail", "game hook live: %s", what);
 }
 
-static void hook_ExecFrame(void)
+/* The game loop (ExecuteGame) calls this through a vtable once a frame.
+ * (TGame::ExecFrame, hooked first, is reached by a direct call: never seen here.) */
+static void hook_GameFrame(void)
 {
     static volatile LONG seen;
-    TGame_ExecFrame_0008AB80();
-    first_time(&seen, "TGame::ExecFrame (the once-a-frame tick)");
+    TGameManagerImplementation_Frame_000183A0();
+    first_time(&seen, "TGameManagerImplementation::Frame (the once-a-frame tick)");
+    xbox_HangMonitorBeat();
     btvs_frame_tick();
 }
 
@@ -478,7 +509,7 @@ static void hook_AutoSave(void)
 btvs_guest_fn btvs_trail_lookup(uint32_t va)
 {
     switch (va) {
-    case 0x0008AB80u: return hook_ExecFrame;
+    case 0x000183A0u: return hook_GameFrame;
     case 0x0023D050u: return hook_Map_Loaded;
     case 0x0023CC20u: return hook_Map_Completed;
     case 0x001EBE00u: return hook_SetMenu;
@@ -540,7 +571,7 @@ void btvs_trail_start_watch(void)
         CloseHandle(h);
 }
 
-/* Once a frame on the game thread (the TGame::ExecFrame wrapper). */
+/* Once a frame on the game thread (hook_GameFrame). */
 void btvs_frame_tick(void)
 {
     InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
