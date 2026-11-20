@@ -4,8 +4,13 @@
 # HLSL to SPIR-V with glslang. spirv_check runs that over dumped shaders.
 
 get_filename_component(XBOXRECOMP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+<<<<<<< HEAD
 # The submodules; a project may point XBOXRECOMP_THIRD_PARTY at another copy
 # (a git worktree has them empty and uses its main checkout's).
+=======
+# (XBOXRECOMP_THIRD_PARTY: another checkout's third_party, for a git worktree
+# whose submodules are not checked out)
+>>>>>>> ab270c7 (Boot: native memmove (jump tables the lifter cannot follow); worktree builds use the main checkout's third-party sources; crash report shows the thread's TIB)
 if(NOT XBOXRECOMP_THIRD_PARTY)
     set(XBOXRECOMP_THIRD_PARTY "${XBOXRECOMP_ROOT}/third_party")
 endif()

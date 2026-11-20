@@ -38,7 +38,6 @@ add_subdirectory(${XBOXRECOMP_DIR} ${CMAKE_BINARY_DIR}/xboxrecomp)
 # is not in git). A git worktree has no copy, so it uses the main checkout's
 # generated code and its already-built library (BTVS_MAIN, set by build.sh):
 # a worktree build then compiles only the port's own sources.
-set(BTVS_MAIN "" CACHE PATH "The main checkout, when building in a git worktree")
 set(BTVS_GEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/recomp/gen")
 set(BTVS_PREBUILT "")
 if(BTVS_MAIN AND NOT EXISTS "${BTVS_GEN_DIR}/recomp_funcs.h")
@@ -83,6 +82,7 @@ if(EXISTS "${BTVS_GEN_DIR}/recomp_funcs.h")
 endif()
 if(BTVS_GRAPHICS)
     list(APPEND GAME_SOURCES
+        src/btvs_boot.c
         src/btvs_native.c
         src/btvs_native_gpuwait.c
         src/btvs_native_shot.c
