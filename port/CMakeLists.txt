@@ -56,6 +56,7 @@ endif()
 set(GAME_SOURCES
     src/main.c
     src/recomp_manual.c
+    src/btvs_settings.c
 )
 
 add_executable(${PROJECT_NAME} WIN32 ${GAME_SOURCES})
