@@ -33,7 +33,7 @@ fi
 ARGS=(--build build --config Release)
 [ -n "${1:-}" ] && ARGS+=(--target "$1")
 ARGS+=(-- -m:1 -nologo -v:m)
-export CL="${CL:-} /MP4"
+export CL="${CL:-} -MP4"
 if bash tools/limit.sh cmake "${ARGS[@]}" > build_log.txt 2>&1; then
     echo "build ok"
 else
