@@ -71,6 +71,7 @@ void btvs_menu_no_capture_begin(int a, int s) { (void)a; (void)s; }
 int  btvs_menu_no_capture_state(void) { return -1; }
 void btvs_menu_no_void(void) {}
 void btvs_menu_no_binding_clear(int a, int s) { (void)a; (void)s; }
+int  btvs_menu_no_gpu_info(struct btvs_gpu_info *o) { (void)o; return 0; }
 
 #pragma comment(linker, "/alternatename:btvs_log=btvs_menu_no_log")
 #pragma comment(linker, "/alternatename:btvs_trail=btvs_menu_no_trail")
@@ -85,6 +86,7 @@ void btvs_menu_no_binding_clear(int a, int s) { (void)a; (void)s; }
 #pragma comment(linker, "/alternatename:btvs_input_capture_cancel=btvs_menu_no_void")
 #pragma comment(linker, "/alternatename:btvs_input_binding_clear=btvs_menu_no_binding_clear")
 #pragma comment(linker, "/alternatename:btvs_input_bindings_reset=btvs_menu_no_void")
+#pragma comment(linker, "/alternatename:btvs_gpu_info=btvs_menu_no_gpu_info")
 
 /* ── the game (guest addresses, XDK 4432 retail; names from final.map) ──── */
 
@@ -417,7 +419,18 @@ static void build_memory(void)
     rowf(-1, "System memory:  %s of %s in use", a, b);
     mb(a, sizeof a, proc);
     rowf(-1, "This game:  %s", a);
-    rowf(-1, "Video memory:  not known");
+    {
+        struct btvs_gpu_info g;
+        memset(&g, 0, sizeof g);
+        btvs_gpu_info(&g);
+        if (g.vram_total) {
+            mb(a, sizeof a, g.vram_used_by_game); mb(b, sizeof b, g.vram_total);
+            rowf(-1, "Video memory:  %s", b);
+            rowf(-1, "This game:  %s", a);
+        } else {
+            rowf(-1, "Video memory:  not known");
+        }
+    }
     rowf(-1, "Game heap:  not known");
 #endif
     rowf(0, "Back");
@@ -462,7 +475,7 @@ static void build_rows(void)
         rowf(2, "VSync:  %s", onoff("display", "vsync", 1));
         i = k_fps[fps_index()];
         if (i) rowf(3, "FPS Limit:  %d", i); else rowf(3, "FPS Limit:  Uncapped");
-        rowf(4, "Picture:  %s", k_wide[wrap(btvs_setting_int("display", "widescreen", 1), 3)]);
+        rowf(4, "Picture:  %s", k_wide[wrap(btvs_setting_int("display", "widescreen", 0), 3)]);
         rowf(5, "Overlay:  %s", k_overlay[wrap(btvs_setting_int("display", "show_fps", 0), 3)]);
         break;
     case PG_AUDIO:
@@ -619,7 +632,7 @@ static int act(int item, int dir)
             break;
         case 2: cycle("display", "vsync", 1, 2, step); break;
         case 3: btvs_setting_set_int("display", "fps_limit", k_fps[wrap(fps_index() + step, NFPS)]); break;
-        case 4: cycle("display", "widescreen", 1, 3, step); break;
+        case 4: cycle("display", "widescreen", 0, 3, step); break;
         case 5: cycle("display", "show_fps", 0, 3, step); break;
         }
         break;
