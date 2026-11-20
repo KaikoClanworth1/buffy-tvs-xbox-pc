@@ -244,7 +244,10 @@ void xbox_PeekSample(const char *label);
 /** Base VA for kernel data exports (XboxHardwareInfo, XboxKrnlVersion, etc.)
  *  These are kernel exports that are DATA, not functions. The game reads
  *  their thunk entries and dereferences them to access the data. */
-#define XBOX_KERNEL_DATA_BASE   0x00740000
+/* (This port: the game's image runs from 0x00010000 to 0x00920D40 -- .rdata
+ * and .data cover the 0x00700000..0x00780000 range the toolkit's fixed areas
+ * used to sit in, so they are all placed above the image: 0x00930000 on.) */
+#define XBOX_KERNEL_DATA_BASE   0x00930000
 #define XBOX_KERNEL_DATA_SIZE   4096   /* 4 KB - plenty for all data exports */
 
 /* Offsets within the kernel data area */
@@ -329,7 +332,7 @@ typedef union RecompXmm {
 } RecompXmm;
 #endif
 
-#define XBOX_STACK_SIZE     (8 * 1024 * 1024)
+#define XBOX_STACK_SIZE     (6 * 1024 * 1024)   /* 0x00980000..0x00F80000, above the image */
 
 /** Base VA of the stack area (above last XBE section). */
 /* Where the fake TIB lives -- the linear address fs: is based at.
@@ -367,7 +370,7 @@ typedef union RecompXmm {
 extern RECOMP_TLS uint32_t g_fs_base;
 #define XBOX_FS_BASE        g_fs_base
 
-#define XBOX_STACK_BASE     0x00780000
+#define XBOX_STACK_BASE     0x00980000
 
 /** Initial ESP value (top of stack, 16-byte aligned). */
 #define XBOX_STACK_TOP      (XBOX_STACK_BASE + XBOX_STACK_SIZE - 16)

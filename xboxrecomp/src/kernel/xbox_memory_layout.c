@@ -2286,7 +2286,7 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
          * only worked while page zero was mapped. Pointing at real zeroed
          * memory says the same thing to the title and survives that page being
          * unmapped, which is what makes a genuine null dereference visible. */
-        #define FAKE_PRCB_VA 0x00761000  /* zeroed KPCR Prcb stand-in */
+        #define FAKE_PRCB_VA 0x00951000  /* zeroed KPCR Prcb stand-in */
         memset(XBOX_VA(FAKE_PRCB_VA), 0, 0x400);
         MEM32_INIT(XBOX_FS_BASE + 0x20, FAKE_PRCB_VA);
         #undef FAKE_PRCB_VA
@@ -2297,8 +2297,8 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
          * to its data area. We allocate a fake structure at 0x00760000
          * (in the BSS area) and a data buffer at 0x00700000.
          */
-        #define FAKE_TLS_VA     0x00760000  /* Fake TLS structure (in BSS) */
-        #define FAKE_RWDATA_VA  0x00700000  /* RW engine data area (in BSS) */
+        #define FAKE_TLS_VA     0x00950000  /* Fake TLS structure (in BSS) */
+        #define FAKE_RWDATA_VA  0x00940000  /* RW engine data area (in BSS) */
 
         MEM32_INIT(XBOX_FS_BASE + 0x28, FAKE_TLS_VA);
         /* TLS[0x28] = pointer to RW data area */
@@ -2332,8 +2332,8 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
          * Every guest thread therefore shares LastError. Give this a per-thread
          * allocation when a title is observed to care.
          */
-        #define FAKE_TLS_BLOCK_VA  0x00770000  /* image TLS data          */
-        #define FAKE_TLS_THREAD_VA 0x00770200  /* what slot 0 points at   */
+        #define FAKE_TLS_BLOCK_VA  0x00960000  /* image TLS data          */
+        #define FAKE_TLS_THREAD_VA 0x00960200  /* what slot 0 points at   */
         {
             DWORD tls_dir_va = *(const DWORD *)(xbe + XBE_TLS_ADDR_OFFSET);
 
