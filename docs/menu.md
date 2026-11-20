@@ -119,8 +119,9 @@ B returns to the Options list (and saves `btvs_settings.ini`).
 - **PC Controls**: Sensitivity, Invert Look, Rumble (`controls.*`), Key Bindings, Reset Bindings.
   **Key Bindings** lists Controls' actions with their three slots; Left/Right pick the slot,
   A waits for a key or button (`btvs_input_capture_begin`), X clears it; the list scrolls.
-- **Memory**: system RAM in use / total and this process (measured here), video memory and the
-  game's heap from Logs' `btvs_mem_stats` once `BTVS_HAVE_MEM_STATS` is defined; refreshed twice a second.
+- **Memory**: system RAM in use / total and this process (measured here), video memory total and
+  this game's use from Graphics' `btvs_gpu_info`; all of it plus the game's heap from Logs'
+  `btvs_mem_stats` once `BTVS_HAVE_MEM_STATS` is defined. Refreshed twice a second.
 - **Report a Problem**: Problem (six categories), Details (A to write with the controller:
   Left/Right letter, A add, X delete, B done; or type on the keyboard through `btvs_menu_char`),
   Send Report → `btvs_report_create("<category>: <details>")`, then a page showing
