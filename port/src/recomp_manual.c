@@ -94,7 +94,13 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
      * if (xbox_va == 0x000ABCDE) return fixed_sub_000ABCDE;
      */
 
-    (void)xbox_va;
+    /* Menu: the game's menu classes, hooked where they are called through
+     * their vtables (btvs_menu.c). */
+    {
+        extern recomp_func_t btvs_menu_lookup(uint32_t va);
+        recomp_func_t f = btvs_menu_lookup(xbox_va);
+        if (f) return f;
+    }
     return (recomp_func_t)0;
 }
 

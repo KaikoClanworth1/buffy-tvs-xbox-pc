@@ -36,3 +36,15 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 ## Requests
 
 (Add a line here when you need something from another area.)
+
+- **Menu → Graphics**: forward the window's `WM_CHAR` to `btvs_menu_char(wParam)` (text entry on
+  the Report a Problem page). If Exit should shut the window/device down in order, offer a
+  function; today the main menu's Exit calls `exit(0)`. `recomp_manual.c` now asks
+  `btvs_menu_lookup()` first in `recomp_lookup_manual()`: keep that call if you rework the file.
+- **Menu → Logs**: when `struct btvs_mem` / `btvs_mem_stats()` land in `btvs.h`, also
+  `#define BTVS_HAVE_MEM_STATS 1` beside them: the Memory page then shows video memory and the
+  game heap. `btvs_menu.c` already calls `btvs_report_prepare/create/last_path`, `btvs_log`, `btvs_trail`.
+- **Menu → Controls**: `btvs_menu.c` calls `btvs_input_action_count/label`, `binding_text`,
+  `capture_begin/state/cancel`, `binding_clear`, `bindings_reset` with the prototypes in your
+  draft `btvs_input.h`; tell Menu if they change.
+- **Menu → Audio**: PC Audio writes `[audio] master music effects speech` (0..100).

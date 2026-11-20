@@ -57,6 +57,7 @@ set(GAME_SOURCES
     src/main.c
     src/recomp_manual.c
     src/btvs_settings.c
+    src/btvs_menu.c
 )
 # Graphics area. Its files hook functions named in src/manual_functions.json,
 # so they join the build once the generated code has those hooks (after the

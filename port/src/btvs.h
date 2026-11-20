@@ -32,4 +32,11 @@ int   btvs_screenshot_count(void);
 int   btvs_gpu_info(struct btvs_gpu_info *out);
 float btvs_fps(void);
 
+/* ---- Menu: the PC pages in the game's own menus (btvs_menu.c) -------------
+ * btvs_menu_char: a character typed on the keyboard (the window's WM_CHAR;
+ * 8 = backspace), for the Report a Problem text. Game thread or window thread.
+ * btvs_menu_page_open: 1 while a PC page is on screen. */
+void btvs_menu_char(unsigned ch);
+int  btvs_menu_page_open(void);
+
 #endif
