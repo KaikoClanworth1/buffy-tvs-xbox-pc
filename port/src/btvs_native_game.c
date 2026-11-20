@@ -41,21 +41,23 @@ static int game_log(void)
 
 PASS(TIF_Render_Implement_Buffer_Swap_00297C20, 4)
 /* bool TIF_Render_Implement::Movie_Play(5 arguments), thiscall: plays a WMV
- * to its end (or starts it). BTVS_SKIP_MOVIES=1: not played, "could not
+ * to its end (or starts it). BTVS_SKIP_MOVIES=1 (the logos and intro at
+ * start) or =2 (every movie): not played, "could not
  * play" answered, as the game gets for a file that is not there. For test
  * runs: the four logos take over half a minute. */
+static int s_in_logos;                           /* inside TLogo::ExecuteMovies */
 void TIF_Render_Implement_Movie_Play_00297A90_orig(void);
 void TIF_Render_Implement_Movie_Play_00297A90(void)
 {
     static int skip = -1;
     if (skip < 0) {
         const char *e = getenv("BTVS_SKIP_MOVIES");
-        skip = e && e[0] == '1';
+        skip = e ? atoi(e) : 0;                  /* 1: the logos and intro at start; 2: every movie */
     }
     if (game_log())
         fprintf(stderr, "[GAME] Movie_Play ret=%08X a=%08X %08X %08X %08X %08X%s\n", MEM32(g_esp), MEM32(g_esp + 4),
-                MEM32(g_esp + 8), MEM32(g_esp + 12), MEM32(g_esp + 16), MEM32(g_esp + 20), skip ? " (skipped)" : "");
-    if (skip) {
+                MEM32(g_esp + 8), MEM32(g_esp + 12), MEM32(g_esp + 16), MEM32(g_esp + 20), skip >= 2 || (skip == 1 && s_in_logos) ? " (skipped)" : "");
+    if (skip >= 2 || (skip == 1 && s_in_logos)) {
         g_eax = 0;
         g_esp += 4 + 0x14;
         return;
@@ -154,7 +156,9 @@ void TLogo_ExecuteMovies_00062DB0(void)
             }
         }
     }
+    s_in_logos = 1;
     TLogo_ExecuteMovies_00062DB0_orig();
+    s_in_logos = 0;
 }
 PASS(TIF_Render_Implement_View_SetFOV_002A5110, 8)
 PASS(TIF_Render_Implement_View_InternalSetup_002A4870, 4)

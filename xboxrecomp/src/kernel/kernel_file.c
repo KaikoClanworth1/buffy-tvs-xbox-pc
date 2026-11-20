@@ -116,6 +116,7 @@ static DWORD xbox_share_to_win32(ULONG Share)
 
 /* Translate an Xbox OBJECT_ATTRIBUTES path to a Win32 wide path */
 extern __declspec(thread) int g_xbox_path_for_write;   /* kernel_path.c */
+ptrdiff_t xbox_GetMemoryOffset(void);                    /* xbox_memory_layout.c */
 
 static BOOL translate_obj_path(PXBOX_OBJECT_ATTRIBUTES ObjectAttributes,
                                WCHAR* win_path, DWORD buf_size)
@@ -604,6 +605,54 @@ NTSTATUS __stdcall xbox_NtSetInformationFile(
                 SetFilePointerEx(FileHandle, info->EndOfFile, NULL, FILE_BEGIN);
                 SetEndOfFile(FileHandle);
                 SetFilePointerEx(FileHandle, cur, NULL, FILE_BEGIN);
+            }
+            IoStatusBlock->Status = STATUS_SUCCESS;
+            return STATUS_SUCCESS;
+        }
+        case XboxFileRenameInformation: {
+            /* XAPI's MoveFile. The console's structure, 32-bit: BOOLEAN
+             * ReplaceIfExists; HANDLE RootDirectory (+4); the new name as a
+             * counted string (+8 Length, +10 MaximumLength, +12 Buffer, a
+             * guest address). A title that copies a file under a temporary
+             * name and renames it when the copy is whole (Buffy 2002's music:
+             * x.wma_ -> x.wma) otherwise never sees its file arrive. */
+            const uint8_t *g = (const uint8_t *)FileInformation;
+            uint16_t len = *(const uint16_t *)(g + 8);
+            uint32_t buf_va = *(const uint32_t *)(g + 12);
+            char xname[MAX_PATH];
+            WCHAR to[MAX_PATH];
+            union { FILE_RENAME_INFO ri; uint8_t raw[sizeof(FILE_RENAME_INFO) + MAX_PATH * sizeof(WCHAR)]; } u;
+            size_t n;
+            BOOL ok;
+            if (!buf_va || !len || len >= MAX_PATH)
+                return STATUS_INVALID_PARAMETER;
+            memcpy(xname, (const char *)xbox_GetMemoryOffset() + buf_va, len);
+            xname[len] = 0;
+            g_xbox_path_for_write = 1;
+            ok = xbox_translate_path(xname, to, MAX_PATH);
+            g_xbox_path_for_write = 0;
+            if (!ok)
+                return STATUS_OBJECT_PATH_NOT_FOUND;
+            n = wcslen(to);
+            memset(&u, 0, sizeof u);
+            u.ri.ReplaceIfExists = g[0] != 0;
+            u.ri.FileNameLength = (DWORD)(n * sizeof(WCHAR));
+            memcpy(u.ri.FileName, to, (n + 1) * sizeof(WCHAR));
+            ok = SetFileInformationByHandle(FileHandle, FileRenameInfo, &u.ri,
+                                            (DWORD)(sizeof(FILE_RENAME_INFO) + n * sizeof(WCHAR)));
+            if (!ok) {
+                /* (a handle opened without DELETE: by name instead) */
+                WCHAR from[MAX_PATH];
+                DWORD err = GetLastError();
+                DWORD used = GetFinalPathNameByHandleW(FileHandle, from, MAX_PATH, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+                if (used && used < MAX_PATH)
+                    ok = MoveFileExW(from, to, g[0] ? MOVEFILE_REPLACE_EXISTING : 0);
+                if (!ok) {
+                    fprintf(stderr, "  [FILE] rename to %S failed (err=%u, by name err=%u)\n", to, err, GetLastError());
+                    IoStatusBlock->Status = STATUS_OBJECT_NAME_COLLISION;
+                    return GetLastError() == ERROR_ALREADY_EXISTS || GetLastError() == ERROR_FILE_EXISTS
+                         ? STATUS_OBJECT_NAME_COLLISION : STATUS_ACCESS_DENIED;
+                }
             }
             IoStatusBlock->Status = STATUS_SUCCESS;
             return STATUS_SUCCESS;
