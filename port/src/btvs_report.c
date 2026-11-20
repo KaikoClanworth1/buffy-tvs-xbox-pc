@@ -19,7 +19,7 @@
  *
  * The in-game page (Menu area) calls btvs_report_prepare() when the pause
  * menu opens and btvs_report_create() when the player confirms. The hotkey
- * (F12, or a click of the left stick; btvs_settings.ini [Report] Hotkey=
+ * (F12, or a click of the left stick; btvs_settings.ini [report] hotkey=
  * 0 off, 1 both (default), 2 F12 only) is watched by a thread of its own, so
  * a report can be made while the game is frozen.
  *
@@ -41,7 +41,9 @@ unsigned long xbox_HangMonitorIdleMs(void);
 
 /* Until Graphics defines btvs_screenshot: no picture, and the report says so. */
 int btvs_screenshot_none(const char *path) { (void)path; return 0; }
+int btvs_screenshot_count_none(void) { return 0; }
 #pragma comment(linker, "/alternatename:btvs_screenshot=btvs_screenshot_none")
+#pragma comment(linker, "/alternatename:btvs_screenshot_count=btvs_screenshot_count_none")
 
 static CRITICAL_SECTION s_cs;
 static INIT_ONCE s_once = INIT_ONCE_STATIC_INIT;
@@ -54,6 +56,24 @@ static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
     (void)o; (void)p; (void)c;
     InitializeCriticalSection(&s_cs);
     return TRUE;
+}
+
+/* Graphics writes the picture at the next frame it shows: ask, then wait for
+ * it (2 s at most: a frozen game shows no next frame, and the report must
+ * still be made). */
+static int file_exists(const char *path);
+static int take_screenshot(const char *path)
+{
+    int before = btvs_screenshot_count(), i;
+    DeleteFileA(path);
+    if (!btvs_screenshot(path))
+        return 0;
+    for (i = 0; i < 100; i++) {
+        if (btvs_screenshot_count() != before && file_exists(path))
+            return 1;
+        Sleep(20);
+    }
+    return file_exists(path);
 }
 
 /* ── Files ──────────────────────────────────────────────────────────────── */
@@ -433,7 +453,7 @@ int btvs_report_make(const char *player_text, const char *trigger)
     if (s_pending[0] && GetTickCount() - s_pending_tick < 600000 && MoveFileExA(s_pending, path, MOVEFILE_REPLACE_EXISTING))
         have_shot = 1;
     else
-        have_shot = btvs_screenshot(path) && file_exists(path);
+        have_shot = take_screenshot(path);
     s_pending[0] = 0;
 
     btvs_trail_where(&w);
@@ -447,6 +467,7 @@ int btvs_report_make(const char *player_text, const char *trigger)
     sprintf_s(path, MAX_PATH, "%s\\input.rec", dir);
     input_bytes = have_input ? file_size(path) : 0;
 
+    btvs_settings_save();
     have_settings = copy_into(dir, btvs_settings_path(), "settings.ini");
     sprintf_s(path, MAX_PATH, "%s\\save", dir);
     save_files = btvs_copy_tree(btvs_save_dir(), path, 32ull << 20, &save_bytes);
@@ -599,7 +620,7 @@ void btvs_report_prepare(void)
     CreateDirectoryA(path, NULL);
     strcat_s(path, MAX_PATH, "\\pending.png");
     EnterCriticalSection(&s_cs);
-    if (btvs_screenshot(path) && file_exists(path)) {
+    if (take_screenshot(path)) {
         strcpy_s(s_pending, MAX_PATH, path);
         s_pending_tick = GetTickCount();
     }
@@ -630,7 +651,7 @@ static DWORD WINAPI hotkey_thread(LPVOID arg)
         Sleep(30);
         if (now - mode_tick > 2000) {       /* the Menu area can switch it while the game runs */
             mode_tick = now;
-            mode = (int)GetPrivateProfileIntA("Report", "Hotkey", 1, btvs_settings_path());
+            mode = btvs_setting_int("report", "hotkey", 1);
         }
         if (!mode || !ours_in_front()) {
             was_down = 0;

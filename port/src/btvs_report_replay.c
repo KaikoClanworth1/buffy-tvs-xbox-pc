@@ -1,7 +1,7 @@
 /* BTVS_REPLAY=<report folder or .zip>: go back to where a report was made.
  *
  *  1. before anything reads them, the report's settings and save are put in
- *     place: BTVS_SETTINGS -> the report's settings.ini, BTVS_SAVE_DIR -> a
+ *     place: BTVS_SETTINGS_INI -> the report's settings.ini, BTVS_SAVE_DIR -> a
  *     fresh copy of the report's save\ under <exe>\replay\ (the player's own
  *     saves and settings are never touched);
  *  2. the game is taken to the report's anchor (replay.txt: boot / level /
@@ -133,7 +133,7 @@ void btvs_replay_init(void)
     /* The report's settings and a throw-away copy of its save. */
     sprintf_s(path, MAX_PATH, "%s\\settings.ini", s_r.folder);
     if (is_file(path))
-        _putenv_s("BTVS_SETTINGS", path);
+        _putenv_s("BTVS_SETTINGS_INI", path);
     sprintf_s(path, MAX_PATH, "%s\\save", s_r.folder);
     sprintf_s(base, MAX_PATH, "%s\\replay\\save_run", btvs_exe_dir());
     delete_tree(base);
@@ -147,7 +147,7 @@ void btvs_replay_init(void)
     btvs_log("replay", "  go to: %s \"%s\" (level \"%s\", checkpoint \"%s\"), then %.1f s of recorded input (%s)",
              s_r.anchor, s_r.anchor_name, s_r.level, s_r.checkpoint, s_r.report_time - s_r.anchor_time,
              s_r.input[0] ? "input.rec" : "NONE in the report");
-    btvs_log("replay", "  settings: %s; saves: %s", getenv("BTVS_SETTINGS") ? getenv("BTVS_SETTINGS") : "(defaults)", base);
+    btvs_log("replay", "  settings: %s; saves: %s", getenv("BTVS_SETTINGS_INI") ? getenv("BTVS_SETTINGS_INI") : "(defaults)", base);
 }
 
 /* The trail saw an anchor. Ours? Then the recording plays from here. */

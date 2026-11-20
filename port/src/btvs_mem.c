@@ -28,10 +28,6 @@
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "dxguid.lib")
 
-/* Until Graphics defines btvs_gpu_info: "don't know", and the default adapter is used. */
-int btvs_gpu_info_none(struct btvs_gpu *out) { (void)out; return 0; }
-#pragma comment(linker, "/alternatename:btvs_gpu_info=btvs_gpu_info_none")
-
 /* The game's own heap figures: btvs_trail.c reads them from the game (it owns
  * the game hooks). 0 = not known yet. */
 int btvs_game_heap_stats(uint64_t *used, uint64_t *peak, uint32_t *allocs);
@@ -106,28 +102,32 @@ void btvs_gpu_text(char *buf, size_t n)
     IDXGIFactory1_Release(f);
 }
 
-/* The adapter the game draws with (Graphics says which; else the first). */
+/* The adapter the game draws with: the one Graphics names (btvs_gpu_info),
+ * found here by its name for its LUID (the Windows counters are per LUID);
+ * until Graphics has a device, the first hardware adapter. */
 static void find_adapter(void)
 {
     IDXGIFactory1 *f = NULL;
     IDXGIAdapter1 *a = NULL, *pick = NULL;
-    struct btvs_gpu g;
-    int have = 0;
+    struct btvs_gpu_info g;
+    char name[128];
+    static char s_have_name[128];
     UINT i;
 
     memset(&g, 0, sizeof g);
-    have = btvs_gpu_info(&g);
-    if (!have && s_adapter_tried)
-        return;                 /* keep the default until Graphics knows better */
-    if (have && s_adapter3 && s_desc.AdapterLuid.LowPart == g.luid_low && s_desc.AdapterLuid.HighPart == g.luid_high)
+    btvs_gpu_info(&g);
+    if (s_adapter_tried && !strcmp(g.adapter, s_have_name))
         return;
     s_adapter_tried = 1;
+    strcpy_s(s_have_name, sizeof s_have_name, g.adapter);
     if (FAILED(CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&f)) || !f)
         return;
     for (i = 0; IDXGIFactory1_EnumAdapters1(f, i, &a) == S_OK; i++) {
         DXGI_ADAPTER_DESC1 d;
         if (SUCCEEDED(IDXGIAdapter1_GetDesc1(a, &d)) && !(d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) {
-            int match = have && d.AdapterLuid.LowPart == g.luid_low && d.AdapterLuid.HighPart == g.luid_high;
+            int match;
+            WideCharToMultiByte(CP_UTF8, 0, d.Description, -1, name, sizeof name, NULL, NULL);
+            match = g.adapter[0] && !strcmp(name, g.adapter);
             if (match || !pick) {
                 if (pick)
                     IDXGIAdapter1_Release(pick);

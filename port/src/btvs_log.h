@@ -17,7 +17,6 @@ void btvs_log_block(const char *text);    /* several lines as they are, no prefi
 double btvs_uptime(void);                 /* seconds since the log began */
 const char *btvs_exe_dir(void);           /* the folder of the exe (or BTVS_LOG_DIR), no trailing slash */
 const char *btvs_save_dir(void);          /* where the Xbox's save drives live (BTVS_SAVE_DIR or <exe>\XboxData) */
-const char *btvs_settings_path(void);     /* BTVS_SETTINGS or <exe>\btvs_settings.ini */
 int btvs_is_test_run(void);               /* BTVS_NO_WINDOW: no windows, no sounds, no real input */
 const char *btvs_version_text(void);      /* "0.0.1 (commit abc1234, built ...)" */
 void btvs_system_text(char *buf, size_t n);   /* Windows, CPU, RAM, GPUs: several lines */

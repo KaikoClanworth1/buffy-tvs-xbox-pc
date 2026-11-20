@@ -298,6 +298,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     /* Unbuffered output for immediate visibility during debugging */
     apply_test_guards();
+    btvs_replay_init();     /* BTVS_REPLAY: before the settings and the save folder are read */
     btvs_log_init();        /* btvs_log.txt: from here on everything goes to the log */
 #ifdef BTVS_GRAPHICS
     {
@@ -307,7 +308,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 #endif
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
-    btvs_replay_init();     /* BTVS_REPLAY: before the settings and the save folder are read */
 
     resolve_game_paths();
     btvs_log("boot", "game folder: %s", g_game_dir);

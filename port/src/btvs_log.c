@@ -32,7 +32,7 @@ static INIT_ONCE s_once = INIT_ONCE_STATIC_INIT;
 static CRITICAL_SECTION s_cs;
 static HANDLE s_file = INVALID_HANDLE_VALUE;
 static LARGE_INTEGER s_t0, s_freq;
-static char s_dir[MAX_PATH], s_save_dir[MAX_PATH], s_settings[MAX_PATH];
+static char s_dir[MAX_PATH], s_save_dir[MAX_PATH];
 static int s_tee;          /* also write to stderr */
 static int s_test_run;
 
@@ -56,25 +56,16 @@ double btvs_uptime(void)
     return (double)(now.QuadPart - s_t0.QuadPart) / (double)s_freq.QuadPart;
 }
 
-const char *btvs_exe_dir(void) { btvs_log_init(); return s_dir; }
+static BOOL CALLBACK init_once(PINIT_ONCE once, PVOID param, PVOID *ctx);
+const char *btvs_exe_dir(void) { InitOnceExecuteOnce(&s_once, init_once, NULL, NULL); return s_dir; }
 /* Read again each time: BTVS_REPLAY points it at a copy of the report's save. */
 const char *btvs_save_dir(void)
 {
     const char *e = getenv("BTVS_SAVE_DIR");
-    btvs_log_init();
+    InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
     return e && *e ? e : s_save_dir;
 }
-int btvs_is_test_run(void) { btvs_log_init(); return s_test_run; }
-
-/* Read again each time: BTVS_REPLAY points these somewhere else at start. */
-const char *btvs_settings_path(void)
-{
-    const char *e = getenv("BTVS_SETTINGS");
-    btvs_log_init();
-    if (e && *e)
-        return e;
-    return s_settings;
-}
+int btvs_is_test_run(void) { InitOnceExecuteOnce(&s_once, init_once, NULL, NULL); return s_test_run; }
 
 const char *btvs_version_text(void)
 {
@@ -203,7 +194,6 @@ static BOOL CALLBACK init_once(PINIT_ONCE once, PVOID param, PVOID *ctx)
     if (slash)
         *slash = 0;
     sprintf_s(s_save_dir, MAX_PATH, "%s\\XboxData", s_dir);
-    sprintf_s(s_settings, MAX_PATH, "%s\\btvs_settings.ini", s_dir);
     e = getenv("BTVS_LOG_DIR");
     if (e && *e) {
         strcpy_s(s_dir, MAX_PATH, e);
