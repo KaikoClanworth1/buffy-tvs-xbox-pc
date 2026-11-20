@@ -130,7 +130,6 @@ void btvs_window_boot(void)
     env_default("RECOMP_VBLANK", "0");
     env_default("RECOMP_NV2A_ACK", "0");
     env_default("BUFFY_GPU_BACKEND", "d3d11");
-    env_default("RECOMP_LAZY_DIRS", "1");
     apply();
     InterlockedExchange(&s_dirty, 0);
     btvs_setting_on_change("display", NULL, on_display_changed, NULL);

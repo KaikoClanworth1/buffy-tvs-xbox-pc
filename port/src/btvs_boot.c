@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "recomp/gen/recomp_types.h"
+#include "recomp_types.h"
 
 /* void *memmove(void *dst, const void *src, size_t n) -- 0x00580200, cdecl.
  * (memcpy is the same function in this CRT.) MSVC's hand-written version

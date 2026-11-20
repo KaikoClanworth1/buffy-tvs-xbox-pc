@@ -7,7 +7,7 @@
  * boot, btvs_window_boot). These functions finish what that mode leaves to a
  * GPU: its time (fences), its write-combine flush and its vertical blank.
  */
-#include "recomp/gen/recomp_types.h"
+#include "recomp_types.h"
 #include "btvs_native.h"
 
 void D3D_CDevice_KickOff_00596CC0_orig(void);

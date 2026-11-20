@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "recomp/gen/recomp_types.h"
+#include "recomp_types.h"
 #include "btvs.h"
 #include "btvs_native.h"
 

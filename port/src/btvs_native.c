@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "recomp/gen/recomp_types.h"
+#include "recomp_types.h"
 #include "gpu.h"
 #include "btvs.h"
 #include "btvs_native.h"
