@@ -47,6 +47,8 @@ int btvs_screenshot_count_none(void) { return 0; }
 
 static CRITICAL_SECTION s_cs;
 static INIT_ONCE s_once = INIT_ONCE_STATIC_INIT;
+extern int btvs_recording_cut;
+static long long file_size(const char *path);
 static char s_last[MAX_PATH];
 static char s_pending[MAX_PATH];
 static DWORD s_pending_tick;
@@ -428,7 +430,7 @@ int btvs_report_make(const char *player_text, const char *trigger)
     SYSTEMTIME t;
     FILE *f;
     unsigned long long save_bytes = 0;
-    int have_shot = 0, have_input, have_settings, save_files, crashes, i, files;
+    int have_shot = 0, have_input, input_complete, have_settings, save_files, crashes, i, files;
     long long input_bytes;
     double t0 = btvs_uptime();
 
@@ -463,9 +465,23 @@ int btvs_report_make(const char *player_text, const char *trigger)
     /* The recording, complete up to this moment. */
     btvs_input_record_flush();
     sprintf_s(src, MAX_PATH, "%s\\" BTVS_INPUT_FILE, btvs_exe_dir());
-    have_input = copy_into(dir, src, "input.rec");
+    input_complete = !btvs_recording_cut;
+    if (btvs_input_recording() && file_size(src) < 64) {
+        /* Controls' recorder keeps the file in memory until it is closed and
+         * has no "write it now" yet: close it, take it, start again. What
+         * follows no longer begins at the anchor, so a later report made
+         * before the next anchor says its recording is not complete. */
+        btvs_input_record_end();
+        have_input = copy_into(dir, src, "input.rec");
+        btvs_input_record_begin(src);
+        btvs_recording_cut = 1;
+    } else {
+        have_input = copy_into(dir, src, "input.rec");
+    }
     sprintf_s(path, MAX_PATH, "%s\\input.rec", dir);
     input_bytes = have_input ? file_size(path) : 0;
+    if (input_bytes <= 0)
+        have_input = 0;
 
     btvs_settings_save();
     have_settings = copy_into(dir, btvs_settings_path(), "settings.ini");
@@ -490,9 +506,9 @@ int btvs_report_make(const char *player_text, const char *trigger)
     if (fopen_s(&f, path, "w") == 0 && f) {
         fprintf(f, "format=1\nversion=%s\nanchor=%s\nanchor_name=%s\nlevel=%s\ncheckpoint=%s\n"
                    "anchor_time=%.3f\nanchor_frame=%ld\nreport_time=%.3f\nreport_frame=%ld\n"
-                   "input=%s\nsettings=%s\nsave=%s\n",
+                   "input=%s\ninput_complete=%d\nsettings=%s\nsave=%s\n",
                 BTVS_VERSION, w.anchor_event, w.anchor_name, w.level, w.checkpoint, w.anchor_time, w.anchor_frame,
-                t0, w.frame, have_input ? "input.rec" : "", have_settings ? "settings.ini" : "",
+                t0, w.frame, have_input ? "input.rec" : "", input_complete, have_settings ? "settings.ini" : "",
                 save_files ? "save" : "");
         if (w.have_pos)
             fprintf(f, "pos=%.3f %.3f %.3f\nhealth=%.1f\n", w.pos[0], w.pos[1], w.pos[2], w.health);
@@ -515,7 +531,7 @@ int btvs_report_make(const char *player_text, const char *trigger)
                 xbox_HangMonitorIdleMs() > 3000 ? "   <-- the game thread is not moving" : "");
         fprintf(f, "replay starts at: %s \"%s\" (%.1f s, frame %ld); %.1f s of play since then; input recording: %s\n\n",
                 w.anchor_event, w.anchor_name, w.anchor_time, w.anchor_frame, t0 - w.anchor_time,
-                have_input ? "yes" : "NO (not recorded)");
+                !have_input ? "NO (not recorded)" : input_complete ? "yes" : "PARTIAL (it starts at an earlier report, not at the anchor)");
         fprintf(f, "== The last things that happened (the trail; all of it: btvs_trail.txt)\n%s\n", tail);
         fprintf(f, "== System\n%s\n", sys);
         fprintf(f, "== Memory\n%s\n", memtext);

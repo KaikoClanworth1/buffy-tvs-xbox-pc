@@ -45,6 +45,7 @@ static char s_ring[RING][LINE];
 static unsigned s_ring_n;
 static struct btvs_where s_where;
 static int s_recording;          /* Controls took the recording */
+int btvs_recording_cut;          /* a report had to restart the recording: it no longer begins at the anchor */
 static double s_pos_every = 5.0, s_pos_last = -1000.0;
 static float s_last_pos[3], s_last_health;
 
@@ -165,6 +166,7 @@ void btvs_trail(const char *event, const char *fmt, ...)
             btvs_replay_on_anchor(event, name);
         if (!btvs_input_playback_active()) {
             int ok = btvs_input_record_begin(path);
+            btvs_recording_cut = 0;
             if (ok != s_recording) {
                 s_recording = ok;
                 btvs_log("trail", ok ? "input recording on (%s)" : "input recording not available (%s)", path);

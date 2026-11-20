@@ -104,7 +104,7 @@ static DWORD WINAPI sym_thread(LPVOID arg)
     const char *from = "btvs_symbols.txt";
     (void)arg;
 
-    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
     s_syms_cap = 70000;
     s_names_cap = 6u << 20;
     s_syms = (sym_t *)VirtualAlloc(NULL, s_syms_cap * sizeof(sym_t), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -341,6 +341,8 @@ static DWORD WINAPI crash_writer(LPVOID arg)
     DWORD w;
 
     s_report_thread = GetCurrentThreadId();
+    for (i = 0; i < 300 && s_sym_state == 1; i++)      /* the names are still loading: worth the wait */
+        Sleep(100);
     stamp(when, sizeof when);
     crash_dir(dir);
     sprintf_s(c->path, MAX_PATH, "%s\\crash_%s.txt", dir, when);
@@ -615,8 +617,6 @@ void btvs_crash_test_now(void)
     int i;
     if (!e || atoi(e) != 1)
         return;
-    for (i = 0; i < 100 && s_sym_state == 1; i++)      /* let the names load: the point is to see them */
-        Sleep(100);
     btvs_log("crash", "BTVS_TEST_CRASH=1: crashing on purpose (the game thread; the two guest return "
                       "addresses on the stack are put there by the test)");
     if (g_xbox_mem_offset && g_esp > 0x1000) {       /* as two nested guest calls would leave it */
@@ -624,6 +624,6 @@ void btvs_crash_test_now(void)
         g_esp -= 4; *(uint32_t *)((uintptr_t)g_xbox_mem_offset + g_esp) = g_xbox_code_lo + 0x1000;
         g_eax = 0xB0FF1E5u;
     }
-    *(volatile uint32_t *)((uintptr_t)g_xbox_mem_offset + 0x10) = 1;
+    *(volatile uint32_t *)((uintptr_t)g_xbox_mem_offset + 0xBAD00010u) = 1;     /* guest memory nothing maps */
     *(volatile int *)(uintptr_t)0x10 = 1;
 }

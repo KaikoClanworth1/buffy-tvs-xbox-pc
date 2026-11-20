@@ -119,21 +119,19 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 - **Everyone**: write to the log with `btvs_log("area", "fmt", ...)` (`#include "btvs.h"`), not `printf` /
   `fprintf(stderr)`. Things the player does or changes go to the trail too: `btvs_trail("event", "key=value ...")`.
-- **Graphics**: please define `int btvs_screenshot(const char *png_path)` (the frame last shown, from any thread,
+- **Graphics** (your `btvs_screenshot` / `btvs_screenshot_count` / `btvs_gpu_info` are used as they are; the rest of this line is history): `int btvs_screenshot(const char *png_path)` (the frame last shown, from any thread,
   returns 1 once the file is written, gives up within ~2 s if the game thread is frozen) and
   `int btvs_gpu_info(struct btvs_gpu *)` (the adapter the game draws with: name, driver, LUID, back buffer size).
   Both are declared in `btvs.h`; Logs links stand-ins that answer 0 until yours exist (`/alternatename`, so just
   define them: no edit on our side). Keep calling `xbox_HangMonitorBeat()` once per presented frame: the hang
   report, the trail's frame numbers and reports use it.
-- **Controls**: please define `btvs_input_record_begin(path)`, `btvs_input_record_flush()`,
-  `btvs_input_record_end()`, `btvs_input_playback(path)`, `btvs_input_playback_active()` (contract in `btvs.h`).
-  Logs calls `record_begin(<exe>tvs_input.rec)` at every trail anchor (boot, level loaded, load) and
-  `playback(<report>\input.rec)` when a replay reaches its anchor, both on the game thread or the watcher thread.
-  One record per frame the game reads the pads, so playback is frame for frame; put a small header with a
-  version and, if you can, the frame time the game was given (the replay is only as exact as that). The file
-  format is yours. Don't read real devices while a file plays. Stand-ins answer 0 until yours exist.
-  The report hotkey (F12 / left stick click) is read by Logs' own thread (so it works when the game is frozen):
-  it does not swallow the click.
+- **Controls**: thanks for the recorder. One more: `void btvs_input_record_flush(void)` (any thread: write
+  what is recorded so far and leave the recording running). Without it a report has to end the recording,
+  copy the file and begin a new one, so a second report before the next anchor has only a partial recording.
+  Logs links a do-nothing stand-in (`/alternatename`), so defining it is all that's needed. Logs calls
+  `record_begin(<exe>\btvs_input.rec)` at every trail anchor (boot, level loaded) and
+  `playback(<report>\input.rec)` when a replay reaches its anchor. If the file can carry the frame time the
+  game was given each frame, the replay can be made exact later (docs/logs.md, "How exact is it").
 - **Menu**: (1) the pause menu's Report a Problem page: call `btvs_report_prepare()` when the pause menu opens
   (screenshot before the menu covers the picture) and `btvs_report_create(text)` on confirm; show
   `btvs_report_last_path()`. (2) Memory page: `btvs_mem_stats(&m)` every frame is fine (`struct btvs_mem` in
@@ -150,3 +148,8 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   `btvs_log*.txt`, `btvs_trail*.txt`, `btvs_input.rec` appear beside the exe: an uninstaller should know them.
 - **Whoever regenerates next** (main checkout): nothing needed from Logs. The game hooks ride on
   `recomp_lookup_manual` (virtual calls); no `manual_functions.json` entry yet.
+
+- **Logs -> whoever owns `port/tools/build.sh`**: a git worktree has empty `xboxrecomp/third_party/*` folders
+  (submodules are not checked out in worktrees), so its first configure fails at glslang. Logs' worktree links
+  them to the main checkout's with folder junctions (`mklink /J`) and sets `git config --worktree
+  diff.ignoreSubmodules all`; `build.sh` could do the same.

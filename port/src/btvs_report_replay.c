@@ -71,6 +71,7 @@ void btvs_replay_init(void)
     const char *src = getenv("BTVS_REPLAY");
     char path[MAX_PATH], base[MAX_PATH], line[400], *p;
     size_t len;
+    int partial = 0;
     FILE *f;
 
     if (!src || !*src)
@@ -123,12 +124,17 @@ void btvs_replay_init(void)
         else if (!strcmp(line, "report_time")) s_r.report_time = atof(p);
         else if (!strcmp(line, "anchor_time")) s_r.anchor_time = atof(p);
         else if (!strcmp(line, "input") && *p) sprintf_s(s_r.input, MAX_PATH, "%s\\%s", s_r.folder, p);
+        else if (!strcmp(line, "input_complete") && atoi(p) == 0) partial = 1;
     }
     fclose(f);
     if (!s_r.anchor[0])
         strcpy_s(s_r.anchor, sizeof s_r.anchor, "boot");
     if (s_r.input[0] && !is_file(s_r.input))
         s_r.input[0] = 0;
+    if (s_r.input[0] && partial) {
+        btvs_log("replay", "the report's input recording does not begin at the anchor (an earlier report cut it): not played");
+        s_r.input[0] = 0;
+    }
 
     /* The report's settings and a throw-away copy of its save. */
     sprintf_s(path, MAX_PATH, "%s\\settings.ini", s_r.folder);
@@ -166,7 +172,7 @@ void btvs_replay_on_anchor(const char *event, const char *name)
     } else {
         s_r.done = 1;
         btvs_log("replay", "at the anchor (%s \"%s\") after %.1f s: %s. The pads are yours.", event, name, s_r.arrived_at,
-                 s_r.input[0] ? "the input player is not available (Controls)" : "the report has no input recording");
+                 s_r.input[0] ? "the recording could not be played (see the [INPUT] line)" : "no input recording to play");
     }
 }
 

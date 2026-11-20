@@ -35,7 +35,11 @@ def load_syms():
     path = os.path.join(main_checkout(), "xboxrecomp", "tools", "disasm", "output", "functions.json")
     if not os.path.isfile(path):
         return None
-    f = sorted((int(x["start"], 16), int(x["end"], 16), x["name"]) for x in json.load(open(path)))
+    try:
+        f = sorted((int(x["start"], 16), int(x["end"], 16), x["name"]) for x in json.load(open(path)))
+    except Exception as e:       # being rewritten by a regen right now
+        print("(no function names: %s can't be read: %s)" % (path, e))
+        return None
     return f, [a for a, _, _ in f]
 
 

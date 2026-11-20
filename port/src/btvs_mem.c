@@ -76,7 +76,8 @@ void btvs_gpu_text(char *buf, size_t n)
 {
     IDXGIFactory1 *f = NULL;
     IDXGIAdapter1 *a = NULL;
-    UINT i;
+    UINT i, seen = 0, k;
+    LUID luids[16];
     size_t len = 0;
 
     if (n)
@@ -88,7 +89,14 @@ void btvs_gpu_text(char *buf, size_t n)
     for (i = 0; IDXGIFactory1_EnumAdapters1(f, i, &a) == S_OK; i++) {
         DXGI_ADAPTER_DESC1 d;
         char name[128], drv[64];
-        if (SUCCEEDED(IDXGIAdapter1_GetDesc1(a, &d)) && !(d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) && len < n) {
+        int dup = 0;
+        if (SUCCEEDED(IDXGIAdapter1_GetDesc1(a, &d)))
+            for (k = 0; k < seen; k++)      /* one card can be listed once per display path */
+                if (luids[k].LowPart == d.AdapterLuid.LowPart && luids[k].HighPart == d.AdapterLuid.HighPart)
+                    dup = 1;
+        if (!dup && seen < 16)
+            luids[seen++] = d.AdapterLuid;
+        if (!dup && SUCCEEDED(IDXGIAdapter1_GetDesc1(a, &d)) && !(d.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) && len < n) {
             WideCharToMultiByte(CP_UTF8, 0, d.Description, -1, name, sizeof name, NULL, NULL);
             driver_text(a, drv, sizeof drv);
             _snprintf_s(buf + len, n - len, _TRUNCATE,
