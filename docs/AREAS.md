@@ -64,8 +64,11 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   `<exe>/XboxData/Cache`; the game's threads share one CPU (`BTVS_GAME_CPUS`). `btvs_quit()` /
   `btvs_on_quit()` are in `btvs.h`; the window gives Menu its `WM_CHAR` and Controls the wheel, the cursor
   capture and `btvs_input_frame()`.
-  Open, for whoever owns it: after the difficulty menu a new game fades to black and stays there (menu 13
-  still drawn, no file opened); the hard disk's `TDATA`/`UDATA` still land in `game_files/` (the runtime's
+  Open (Graphics is on it): after the difficulty menu a new game fades to black and stays there. Cause
+  found so far: the game has no map list. `TGame::Map_Set` asks the resource manager for the text resource
+  `GameInfo\MissionList` (it is in `pak/res_null.pak`), gets nothing, and so never makes its
+  `TMapSequencer`; the difficulty menu then has no map to launch (`GUI::TMenuDifficulty::OnUpdate`).
+  Also open: the hard disk's `TDATA`/`UDATA` still land in `game_files/` (the runtime's
   `xbox_path_set_hdd_dir` is not used yet).
 - **Graphics, 20 Nov 20:06: the new library is ready.** The main checkout (d9394d3) has a regen with every
   entry of `port/src/manual_functions.json` as of that commit (Graphics, Audio, Controls, Logs, Menu) and a

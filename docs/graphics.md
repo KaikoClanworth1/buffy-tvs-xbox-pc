@@ -17,6 +17,7 @@ Updated as the work goes; the newest facts are at the top of each section.
 | Frame dumps (`BTVS_SHOT_AT`, `BTVS_SHOT_EVERY`) | work (PNG, folder made if missing) |
 | `btvs_screenshot`, `btvs_gpu_info`, `btvs_fps` | in `btvs.h` |
 | Overlay text / rectangles for Menu and Logs | not done |
+| A level | **not reached**: a new game fades to black after the difficulty menu. The game has no map list: `TGame::Map_Set` asks for the text resource `GameInfo\MissionList` (in `pak/res_null.pak`), the resource manager returns nothing (`TResourceManager::LoadTextFile` is never called for it), no `TMapSequencer` is made, and `GUI::TMenuDifficulty::OnUpdate` has nothing to launch. Next: why the lookup in the resource tree fails |
 
 ## How it draws
 
