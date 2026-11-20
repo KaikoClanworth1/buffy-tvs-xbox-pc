@@ -184,11 +184,15 @@ port 2                     # following lines are player 2
   `START BACK UP DOWN LEFT RIGHT L3 R3`, `LSU LSD LSL LSR RSU RSD RSL RSR` (stick fully one way),
   `LS=x,y RS=x,y` (−1…1, up and right positive), `NONE`. Stick values are raw: they must exceed the
   game's 40 % dead zone to move anything.
+- **keys**: `K:<key name>` (`K:Space`, `K:W`, `K:MouseLeft`; the names of the bindings) holds a
+  keyboard key or mouse button. It goes through the bindings table like a real key press, for the
+  keyboard's player, and needs no focus: this is how the keyboard path is tested in hidden runs.
 - **for**: how long it is held (same unit as *when*; frame lines default to 9 frames).
 - **every**: repeat with this period until the next part starts.
 - **after `<name>`** starts a new part that begins when some code calls
   `btvs_input_script_mark("<name>")`; the earlier part stops then. Loading time therefore does not
-  matter. Marks the input layer places itself (see "Where the game is"): `title`, `menu` (main
+  matter. Parts run in the order written (a mark only starts the next part), so the same name can
+  be waited for again: `after menu1` … `after menu12` … `after menu1`. Marks the input layer places itself (see "Where the game is"): `title`, `menu` (main
   menu), `pause`, `menu<id>` for any menu, `level`.
 - `BTVS_INPUT_LOG=1` logs every change of the pad the game was given (`[INPUT] t … p1 pad btn …`).
 - `btvs_input_script_done()` is 1 when everything has played.
@@ -202,14 +206,45 @@ globals: the current menu id (`0x7F0408`; 1 main, 9 pause, 10 title, 15 resurrec
 object (`[[0x7D0090] + 0xF0]`, non-zero while a level runs). Changes are logged
 (`[INPUT] game: menu id 1`), named for scripts (`title`, `menu`, `pause`, `menu<id>`, `level`), and
 mouse look is allowed only while a level runs and neither the pause nor the resurrect menu is up.
-The addresses come from the Logs area's reading of `final.map` and are **not confirmed at run time**;
-the log lines of the first runs will show. `BTVS_INPUT_NO_PROBE=1` turns the probe off.
+The menu id is confirmed in the running game (title 10, main 1, new game 12, load 5, credits 11
+were all seen as the script walked through them). The player object has not been seen yet (no
+level loads). `BTVS_INPUT_NO_PROBE=1` turns the probe off.
+
+### Checking a run: `BTVS_INPUT_VERIFY=1`
+
+With this set, the port compares every pad it hands the game with what the game then stored in its
+own input table (the 22 values `TInputDeviceController::Poll` makes of a read: sticks after its
+dead zone, the eight analog buttons, the eight digital ones; layout in `btvs_input_xapi.c`). One
+log line per pad value:
+
+```
+[INPUT] verify p1 ok: btn 0000 an 0 0 0 0 0 0 128 40 L 0 0 R 0 0 -> LT=0.502 RT=0.157
+[INPUT] verify p1 MISMATCH: ...        <- the game stored something else
+```
+
+Ready-made scripts in `port/src/btvs_input_scripts/`:
+
+| Script | What |
+|---|---|
+| `all_inputs.txt` | every button, trigger and stick direction once, part values, values under the game's thresholds |
+| `all_keys.txt` | every default key and mouse button once (`K:` lines) |
+| `menu_path.txt` | title → main menu → New Game → back → Load → back → Credits → back, waiting on the menu marks |
+
+```bash
+bash port/tools/run.sh inputs 50 BTVS_INPUT_LOG=1 BTVS_INPUT_VERIFY=1 BTVS_SKIP_MOVIES=2 \
+     "BTVS_PAD_SCRIPT=$(pwd -W)/port/src/btvs_input_scripts/all_inputs.txt" "BTVS_SETTINGS_INI=<a scratch file>"
+grep "verify" port/runs/inputs.err
+```
+
+Run test games one after the other when both read the disc's sound files: two at once can stop
+at start with a sharing violation on `Sound\dsstdfx.bin` (seen once; not a Controls fault).
 
 ## Recording and playback (for Logs' trail)
 
 ```c
 btvs_input_record_begin(path);   // every pad the game reads from now on
 btvs_input_record_end();
+btvs_input_record_flush();       // what was recorded so far is on disk (the file stays open)
 btvs_input_playback(path);       // the game gets the recording instead of the player until it ends
 btvs_input_playback_active();  btvs_input_playback_stop();
 ```
@@ -225,8 +260,8 @@ Format (little-endian): `"BTVSINP1"`, `u32` version 1, `u32` reserved, then reco
 | end | tag `0xFF`; 4 varints (reads of each port since its last record); varint frames; varint ms |
 
 A record is written only when a port's pad changes, so a resting pad costs nothing and a minute of
-play is a few kilobytes. The file is flushed every second; one without an end record (a crash) plays
-to its last complete record.
+play is a few kilobytes. The file is flushed within a second of each record; one without an end
+record (a crash, or a test run's timed exit) plays to its last complete record.
 
 Playback is keyed by **read count** by default: the n-th `XInputGetState` of a port returns what
 the n-th returned when recording. That is exact with respect to the game's input sampling.
@@ -238,39 +273,69 @@ reproduced.
 the same spot also depends on the game: it samples pads on a 16 ms timer and consumes the buffered
 samples per frame, so frame timing (and anything random) can shift how samples fall into frames. A
 recording that starts at a level load or checkpoint and is replayed at the same frame rate is the
-best case. This has not been measured on the running game yet.
+best case. Measured so far only in the menus: a 29 s recording of `menu_path.txt` from boot, played
+back in a second run, gave the game the same 29 pad changes and the game went through the same
+menus in the same order (10, 1, 12, 1, 5, 1, 11, 1, 11, 1). Not measured in a level.
 
 ## Verified / not verified
 
-Verified (`btvs_input_test.exe` self-test, made-up clock and controller, no hardware):
+**In the running game** (hidden, muted test runs through `port/tools/run.sh`; no window, no focus,
+no hardware; 20 Nov 2026):
+
+- The XAPI replacements: the game calls `XInitDevices`, `XGetDevices`, `XInputOpen`,
+  `XGetDeviceChanges` and `XInputGetState`, gets a pad on port 1 and runs on; the stack handling is
+  right (thousands of reads per run, no crash).
+- **Every pad input through the script path** (`all_inputs.txt` with `BTVS_INPUT_VERIFY=1`): A, B,
+  X, Y, Black, White, both triggers (full and part values), Start, Back, both stick clicks, the
+  four d-pad directions and a diagonal, both sticks in all four directions and at part deflection.
+  Each was stored by the game with the expected value; values under the game's own thresholds
+  (analog 30, stick dead zone) were stored as nothing. 29 of 29, no mismatch.
+- **The keyboard and mouse-button mapping** (`all_keys.txt`): each of the 29 default keys held by the
+  script went through the bindings table and the same per-read function, and the game stored the
+  input it is bound to. The key *reading* itself (`GetAsyncKeyState`) is not part of this.
+- **Bindings and options from the settings file**: with `key_A=K`, `key_LookDown=Num5`, `invert_y=1`
+  in the file, Space no longer gave A, K gave A, Num5 looked up (inverted), I looked down.
+- **Menus driven by a script**: `menu_path.txt` went title → main → New Game → back → Load → back →
+  Credits → back, d-pad and left stick both moving the selection, waiting on the menu marks.
+- **Recording then playback** of that run: same pad changes, same menus, same order (above).
+- The menu id of the game-state probe (above).
+
+The game opens port 1 twice at start (`XInputOpen port 1 -> open` is logged twice); both get the
+same handle and it does no harm.
+
+**Self-test** (`btvs_input_test.exe`, made-up clock and controller):
 
 - controller → Xbox pad mapping (analog triggers, Black/White on LB/RB, digital buttons, stick
   dead-zone mapping onto the game's);
 - devices ignored without focus while port 1 stays connected;
-- script parsing and timing: seconds and frames, `+`, `for`, `every`, `after` marks, player 2;
+- script parsing and timing: seconds and frames, `+`, `for`, `every`, `after` marks, player 2, keys;
 - recording → playback gives identical pads read for read even when the clock stumbles; recording
   size (changes only);
 - capturing a controller binding, the resting pad during capture, save / reload / reset.
 
-Also run by hand on the dev PC: `btvs_input_test script "<text>" 5` plays a script in real time with
-`BTVS_NO_WINDOW=1` (no device is opened); `btvs_input_test live 3` loads `xinput1_4.dll`, finds and
-starts `SDL3.dll` (every function the backend uses resolves). No controller was plugged in at the
-time, so no real pad state has been seen.
+Also run by hand on the dev PC: `btvs_input_test live 3` loads `xinput1_4.dll`, finds and starts
+`SDL3.dll` (every function the backend uses resolves). No controller was plugged in.
 
-Not verified:
+**Not verified in the game, waiting on a level** (levels do not load yet, see `docs/graphics.md`):
 
-- **In the game**: nothing yet. The game does not boot to its main loop (see `docs/graphics.md`), and
-  the XAPI replacements need a regen. `btvs_input_xapi.c` compiles (`build.sh btvs_input_xapi_check`)
-  and the game links with the rest of the layer, but its stack layouts and return values were
-  written from the disassembly of the callers, not run.
-- Real hardware: an Xbox pad, a DualSense through SDL, rumble on either, hot-plug, keyboard and mouse
-  in the window. The SDL functions are declared by hand from the SDL3 ABI.
-- Mouse-look speed (the factor is a guess until the camera can be seen turning).
-- Keyboard rebinding capture (needs a focused window and key presses).
+- Rumble: the game made no `XInputSetState` call at the title or in the menus, so the replacement
+  has never been called. When it is, the log shows `[INPUT] rumble p1 left N right N`.
+- The `level` mark and the player-object address; mouse look being allowed only in play.
+- A pad script from boot into a level; whether a recording replays to the same spot in a level.
+
+**Needs the owner's hands** (a real window with focus and real devices; test runs never have either):
+
+- An Xbox pad through XInput: buttons, triggers, sticks, Guide; rumble strength and both motors.
+- A DualSense (or other non-Xbox pad) through SDL: mapping, rumble, the pad's name on the Controls page.
+- Hot-plug: unplugging and plugging pads while playing, a second pad becoming player 2.
+- Keyboard and mouse in the focused window: keys read, mouse look speed and feel (the factor is a
+  guess), the cursor hidden and held while looking and released in menus, the wheel as a binding.
+- Rebinding on the Controls page: capturing a key and a pad button, Escape and the 8 s timeout,
+  the new binding still there after a restart.
+- Input stopping when the window loses focus (Alt+Tab) and coming back cleanly.
 
 ## Not done
 
-- Confirming the game-state probe's addresses (marks and mouse-look gating depend on them).
-- A pad script that goes from boot through the main menu into a level (needs the game running).
+- A pad script that goes from boot through the main menu into a level (needs a level to load;
+  `menu_path.txt` covers the menus).
 - Cutscenes: the mouse is still captured during them (only menus and "no level" release it).
-- The Menu area's Controls page (the functions it needs are above).

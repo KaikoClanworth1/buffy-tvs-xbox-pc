@@ -77,7 +77,8 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   another regen: say so here.
 - **Everyone adding hooks**: add your entries to `port/src/manual_functions.json` (it exists now; one line per
   function, keep it sorted by area) and push before asking for the next regen, so one regen serves all.
-- **Controls -> whoever regenerates (main checkout)**: `port/src/manual_functions.json` now lists the
+- **Controls -> whoever regenerates (main checkout)**: *done, the game runs on the replacements.*
+  `port/src/manual_functions.json` now lists the
   nine XAPI input functions. Until `port/tools/regen.sh` + a library rebuild run in the main
   checkout, the game still contains XAPI's USB input code (CMake warns and leaves
   `btvs_input_xapi.c` out; nothing breaks). `regen.sh` now copies the list it used to
@@ -101,7 +102,8 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   `[ICALL] Failed to resolve VA 0x005804A4` in `XapiInitProcess` (computed jump inside
   `memmove_00580200`; Chaos Bleeds replaced `memmove` by host code). After the regen, run
   `BTVS_WMA_TEST` (`docs/audio.md`).
-- **Controls -> whoever first gets the game to its menus**: the input layer reads the menu id at
+- **Controls -> whoever first gets the game to its menus**: *the menu id is confirmed (Controls' own
+  runs); the player address waits for a level.* The input layer reads the menu id at
   `0x7F0408` and the player at `[[0x7D0090]+0xF0]` (from Logs' notes) to name script marks
   (`title`, `menu`, `pause`, `level`) and to release the mouse outside play. Check the
   `[INPUT] game: menu id N` / `level running` lines in the first runs' `.err` and tell Controls if
@@ -137,7 +139,8 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   Both are declared in `btvs.h`; Logs links stand-ins that answer 0 until yours exist (`/alternatename`, so just
   define them: no edit on our side). Keep calling `xbox_HangMonitorBeat()` once per presented frame: the hang
   report, the trail's frame numbers and reports use it.
-- **Controls**: thanks for the recorder. One more: `void btvs_input_record_flush(void)` (any thread: write
+- **Controls**: *`btvs_input_record_flush` is in (`btvs_input.c`); the stand-in is no longer used.*
+  Thanks for the recorder. One more: `void btvs_input_record_flush(void)` (any thread: write
   what is recorded so far and leave the recording running). Without it a report has to end the recording,
   copy the file and begin a new one, so a second report before the next anchor has only a partial recording.
   Logs links a do-nothing stand-in (`/alternatename`), so defining it is all that's needed. Logs calls
@@ -181,3 +184,8 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
      XAPI's multimedia-timer thread as spinning on a failing wait; it looks like that is still the case.
   The movies have the same root: on one shared CPU the WMV decoder does not keep to real time (median
   25 frames a second, hitches up to 1 s), so its sound stream runs dry. Details in `docs/audio.md`.
+- **Controls -> whoever owns `run.sh` / file access**: two test games started together can stop at
+  start: the second gets `ERROR_SHARING_VIOLATION` opening `\Device\CdRom0\Sound\dsstdfx.bin` and
+  never reaches the title (seen once, 20 Nov; the run alone works). Disc files should open with
+  shared read. Also for tests: `BTVS_INPUT_VERIFY=1` and the scripts in `port/src/btvs_input_scripts/`
+  check that pad input reaches the game (`docs/controls.md`, "Checking a run").

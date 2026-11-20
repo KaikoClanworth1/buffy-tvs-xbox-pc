@@ -1,13 +1,14 @@
-# Title -> main menu -> Start Game -> back -> down the main menu and into whatever is there -> back.
+# Title -> main menu -> first item -> back -> down the main menu, into each item and back.
 # The log shows the path as "[INPUT] game: menu id N" lines.
 after title
 hold 0.2
 3.0 START
 after menu
-2.0 A                  # first item: Start Game (menu 2)
-after menu2
+2.0 A                  # first item: New Game (menu 12, name the session)
+after menu12
 2.0 B                  # back to the main menu
-+2.0 DOWN
+after menu1
+2.0 DOWN
 +1.0 A
 +3.0 B
 +2.0 DOWN

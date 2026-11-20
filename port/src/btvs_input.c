@@ -760,20 +760,6 @@ int btvs_input_script_load_file(const char *path)
     return n;
 }
 
-void btvs_input_script_mark(const char *name)
-{
-    int i;
-    LOCK();
-    for (i = 1; i < s_nseg; i++)
-        if (!s_seg[i].fired && !_stricmp(s_seg[i].mark, name)) {
-            s_seg[i].fired = 1;
-            s_seg[i].t0 = now_ms();
-            s_seg[i].f0 = s_frame;
-            IN_LOG("pad script: \"%s\" reached", name);
-        }
-    UNLOCK();
-}
-
 static int script_current(void)
 {
     int i, cur = 0;
@@ -781,6 +767,22 @@ static int script_current(void)
         if (s_seg[i].fired)
             cur = i;
     return cur;
+}
+
+/* Parts run in the order they are written: a mark only starts the part that
+ * comes next, so the same name can be waited for more than once. */
+void btvs_input_script_mark(const char *name)
+{
+    int i;
+    LOCK();
+    i = script_current() + 1;
+    if (i < s_nseg && !_stricmp(s_seg[i].mark, name)) {
+        s_seg[i].fired = 1;
+        s_seg[i].t0 = now_ms();
+        s_seg[i].f0 = s_frame;
+        IN_LOG("pad script: \"%s\" reached", name);
+    }
+    UNLOCK();
 }
 
 int btvs_input_script_done(void)
@@ -892,6 +894,7 @@ static struct {
     btvs_pad last[BTVS_PORTS];
     uint32_t frame;
     double ms, flushed;
+    int unwritten;                  /* records since the last flush */
 } R;
 
 static void put_varint(FILE *f, uint32_t v)
@@ -908,9 +911,14 @@ static void record_poll(int port, int connected, const btvs_pad *g)
     if (!R.f)
         return;
     R.polls[port]++;
+    t = now_ms();
+    if (R.unwritten && t - R.flushed > 1000.0) {    /* a crash loses at most a second */
+        fflush(R.f);
+        R.flushed = t;
+        R.unwritten = 0;
+    }
     if (R.have[port] && R.conn[port] == connected && !memcmp(g, &R.last[port], sizeof *g))
         return;
-    t = now_ms();
     if (!R.have[port]) {
         mask = 0x1FFF;
     } else {
@@ -940,10 +948,7 @@ static void record_poll(int port, int connected, const btvs_pad *g)
     R.last[port] = *g;
     R.frame = s_frame;
     R.ms += floor(t - R.ms + 0.5);
-    if (t - R.flushed > 1000.0) {               /* a crash loses at most a second */
-        fflush(R.f);
-        R.flushed = t;
-    }
+    R.unwritten = 1;
 }
 
 static void record_end_locked(void)
@@ -997,6 +1002,7 @@ void btvs_input_record_flush(void)
     if (R.f) {
         fflush(R.f);
         R.flushed = now_ms();
+        R.unwritten = 0;
     }
     UNLOCK();
 }

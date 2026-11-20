@@ -243,8 +243,9 @@ void XInputClose_006105E3(void)
  * level is running, read from the game's own globals. It names moments for pad
  * scripts ("title", "menu", "pause", "menu<id>", "level") and keeps the mouse
  * free outside play. Addresses are from the Logs area's reading of final.map
- * and have NOT been seen at run time yet: every change is logged so the first
- * runs show whether they are right. BTVS_INPUT_NO_PROBE=1 turns it off. */
+ * (the menu id is confirmed in the running game, the player object not yet: no
+ * level loads). Every change is logged, so a run shows whether they are
+ * right. BTVS_INPUT_NO_PROBE=1 turns it off. */
 #define G_MENU_ID   0x007F0408u     /* GUI s_menuID: 1 main, 9 pause, 10 title, 15 resurrect (docs/menu.md) */
 #define G_GAME      0x007D0090u     /* gGame (TGame *) */
 #define GAME_PLAYER 0xF0u           /* TGO::GetPlayer() = [gGame + 0xF0] */
