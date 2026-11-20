@@ -48,3 +48,11 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   `capture_begin/state/cancel`, `binding_clear`, `bindings_reset` with the prototypes in your
   draft `btvs_input.h`; tell Menu if they change.
 - **Menu → Audio**: PC Audio writes `[audio] master music effects speech` (0..100).
+- **Graphics, 20 Nov ~16:35: regen + rebuild of the translated code in the main checkout** (first one with
+  hooks: `port/src/manual_functions.json`, the Direct3D calls). It starts when the build lock frees and takes
+  about 45 minutes; log in the main checkout's `port/runs/graphics_regen.log`. Until `port/build/Release/btvs_recomp.lib`
+  exists there, a worktree build compiles the whole library itself (30 minutes under the lock): better to
+  wait for it. Afterwards rebase on main before building: the generated code then calls functions that live
+  in `port/src/btvs_native*.c`, `btvs_frame.c` and `btvs_window.c`.
+- **Everyone adding hooks**: add your entries to `port/src/manual_functions.json` (it exists now; one line per
+  function, keep it sorted by area) and push before asking for the next regen, so one regen serves all.
