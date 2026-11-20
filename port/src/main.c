@@ -359,6 +359,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         return 1;
     }
     printf("XBE loaded: %zu bytes\n", xbe_size);
+    {   /* this exe is one release's code: refuse another's data (btvs_xbecheck.c) */
+        extern int btvs_xbe_check(const void *xbe, size_t size);
+        if (!btvs_xbe_check(xbe_data, xbe_size))
+            return 1;
+    }
 
     /* Step 2: Initialize Xbox memory layout */
     printf("Initializing Xbox memory layout...\n");

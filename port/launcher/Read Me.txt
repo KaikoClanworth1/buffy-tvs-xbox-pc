@@ -1,0 +1,66 @@
+BUFFY THE VAMPIRE SLAYER (Xbox, 2002) - PC port
+================================================
+
+This is an unofficial PC version of the 2002 Xbox game. It contains no game
+data: you need your own Xbox disc of the game, as an image file (.iso).
+
+THIS IS AN EARLY DEVELOPMENT BUILD. Installing works. The game itself does
+not start yet.
+
+
+INSTALL
+-------
+1. Start "Buffy Launcher.exe".
+2. Under "Your Xbox disc image", press Browse and choose the .iso of your
+   disc. The launcher tells you if it is the right game.
+3. Under "Install to", press Browse and choose a folder (about 2 GB).
+4. Press INSTALL and wait for the bar to finish.
+5. Press PLAY.
+
+Your disc image is only read. It is never changed, and you can delete it or
+move it away after installing.
+
+The next time you start the launcher it opens straight on PLAY.
+
+
+WHICH DISC
+----------
+The Xbox version, European (PAL) release. If your disc is another release
+(for example the North American one) the launcher says so and does not
+install: that release needs its own build of the port.
+The PlayStation 2 and GameCube do not have this game; the 2003 sequel,
+Chaos Bleeds, is a different game with its own port.
+
+
+SETTINGS AND CONTROLS
+---------------------
+Everything is set inside the game, in its own Options menu. The launcher
+has no settings.
+(Not there yet in this build.)
+
+
+SAVES
+-----
+Your saves are in the "SaveData" folder inside the game folder. Installing
+again or updating never touches them. To back them up, copy that folder.
+
+
+IF SOMETHING GOES WRONG
+-----------------------
+- "This is another release of the game": see WHICH DISC above.
+- "Default.xbe has been changed or damaged": the image was modified
+  (patched, trained, or a bad copy). Use an unmodified image of your disc.
+- "Not enough free space": the game needs about 2 GB on the drive you chose.
+- The game closes or will not start: the launcher's "Reports folder" opens
+  the folder where the game keeps problem reports, and "Game folder" holds
+  btvs_log.txt, which records what the game did.
+
+
+UNINSTALL
+---------
+Delete the game folder. (Copy "SaveData" out first if you want your saves.)
+Nothing is written anywhere else on your PC.
+
+
+This is a fan project, not affiliated with or endorsed by the makers or
+owners of the game. No game material is included.

@@ -67,6 +67,7 @@ set(GAME_SOURCES
     src/recomp_manual.c
     src/btvs_settings.c
     src/btvs_menu.c
+    src/btvs_xbecheck.c
 )
 # Graphics area. Its files hook functions named in src/manual_functions.json,
 # so they join the build once the generated code has those hooks (after the
@@ -171,4 +172,12 @@ if(EXISTS "${BTVS_SDL_DIR}/SDL3.dll")
         add_custom_command(TARGET ${_t} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${BTVS_SDL_DIR}/SDL3.dll" "$<TARGET_FILE_DIR:${_t}>")
     endforeach()
+
+# -- "Buffy Launcher.exe": install from the disc image, then Play (launcher/) --
+add_executable(buffy_tvs_launcher WIN32 launcher/btvs_launcher.c)
+set_target_properties(buffy_tvs_launcher PROPERTIES OUTPUT_NAME "Buffy Launcher")
+target_compile_definitions(buffy_tvs_launcher PRIVATE UNICODE _UNICODE)
+target_link_libraries(buffy_tvs_launcher PRIVATE comdlg32 shell32 ole32 uuid dwmapi bcrypt)
+if(MSVC)
+    target_link_options(buffy_tvs_launcher PRIVATE /ENTRY:wWinMainCRTStartup)
 endif()

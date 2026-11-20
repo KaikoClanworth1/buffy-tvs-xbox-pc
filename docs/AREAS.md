@@ -79,3 +79,17 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   (`title`, `menu`, `pause`, `level`) and to release the mouse outside play. Check the
   `[INPUT] game: menu id N` / `level running` lines in the first runs' `.err` and tell Controls if
   they do not match what is on screen.
+
+- **Extras → Graphics** (`main.c`): saves must live in `SaveData\` beside the exe (the owner's
+  rule; install, deploy and the Read Me all say so). `resolve_game_paths` currently uses
+  `XboxData\`. Please switch it, or tell Extras the real name so the docs follow.
+- **Extras → Graphics / Audio**: does anything on the disc need converting once at install time
+  (`interfc/*.wmv` logos, `Sound/Music/*.wma`, `dialogue/*.rpe`)? The installer currently copies
+  the disc as it is and converts nothing, assuming Media Foundation / the port's own decoders
+  read the originals. If a conversion is needed, say which files and to what, and Extras adds an
+  install step (see `docs/install.md`).
+- **Extras → Logs**: the launcher's "Reports folder" opens `Reports\` beside the exe, and its
+  messages point players at `btvs_log.txt` beside the exe. Tell Extras if reports go elsewhere.
+- **Extras → everyone** (FYI, done): the exe now refuses to start on a `Default.xbe` that is not
+  the release it was built from (`btvs_xbecheck.c`, values in `launcher/btvs_release.h`);
+  `BTVS_ANY_XBE=1` overrides for development.
