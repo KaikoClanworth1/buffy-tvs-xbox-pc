@@ -297,12 +297,32 @@ static void live(double seconds, int device)
     struct btvs_audio_stats st;
     int v = voice_for(s);
 
+    uint64_t under0;
+    int i;
+
     QueryPerformanceFrequency(&f);
-    Sleep(200);                                         /* let the device start */
+    /* let the device start: wait until the clock has been running for half a
+     * second (the first XAudio2 session of a boot can take seconds to open) */
+    for (i = 0; i < 100 && btvs_audio_clock() < BTVS_AUDIO_RATE / 2; i++) Sleep(100);
+    btvs_audio_stats(&st);
+    under0 = st.underruns;
     btvs_audio_voice_play(v, 1);
     QueryPerformanceCounter(&a);
     c0 = btvs_audio_clock();
-    Sleep((DWORD)(seconds * 1000.0));
+    {   /* watch the clock in 100 ms steps and report any step that stalls */
+        int steps = (int)(seconds * 10.0), k;
+        uint64_t prev = c0;
+        for (k = 0; k < steps; k++) {
+            uint64_t now;
+            Sleep(100);
+            now = btvs_audio_clock();
+            if (now - prev < BTVS_AUDIO_RATE / 25)
+                printf("  stall: at %.1f s only %d ms were mixed in 100 ms
+", (k + 1) / 10.0,
+                       (int)((now - prev) * 1000 / BTVS_AUDIO_RATE));
+            prev = now;
+        }
+    }
     QueryPerformanceCounter(&b);
     c1 = btvs_audio_clock();
     cur = btvs_audio_voice_cursor(v);
@@ -311,14 +331,14 @@ static void live(double seconds, int device)
     btvs_audio_stats(&st);
     printf("live: wall %.3f s, mixed %.3f s (%+.1f ms), audible %d, underruns %llu, peak %.3f\n",
            wall, mixed, (mixed - wall) * 1000.0, btvs_audio_audible(),
-           (unsigned long long)st.underruns, st.peak);
+           (unsigned long long)(st.underruns - under0), st.peak);
     check(fabs(mixed - wall) < 0.08, "the mixer does not follow real time", "clock");
     expect = fmod(mixed * s->rate, (double)sound_frames(s)) / (double)sound_frames(s) * s->bytes;
     check(fabs((double)cur - expect) < s->bytes * 0.02 + 0.1 * s->rate ||
           fabs((double)cur - expect) > s->bytes * 0.9, "cursor does not follow real time", s->name);
     if (device) {
         check(btvs_audio_audible(), "the XAudio2 device did not open", "device");
-        check(st.underruns == 0, "the device queue ran empty", "device");
+        check(st.underruns == under0, "the device queue ran empty", "device");
         check(st.peak == 0.0f, "the zero-volume mix is not silent", "device");
     } else {
         check(st.peak > 0.001f, "silent mix", s->name);

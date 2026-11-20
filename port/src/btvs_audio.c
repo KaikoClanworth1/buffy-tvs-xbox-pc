@@ -16,6 +16,7 @@
 #include <objbase.h>
 #include <mmreg.h>
 #include <xaudio2.h>
+#include <avrt.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -26,11 +27,12 @@
 
 #pragma comment(lib, "xaudio2.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "avrt.lib")
 
 #define MAX_VOICES     384
 #define MAX_PACKETS    128
 #define DEV_BUFFERS    8             /* ring of submit buffers */
-#define DEV_QUEUE      4             /* periods kept queued: 40 ms */
+#define DEV_QUEUE      5             /* periods kept queued: 50 ms */
 
 #define PKT_PENDING    0x8000000Au
 #define PKT_FLUSHED    0x80004004u
@@ -476,10 +478,16 @@ static DWORD WINAPI mixer_thread(LPVOID arg)
     (void)arg;
 
     have_com = SUCCEEDED(CoInitializeEx(NULL, COINIT_MULTITHREADED));
-    if (!s_muted && device_open())
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
-    else
+    if (!s_muted && device_open()) {
+        /* The thread that feeds the device must not wait behind the game's
+         * own threads: register it with the multimedia scheduler (it uses
+         * well under 1% of a core), or at least raise it. */
+        DWORD task = 0;
+        if (!AvSetMmThreadCharacteristicsA("Pro Audio", &task))
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    } else {
         silent_t0 = now_seconds();
+    }
     if (s_muted) alog("muted (BTVS_MUTE): no audio device opened");
     else if (s_xsrc) alog("XAudio2 output: 48000 Hz stereo, %d ms periods, %d queued",
                           BTVS_AUDIO_PERIOD * 1000 / BTVS_AUDIO_RATE, DEV_QUEUE);

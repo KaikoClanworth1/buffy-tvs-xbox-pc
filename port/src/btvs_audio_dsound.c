@@ -355,7 +355,9 @@ HOOK(IDirectSoundBuffer_SetBufferData_005A8837)
             /* Dialogue lines are RIFF files with lip-sync chunks ("wrds",
              * "phon") right after the sample data; effects have none. That
              * is what tells speech from effects for the volume sliders. */
-            const uint8_t *end = (const uint8_t *)XBOX_PTR(data + bytes + (bytes & 1));
+            /* (CSample keeps the whole file and points into it; its chunk
+             * walk does not pad odd sizes.) */
+            const uint8_t *end = (const uint8_t *)XBOX_PTR(data + bytes);
             int speech = !memcmp(end, "wrds", 4) || !memcmp(end, "phon", 4);
             btvs_audio_voice_category(v, speech ? BTVS_CAT_SPEECH : BTVS_CAT_EFFECTS);
             btvs_audio_voice_data(v, (const void *)XBOX_PTR(data), bytes);
