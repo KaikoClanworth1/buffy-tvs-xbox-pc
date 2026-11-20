@@ -111,7 +111,12 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
             return btvs_wma_test_cb;
     }
 
-    return (recomp_func_t)0;
+    /* Logs: the trail's wrappers around a few of the game's virtual functions
+     * (level loaded, menu screen, death, the once-a-frame tick): btvs_trail.c. */
+    {
+        extern recomp_func_t btvs_trail_lookup(uint32_t va);
+        return btvs_trail_lookup(xbox_va);
+    }
 }
 
 /* ── ICALL failure logging ─────────────────────────────────── */

@@ -71,6 +71,13 @@ set(GAME_SOURCES
     src/btvs_audio_dsound.c
     src/btvs_wma.c
     src/btvs_xbecheck.c
+    # Logs: the log, crash/hang reports, the trail, Report a Problem, memory statistics
+    src/btvs_log.c
+    src/btvs_trail.c
+    src/btvs_mem.c
+    src/btvs_report.c
+    src/btvs_report_crash.c
+    src/btvs_report_replay.c
 )
 # Graphics area. Its files hook functions named in src/manual_functions.json,
 # so they join the build once the generated code has those hooks (after the
@@ -99,6 +106,15 @@ message(STATUS "Graphics area in the build: ${BTVS_GRAPHICS}")
 
 add_executable(${PROJECT_NAME} WIN32 ${GAME_SOURCES})
 
+# btvs_build_info.h: the git commit, looked up at every build (Logs: the log
+# header and every report name the exact build).
+add_custom_target(btvs_build_info
+    COMMAND ${CMAKE_COMMAND} -DOUT=${CMAKE_BINARY_DIR}/btvs_build_info.h -DSRC=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/btvs_build_info.cmake
+    BYPRODUCTS ${CMAKE_BINARY_DIR}/btvs_build_info.h)
+add_dependencies(${PROJECT_NAME} btvs_build_info)
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_BINARY_DIR})
+
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${BTVS_GEN_DIR} ${BTVS_GEN_DIR}/..
@@ -113,7 +129,7 @@ endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE
     btvs_recomp
     xboxrecomp
-    d3d11 dxgi dxguid xinput winmm dbghelp
+    d3d11 dxgi dxguid xinput winmm dbghelp pdh
 )
 
 # -- Controls (docs/controls.md) -----------------------------------------------

@@ -40,6 +40,7 @@
 
 /* xboxrecomp runtime headers */
 #include <xbox/xboxrecomp.h>
+#include "btvs_log.h"   /* the Logs area: btvs_log, crash reports, Report a Problem */
 
 /*
  * If xboxrecomp.h is not an umbrella header in your setup, include
@@ -101,7 +102,7 @@ static void resolve_game_paths(void)
     if (slash) *slash = '\0';
     strcpy_s(g_game_dir, MAX_PATH, (env && *env) ? env : exe_dir);
     sprintf_s(g_xbe_path, MAX_PATH, "%s\\Default.xbe", g_game_dir);
-    sprintf_s(g_save_dir, MAX_PATH, "%s\\XboxData", exe_dir);
+    strcpy_s(g_save_dir, MAX_PATH, btvs_save_dir());   /* <exe>\XboxData, or BTVS_SAVE_DIR */
 }
 
 #define YOUR_GAME_XBE_PATH      g_xbe_path
@@ -241,48 +242,16 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
             }
         }
 
-        fprintf(stderr, "[CRASH] Access violation at RIP=0x%llX, fault addr=0x%llX (%s)\n",
-            (unsigned long long)ep->ContextRecord->Rip,
-            (unsigned long long)fault_addr,
-            ep->ExceptionRecord->ExceptionInformation[0] ? "write" : "read");
-        fprintf(stderr, "  Xbox regs: eax=0x%08X ecx=0x%08X edx=0x%08X esp=0x%08X\n",
-            g_eax, g_ecx, g_edx, g_esp);
-        fprintf(stderr, "  Xbox regs: ebx=0x%08X esi=0x%08X edi=0x%08X\n",
-            g_ebx, g_esi, g_edi);
-        fprintf(stderr, "  Xbox VA of fault: 0x%08X\n",
-            (uint32_t)(fault_addr - (uintptr_t)g_xbox_mem_offset));
-        print_guest_context((void *)ep->ContextRecord->Rip);
+        /* The readable report (crashes\\crash_*.txt, the log): btvs_report_crash.c. */
+        btvs_crash_report(ep, 0);
         {
             /* the thread's TIB: SEH chain, fs:[4] (the CRT's and XAPI's per-thread data), KTHREAD */
             extern RECOMP_TLS uint32_t g_fs_base;
             const uint32_t *tib = (const uint32_t *)((uintptr_t)g_xbox_mem_offset + g_fs_base);
-            fprintf(stderr, "  fs base 0x%08X: [0]=%08X [4]=%08X [8]=%08X [20]=%08X [28]=%08X, thread %lu\n", g_fs_base,
-                    tib[0], tib[1], tib[2], tib[8], tib[10], GetCurrentThreadId());
+            if (g_fs_base)
+                btvs_log("crash", "fs base 0x%08X: [0]=%08X [4]=%08X [8]=%08X [20]=%08X [28]=%08X, thread %lu", g_fs_base,
+                         tib[0], tib[1], tib[2], tib[8], tib[10], GetCurrentThreadId());
         }
-
-        /*
-         * TODO: Add game-specific diagnostics here. Examples:
-         *
-         * Dump CRT heap handle:
-         *   uint32_t heap = *(uint32_t *)((uint8_t *)g_xbox_mem_offset + HEAP_HANDLE_VA);
-         *   fprintf(stderr, "  CRT heap handle: 0x%08X\n", heap);
-         *
-         * Dump game state:
-         *   uint32_t state = *(uint32_t *)((uint8_t *)g_xbox_mem_offset + GAME_STATE_VA);
-         *   fprintf(stderr, "  Game state: %u\n", state);
-         */
-
-        /* Print native stack return addresses for debugging */
-        {
-            uintptr_t *sp = (uintptr_t *)ep->ContextRecord->Rsp;
-            fprintf(stderr, "  Native stack (first 8 return addrs):\n");
-            for (int i = 0; i < 64 && sp[i]; i++) {
-                if (sp[i] >= 0x140000000ULL && sp[i] < 0x150000000ULL) {
-                    fprintf(stderr, "    [%d] 0x%llX\n", i, (unsigned long long)sp[i]);
-                }
-            }
-        }
-        fflush(stderr);
     }
 
     return EXCEPTION_CONTINUE_SEARCH;
@@ -296,8 +265,7 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
 static DWORD WINAPI exit_after_thread(LPVOID arg)
 {
     Sleep((DWORD)(uintptr_t)arg * 1000);
-    fprintf(stderr, "[BOOT] BTVS_EXIT_AFTER reached, exiting\n");
-    fflush(stderr);
+    btvs_log("boot", "BTVS_EXIT_AFTER reached, exiting");
     TerminateProcess(GetCurrentProcess(), 0);
     return 0;
 }
@@ -330,6 +298,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     /* Unbuffered output for immediate visibility during debugging */
     apply_test_guards();
+    btvs_log_init();        /* btvs_log.txt: from here on everything goes to the log */
 #ifdef BTVS_GRAPHICS
     {
         void btvs_window_boot(void);
@@ -338,10 +307,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 #endif
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
+    btvs_replay_init();     /* BTVS_REPLAY: before the settings and the save folder are read */
 
-    printf("=== Buffy the Vampire Slayer (Xbox, 2002) - Static Recompilation ===\n");
     resolve_game_paths();
-    printf("Loading XBE...\n");
+    btvs_log("boot", "game folder: %s", g_game_dir);
+    btvs_log("boot", "save folder: %s", g_save_dir);
 
     /* Install VEH handler (first handler in chain) */
     /* Load symbols up front rather than from inside the handler: at fault
@@ -350,6 +320,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME);
     SymInitialize(GetCurrentProcess(), NULL, TRUE);
     AddVectoredExceptionHandler(1, veh_handler);
+    btvs_crash_init();      /* guest names, the unhandled-exception report, the hang watch */
+    btvs_trail_init();
+    btvs_report_init();     /* Report a Problem: hotkey thread */
 
     /* Step 1: Load XBE */
     if (!load_xbe(YOUR_GAME_XBE_PATH, &xbe_data, &xbe_size)) {
@@ -358,7 +331,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                     "Recomp", MB_ICONERROR);
         return 1;
     }
-    printf("XBE loaded: %zu bytes\n", xbe_size);
+    btvs_log("boot", "XBE loaded: %zu bytes", xbe_size);
     {   /* this exe is one release's code: refuse another's data (btvs_xbecheck.c) */
         extern int btvs_xbe_check(const void *xbe, size_t size);
         if (!btvs_xbe_check(xbe_data, xbe_size))
@@ -366,7 +339,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
 
     /* Step 2: Initialize Xbox memory layout */
-    printf("Initializing Xbox memory layout...\n");
     if (!xbox_MemoryLayoutInit(xbe_data, xbe_size)) {
         MessageBoxA(NULL, "Failed to initialize Xbox memory layout.\n"
                     "The required virtual address range may be unavailable.",
@@ -382,7 +354,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         btvs_native_start();        /* the native renderer's device (btvs_native.c) */
     }
 #endif
-    printf("Xbox memory mapped. Offset: 0x%llX\n", (unsigned long long)g_xbox_mem_offset);
+    btvs_log("boot", "Xbox memory mapped, offset 0x%llX", (unsigned long long)g_xbox_mem_offset);
 
     /* Bring up the emulated APU.
      *
@@ -393,12 +365,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * base. */
     if (getenv("RECOMP_AC97_READY")) {
         g_apu_state = mcpx_apu_init_standalone((uint8_t *)xbox_GetMemoryBase());
-        fprintf(stderr, "[BOOT] emulated APU %s\n",
-                g_apu_state ? "up" : "FAILED to initialise");
+        btvs_log("boot", "emulated APU %s", g_apu_state ? "up" : "FAILED to initialise");
     }
 
     /* Step 3: Initialize Xbox kernel */
-    printf("Initializing Xbox kernel replacement...\n");
     xbox_kernel_init();
 
     /* Step 4: Set game directory for file I/O path translation */
@@ -408,7 +378,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
 
     /* Step 5: Initialize kernel bridge (thunk table in Xbox memory) */
-    printf("Initializing kernel bridge...\n");
     xbox_kernel_bridge_init();
 
     /* Step 6: Initialize stack */
@@ -428,9 +397,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * or by looking for the CRT's __active_heap global in the data section.
      */
 
-    printf("\n=== Initialization complete ===\n");
-    printf("Entry point: 0x%08X\n", YOUR_GAME_ENTRY_POINT);
-    printf("ESP: 0x%08X\n", g_esp);
+    btvs_log("boot", "kernel and memory ready; entry point 0x%08X, esp 0x%08X", YOUR_GAME_ENTRY_POINT, g_esp);
 
     /* Build the flat dispatch table before the guest runs.
      *
@@ -444,8 +411,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
      * Optional by design: if the allocation fails the search still works,
      * so a failure is worth one line and not a fatal error. */
     if (!recomp_dispatch_init())
-        fprintf(stderr, "[BOOT] flat dispatch unavailable; "
-                        "indirect calls will use the binary search\n");
+        btvs_log("boot", "flat dispatch unavailable; indirect calls will use the binary search");
 
     /* Audio self-test: BTVS_WMA_TEST=<file.wma> decodes one music file with
      * the game's own (translated) WMA decoder, writes BTVS_AUDIO_DUMP and
@@ -468,12 +434,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     xbox_WatchdogStart();
 
     /* Step 7: Call the recompiled entry point */
-    printf("\nStarting game...\n");
-    fflush(stdout);
+    btvs_crash_test_now();  /* BTVS_TEST_CRASH=1 */
+    btvs_log("boot", "starting the game");
+    btvs_trail("game_start", NULL);
 
     xbe_entry_point();
 
-    printf("\nGame returned. Cleaning up...\n");
+    btvs_log("boot", "the game returned; cleaning up");
+    btvs_trail("exit", NULL);
 
     /* Cleanup */
     xbox_kernel_shutdown();
@@ -489,7 +457,7 @@ static BOOL load_xbe(const char *path, void **out_data, size_t *out_size)
 {
     FILE *f = fopen(path, "rb");
     if (!f) {
-        fprintf(stderr, "Cannot open XBE: %s\n", path);
+        btvs_log("boot", "Cannot open XBE: %s", path);
         return FALSE;
     }
 

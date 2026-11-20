@@ -83,6 +83,9 @@ void xbox_SetMapSize(size_t bytes);
  * See the implementation for why reservations must not come from the heap. */
 uint32_t xbox_ReserveAlloc(uint32_t size, uint32_t align);
 
+/* The title's heap right now: bytes and blocks in use, and its high-water mark. */
+void xbox_HeapStats(uint32_t *used_bytes, uint32_t *blocks, uint32_t *high_water);
+
 /* Bounds of the guest's executable sections, derived from the XBE at load.
  *
  * recomp_types.h declares these too, for RECOMP_ICALL_IS_CODE. They are

@@ -48,4 +48,61 @@ int  btvs_menu_page_open(void);
  * Tests:    BTVS_PAD_SCRIPT, btvs_input_script_mark("menu") */
 #include "btvs_input.h"
 
+#include <stddef.h>
+
+/* ── Logs → everyone ───────────────────────────────────────────────────────
+ * btvs_log: one line into btvs_log.txt beside the exe ("[  12.345] [area] text"),
+ * from any thread, at any time (also before main's btvs_log_init). A test run
+ * also gets the line on stderr. `area` is a short lower-case word: "gfx",
+ * "audio", "input", "menu", "boot", ... A trailing newline is not needed.
+ *
+ * btvs_trail: one event in the record of what the player did (btvs_trail.txt,
+ * part of every report). `event` is one word; the rest is "key=value" pairs:
+ *     btvs_trail("menu", "screen=%s", name);
+ *     btvs_trail("setting", "%s.%s=%s", section, key, value);
+ * The events "level", "checkpoint" and "load" are anchors: places a replay
+ * can start from (the input recording restarts at each one). */
+void btvs_log(const char *area, const char *fmt, ...);
+void btvs_trail(const char *event, const char *fmt, ...);
+
+/* ── Logs → Menu ───────────────────────────────────────────────────────────
+ * Report a Problem. btvs_report_prepare() when the pause menu opens (takes
+ * the screenshot while the game picture is still on screen);
+ * btvs_report_create(text) when the player confirms: writes
+ * reports\<yyyymmdd-hhmmss>\ and a .zip of it beside the exe and returns 1.
+ * Nothing is sent anywhere. Both may be called from any thread.
+ * btvs_report_last_path(): the folder of the newest report made this run
+ * ("" if none), to show to the player. */
+void btvs_report_prepare(void);
+int btvs_report_create(const char *player_text);
+const char *btvs_report_last_path(void);
+
+/* Memory statistics, cheap enough to call every frame (sampled once a second
+ * on a thread of its own). Sizes in bytes; 0 = not known. */
+struct btvs_mem {
+    /* the PC */
+    uint64_t ram_total, ram_available;
+    /* this game */
+    uint64_t proc_working_set;          /* Task Manager, Details: "Working set (memory)" */
+    uint64_t proc_private_working_set;  /* Task Manager's "Memory" column */
+    uint64_t proc_commit;               /* "Commit size" */
+    uint64_t proc_peak_working_set;
+    /* the graphics card the game draws with */
+    char gpu_name[128];
+    uint64_t vram_total;                /* dedicated video memory */
+    uint64_t vram_used_system;          /* in use by every program (0 if Windows won't say) */
+    uint64_t vram_used;                 /* in use by this game */
+    uint64_t vram_budget;               /* what Windows lets this game use right now */
+    uint64_t vram_shared_used;          /* this game's use of shared (system) memory */
+    /* the game's own memory: the Xbox's 64 MB as the game sees it */
+    uint64_t guest_ram_total;
+    int game_heap_valid;                /* 0 until the game's allocator is up */
+    uint64_t game_heap_used;            /* bytes the game has allocated */
+    uint64_t game_heap_peak;
+    uint32_t game_heap_allocs;          /* live allocations */
+};
+void btvs_mem_stats(struct btvs_mem *out);
+#define BTVS_HAVE_MEM_STATS 1
+
+
 #endif

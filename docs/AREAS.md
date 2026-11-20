@@ -22,6 +22,7 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 - Graphics → Logs/Menu: `btvs_screenshot(path)`, `btvs_gpu_info(...)`, `btvs_draw_text/rect` for overlay pages if the game's own font path isn't usable
 - Controls → Logs: `btvs_input_record_begin/end`, `btvs_input_playback(path)`; every frame's pad state passes through one function
 - Logs → Menu: `btvs_report_create(const char *player_text)`, `btvs_mem_stats(struct btvs_mem *)`
+- (`port/src/btvs.h` exists now and carries the exact contracts for the lines above; `btvs_screenshot` returns `int`, the input functions are `btvs_input_record_begin/flush/end` and `btvs_input_playback/_active`)
 
 ## Ready to use
 
@@ -111,3 +112,41 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   decoded from the original `.wma` files, dialogue and effects are played from the original `.rpe` /
   `.pak` data, and no Media Foundation or other codec is used for sound. (`Sound/dsstdfx.bin` is read by
   the game but not used by the port; leave it in place.)
+- **Controls -> anyone who finds them**: the points where the main menu is ready and where a level
+  starts (for `btvs_input_script_mark`), and how to tell menu / pause / cutscene from play (for
+  `btvs_input_allow_mouse_look`).
+**From Logs (the API is in, see `port/src/btvs.h` and `docs/logs.md`):**
+
+- **Everyone**: write to the log with `btvs_log("area", "fmt", ...)` (`#include "btvs.h"`), not `printf` /
+  `fprintf(stderr)`. Things the player does or changes go to the trail too: `btvs_trail("event", "key=value ...")`.
+- **Graphics**: please define `int btvs_screenshot(const char *png_path)` (the frame last shown, from any thread,
+  returns 1 once the file is written, gives up within ~2 s if the game thread is frozen) and
+  `int btvs_gpu_info(struct btvs_gpu *)` (the adapter the game draws with: name, driver, LUID, back buffer size).
+  Both are declared in `btvs.h`; Logs links stand-ins that answer 0 until yours exist (`/alternatename`, so just
+  define them: no edit on our side). Keep calling `xbox_HangMonitorBeat()` once per presented frame: the hang
+  report, the trail's frame numbers and reports use it.
+- **Controls**: please define `btvs_input_record_begin(path)`, `btvs_input_record_flush()`,
+  `btvs_input_record_end()`, `btvs_input_playback(path)`, `btvs_input_playback_active()` (contract in `btvs.h`).
+  Logs calls `record_begin(<exe>tvs_input.rec)` at every trail anchor (boot, level loaded, load) and
+  `playback(<report>\input.rec)` when a replay reaches its anchor, both on the game thread or the watcher thread.
+  One record per frame the game reads the pads, so playback is frame for frame; put a small header with a
+  version and, if you can, the frame time the game was given (the replay is only as exact as that). The file
+  format is yours. Don't read real devices while a file plays. Stand-ins answer 0 until yours exist.
+  The report hotkey (F12 / left stick click) is read by Logs' own thread (so it works when the game is frozen):
+  it does not swallow the click.
+- **Menu**: (1) the pause menu's Report a Problem page: call `btvs_report_prepare()` when the pause menu opens
+  (screenshot before the menu covers the picture) and `btvs_report_create(text)` on confirm; show
+  `btvs_report_last_path()`. (2) Memory page: `btvs_mem_stats(&m)` every frame is fine (`struct btvs_mem` in
+  `btvs.h`; `btvs_mem_text()` in `btvs_log.h` formats it). (3) Please read the settings file from
+  `btvs_settings_path()` (`btvs_log.h`: `BTVS_SETTINGS` if set, else `<exe>tvs_settings.ini`): `BTVS_REPLAY`
+  points it at the report's copy. (4) Settings Logs reads straight from the ini: `[Report] Hotkey` = 0 off,
+  1 F12 + left stick click (default), 2 F12 only. (5) Log every change: `btvs_trail("setting", "%s.%s=%s", ...)`.
+  (6) Menu ids: the trail logs `menu screen=<id>` from `GUI::TManager::SetMenu`; if you learn the id -> screen
+  names, tell Logs (or add a name table) so the trail reads better.
+- **Extras**: `python port/tools/report_symbols.py <out>` writes `btvs_symbols.txt` (function names for crash
+  reports of a build shipped without its `.pdb`). It is derived from the disc's linker map: don't put it in a
+  release package; the installer could generate it on the player's PC, or leave it out (reports then carry
+  addresses and `report_open.py` names them). The folders `reports\`, `crashes\`, `replay\` and the files
+  `btvs_log*.txt`, `btvs_trail*.txt`, `btvs_input.rec` appear beside the exe: an uninstaller should know them.
+- **Whoever regenerates next** (main checkout): nothing needed from Logs. The game hooks ride on
+  `recomp_lookup_manual` (virtual calls); no `manual_functions.json` entry yet.

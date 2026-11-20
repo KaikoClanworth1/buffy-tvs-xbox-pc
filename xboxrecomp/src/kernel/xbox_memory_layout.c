@@ -2973,6 +2973,23 @@ static struct { uint32_t addr; uint32_t size; uint8_t free; }
     g_heap_blocks[XBOX_HEAP_MAX_BLOCKS];
 static int g_heap_block_count = 0;
 
+/* What the title holds of the heap right now: bytes and blocks in use, and
+ * the furthest the heap has ever reached. For memory displays and reports;
+ * read without a lock, so a figure can be one allocation out. */
+void xbox_HeapStats(uint32_t *used_bytes, uint32_t *blocks, uint32_t *high_water)
+{
+    uint32_t used = 0, n = 0;
+    int i, count = g_heap_block_count;
+    for (i = 0; i < count; i++)
+        if (!g_heap_blocks[i].free && g_heap_blocks[i].size) {
+            used += g_heap_blocks[i].size;
+            n++;
+        }
+    if (used_bytes) *used_bytes = used;
+    if (blocks) *blocks = n;
+    if (high_water) *high_water = g_heap_next - XBOX_HEAP_BASE;
+}
+
 /*
  * Simulated stacks for spawned threads.
  *
