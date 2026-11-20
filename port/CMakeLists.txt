@@ -104,3 +104,58 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     xboxrecomp
     d3d11 dxgi dxguid xinput winmm dbghelp
 )
+
+# -- Controls (docs/controls.md) -----------------------------------------------
+set(BTVS_INPUT_SOURCES
+    src/btvs_input.c
+    src/btvs_input_xinput.c
+    src/btvs_input_sdl.c
+    src/btvs_input_kbm.c
+)
+target_sources(${PROJECT_NAME} PRIVATE ${BTVS_INPUT_SOURCES})
+
+# The XAPI replacements define functions the recompiler otherwise generates, so
+# they are only compiled in once the generated code was made with them listed
+# in src/manual_functions.json (tools/regen.sh leaves a copy of the list it
+# used beside the generated code). Other areas can test BTVS_MANUAL_APPLIED too.
+set(BTVS_MANUAL_APPLIED "")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${BTVS_GEN_DIR}/manual_functions.applied.json")
+if(EXISTS "${BTVS_GEN_DIR}/manual_functions.applied.json")
+    file(READ "${BTVS_GEN_DIR}/manual_functions.applied.json" BTVS_MANUAL_APPLIED)
+endif()
+if(BTVS_MANUAL_APPLIED MATCHES "XInputGetState_006105EF")
+    target_sources(${PROJECT_NAME} PRIVATE src/btvs_input_xapi.c)
+else()
+    message(WARNING "Controls: the generated code still has the game's own XInput functions; "
+                    "run tools/regen.sh in the main checkout to switch to the PC input layer")
+endif()
+
+# The input layer on its own: self-test, pad-script player, live pad printer.
+add_executable(btvs_input_test src/btvs_input_test.c ${BTVS_INPUT_SOURCES} src/btvs_settings.c)
+target_include_directories(btvs_input_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+# SDL3.dll (DualSense, Switch and other non-Xbox pads) is loaded at run time and
+# is optional; the build fetches the official release and puts it beside the exe.
+option(BTVS_FETCH_SDL "Download SDL3.dll for the SDL controller backend" ON)
+set(BTVS_SDL_VERSION "3.4.20")
+set(BTVS_SDL_SHA256 "368bed8b24e44ad9ea372990814f2343fcfb9e468abb7f8f4a3bc146c7304752")
+set(BTVS_SDL_DIR "${CMAKE_BINARY_DIR}/sdl3")
+if(BTVS_FETCH_SDL AND NOT EXISTS "${BTVS_SDL_DIR}/SDL3.dll")
+    set(_sdl_zip "${CMAKE_BINARY_DIR}/SDL3-${BTVS_SDL_VERSION}-win32-x64.zip")
+    file(DOWNLOAD
+        "https://github.com/libsdl-org/SDL/releases/download/release-${BTVS_SDL_VERSION}/SDL3-${BTVS_SDL_VERSION}-win32-x64.zip"
+        "${_sdl_zip}" EXPECTED_HASH SHA256=${BTVS_SDL_SHA256} TLS_VERIFY ON STATUS _sdl_status)
+    list(GET _sdl_status 0 _sdl_code)
+    if(_sdl_code EQUAL 0)
+        file(ARCHIVE_EXTRACT INPUT "${_sdl_zip}" DESTINATION "${BTVS_SDL_DIR}")
+    else()
+        message(WARNING "Controls: could not download SDL3 (${_sdl_status}); the game still builds and runs, without the SDL backend")
+        file(REMOVE "${_sdl_zip}")
+    endif()
+endif()
+if(EXISTS "${BTVS_SDL_DIR}/SDL3.dll")
+    foreach(_t ${PROJECT_NAME} btvs_input_test)
+        add_custom_command(TARGET ${_t} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${BTVS_SDL_DIR}/SDL3.dll" "$<TARGET_FILE_DIR:${_t}>")
+    endforeach()
+endif()

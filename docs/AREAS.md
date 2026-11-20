@@ -33,6 +33,14 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   speech`, `[controls] sensitivity invert_y rumble`) are listed at the top of `port/src/btvs_settings.h`:
   read your options from there and register a change callback so the menu pages apply live.
 
+- **Controls** (Controls): `#include "btvs.h"`; manual: `docs/controls.md`.
+  Logs: `btvs_input_record_begin(path)` / `btvs_input_record_end()` / `btvs_input_playback(path)`
+  (compact change-only file, replayed read for read). Menu: `btvs_input_action_count/label`,
+  `btvs_input_binding_text`, `btvs_input_capture_begin` + `btvs_input_capture_state`,
+  `btvs_input_binding_clear`, `btvs_input_bindings_reset`; options are `[controls]` keys.
+  Tests: `BTVS_PAD_SCRIPT=<file or text>` drives hidden runs; put `btvs_input_script_mark("menu")` /
+  `("level")` where those become ready so scripts do not depend on loading time.
+
 ## Requests
 
 (Add a line here when you need something from another area.)
@@ -56,3 +64,16 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   in `port/src/btvs_native*.c`, `btvs_frame.c` and `btvs_window.c`.
 - **Everyone adding hooks**: add your entries to `port/src/manual_functions.json` (it exists now; one line per
   function, keep it sorted by area) and push before asking for the next regen, so one regen serves all.
+- **Controls -> whoever regenerates (main checkout)**: `port/src/manual_functions.json` now lists the
+  nine XAPI input functions. Until `port/tools/regen.sh` + a library rebuild run in the main
+  checkout, the game still contains XAPI's USB input code (CMake warns and leaves
+  `btvs_input_xapi.c` out; nothing breaks). `regen.sh` now copies the list it used to
+  `recomp/gen/manual_functions.applied.json`; CMake reads it (`BTVS_MANUAL_APPLIED`).
+- **Controls -> Graphics**: call `btvs_input_frame()` once per presented frame; forward
+  `WM_MOUSEWHEEL` to `btvs_input_wheel(notches)`; hide the cursor while
+  `btvs_input_mouse_captured()`. Input decides focus itself (foreground window of this process).
+- **Controls -> Extras**: ship `SDL3.dll` (zlib licence; the build puts it beside the exe) in the
+  package. It is optional at run time.
+- **Controls -> anyone who finds them**: the points where the main menu is ready and where a level
+  starts (for `btvs_input_script_mark`), and how to tell menu / pause / cutscene from play (for
+  `btvs_input_allow_mouse_look`).

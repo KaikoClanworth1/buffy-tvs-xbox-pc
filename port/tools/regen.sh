@@ -34,3 +34,11 @@ EXTRA=()
 python -m tools.recomp "$GF/default.xbe" --all --split 1000 \
     --game-name "Buffy the Vampire Slayer" \
     --gen-dir "$PORT/src/recomp/gen" "${EXTRA[@]}" 2>&1 | grep -E "functions \(|unresolved|unimplemented"
+
+# Which functions were left to hand-written code: CMake reads this to know
+# whether the replacements in port/src can be compiled in (see CMakeLists.txt).
+if [ -f "$PORT/src/manual_functions.json" ]; then
+    cp -f "$PORT/src/manual_functions.json" "$PORT/src/recomp/gen/manual_functions.applied.json"
+else
+    rm -f "$PORT/src/recomp/gen/manual_functions.applied.json"
+fi

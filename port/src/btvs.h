@@ -39,4 +39,13 @@ float btvs_fps(void);
 void btvs_menu_char(unsigned ch);
 int  btvs_menu_page_open(void);
 
+/* ---- Controls: the game's pads (docs/controls.md) --------------------------
+ * Logs:     btvs_input_record_begin(path) / _end(), btvs_input_playback(path)
+ * Menu:     btvs_input_action_count/label, _binding_text, _capture_begin/_state,
+ *           _binding_clear, _bindings_reset, _device_name
+ * Graphics: btvs_input_frame() once per presented frame, btvs_input_wheel(),
+ *           btvs_input_mouse_captured()
+ * Tests:    BTVS_PAD_SCRIPT, btvs_input_script_mark("menu") */
+#include "btvs_input.h"
+
 #endif

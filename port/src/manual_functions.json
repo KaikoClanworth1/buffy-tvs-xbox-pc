@@ -37,5 +37,14 @@
   "0x002A4870": "wrap:TIF_Render_Implement_View_InternalSetup_002A4870",
   "0x002A32D0": "wrap:TIF_Render_Implement_State_SetGamma_002A32D0",
   "0x0001DC30": "wrap:TIF_EngineAPI_Implement_SysInfo_Video_0001DC30",
-  "0x00579D81": "wrap:XGetVideoFlags_00579D81"
+  "0x00579D81": "wrap:XGetVideoFlags_00579D81",
+  "0x0061058D": "XInputOpen_0061058D",
+  "0x006105E3": "XInputClose_006105E3",
+  "0x006105EF": "XInputGetState_006105EF",
+  "0x0061065E": "XInputSetState_0061065E",
+  "0x006106B6": "XInitDevices_006106B6",
+  "0x006106BB": "XGetDevices_006106BB",
+  "0x006106DD": "XGetDeviceChanges_006106DD",
+  "0x00610BFF": "XMountMUA_00610BFF",
+  "0x00610D31": "XUnmountMU_00610D31"
 }
