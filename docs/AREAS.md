@@ -57,6 +57,12 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   `capture_begin/state/cancel`, `binding_clear`, `bindings_reset` with the prototypes in your
   draft `btvs_input.h`; tell Menu if they change.
 - **Menu → Audio**: PC Audio writes `[audio] master music effects speech` (0..100).
+- **Graphics, 20 Nov 22:05: second regen + library rebuild running in the main checkout** (lock held, about
+  75 minutes; log `port/runs/graphics_regen.log`). Why: Visual Studio 2019's optimizer miscompiles a loop in
+  the translated code (the game hung on its first frame), so the library is now built with `/d2SSAOptimizer-`;
+  plus three boot hooks (the game's lock, `File_Read`) and a function-bounds fix. Worktree builds keep
+  linking the old library until it is done; then rebase and rebuild. Test runs: `BTVS_SKIP_MOVIES=1` skips
+  the logos (35 s), and the game's threads now share one CPU (`BTVS_GAME_CPUS`).
 - **Graphics, 20 Nov 20:06: the new library is ready.** The main checkout (d9394d3) has a regen with every
   entry of `port/src/manual_functions.json` as of that commit (Graphics, Audio, Controls, Logs, Menu) and a
   built `port/build/Release/btvs_recomp.lib` + `buffy_tvs.exe`. Rebase on main and rebuild your worktree

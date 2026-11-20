@@ -31,6 +31,24 @@ def main():
             cur["end"] = "0x%08X" % nstart
             cur["size"] = nstart - int(cur["start"], 16)
             changed += 1
+    # The disassembler follows at most 8192 instructions of one function and
+    # then starts an unnamed function ("tail_jump_alias") in the middle of it.
+    # The lifter gives that one the rest of the code, and the named function's
+    # jump table can no longer reach its own cases: every particle template
+    # past the 451st in TGBuffyInterface::ParticleTemplateSetup (10168
+    # instructions, a 535-way switch) became a failed indirect call. Such an
+    # alias inside a map function that long is dropped again.
+    named = [(int(f["start"], 16), int(f["end"], 16)) for f in funcs
+             if "0x%08X" % int(f["start"], 16) in names and f.get("num_instructions", 0) >= 8192]
+    kept = []
+    for f in funcs:
+        s = int(f["start"], 16)
+        if (f.get("detection_method") == "tail_jump_alias" and "0x%08X" % s not in names
+                and any(a < s < b for a, b in named)):
+            print("dropped %s: the tail of a function longer than the disassembler follows" % f["name"])
+            continue
+        kept.append(f)
+    funcs = kept
     json.dump(funcs, open(fpath, "w"), indent=1)
     print("extended %d functions" % changed)
 

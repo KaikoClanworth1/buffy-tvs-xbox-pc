@@ -1,5 +1,8 @@
 {
   "0x00580200": "memmove_00580200",
+  "0x002AA870": "CLocker_Lock_002AA870",
+  "0x002AA950": "CLocker_Unlock_002AA950",
+  "0x002B46D0": "wrap:File_Read_002B46D0",
   "0x00595DB0": "wrap:D3DDevice_Swap_00595DB0",
   "0x00595E70": "wrap:D3DDevice_Clear_00595E70",
   "0x00593FC0": "wrap:D3DDevice_DrawIndexedVertices_00593FC0",

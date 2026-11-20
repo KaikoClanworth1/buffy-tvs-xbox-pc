@@ -58,7 +58,12 @@ else()
         ${BTVS_GEN_DIR} ${BTVS_GEN_DIR}/..
         ${CMAKE_CURRENT_SOURCE_DIR}/src ${XBOXRECOMP_DIR}/include)
     if(MSVC)
-        target_compile_options(btvs_recomp PRIVATE /bigobj)
+        # /d2SSAOptimizer-: Visual Studio 2019's optimizer (19.29) compiles the
+        # translated "find the set bit" loop (shl / inc / test in a loop,
+        # TManager_Object::QueryGroup) to a test of bit 1 every time round, so
+        # the loop never ends: the game hung on its first frame. With the SSA
+        # optimizer off the code is right (docs/graphics.md, "Boot log").
+        target_compile_options(btvs_recomp PRIVATE /bigobj /d2SSAOptimizer-)
     endif()
 endif()
 
@@ -149,6 +154,9 @@ set(BTVS_MANUAL_APPLIED "")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${BTVS_GEN_DIR}/manual_functions.applied.json")
 if(EXISTS "${BTVS_GEN_DIR}/manual_functions.applied.json")
     file(READ "${BTVS_GEN_DIR}/manual_functions.applied.json" BTVS_MANUAL_APPLIED)
+endif()
+if(BTVS_MANUAL_APPLIED MATCHES "File_Read_002B46D0")     # Graphics/boot: the game's lock, File_Read
+    target_sources(${PROJECT_NAME} PRIVATE src/btvs_boot_hooks.c)
 endif()
 if(BTVS_MANUAL_APPLIED MATCHES "XInputGetState_006105EF")
     target_sources(${PROJECT_NAME} PRIVATE src/btvs_input_xapi.c)
