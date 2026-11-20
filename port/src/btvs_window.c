@@ -37,6 +37,11 @@ void nv2a_gpu_set_display_callback(void (*cb)(int fullscreen));
 void nv2a_gpu_set_frame_widescreen(int wide);
 void nv2a_gpu_set_frame_aspect(float aspect);
 void *nv2a_gpu_window(void);
+void nv2a_gpu_set_close_callback(void (*cb)(void));
+void nv2a_gpu_set_char_callback(void (*cb)(unsigned ch));
+int  nv2a_gpu_take_wheel(void);
+void nv2a_gpu_mouse_capture(int on);
+static void on_char(unsigned ch);
 
 /* The log call until the Logs area's is linked (then the linker takes that
  * one: /alternatename only fills in for a missing symbol). */
@@ -161,17 +166,64 @@ void btvs_window_boot(void)
     InterlockedExchange(&s_dirty, 0);
     btvs_setting_on_change("display", NULL, on_display_changed, NULL);
     nv2a_gpu_set_display_callback(on_mode_key);
+    nv2a_gpu_set_close_callback(btvs_quit);
+    nv2a_gpu_set_char_callback(on_char);
 }
 
-/* Once a frame (game thread): settings changed in the menu take effect. */
+/* ── leaving ───────────────────────────────────────────────────────────── */
+
+#define QUIT_HOOKS 8
+static void (*s_quit_hook[QUIT_HOOKS])(void);
+static volatile LONG s_quit_hooks, s_quitting;
+
+void btvs_on_quit(void (*fn)(void))
+{
+    LONG i = InterlockedIncrement(&s_quit_hooks) - 1;
+    if (fn && i < QUIT_HOOKS)
+        s_quit_hook[i] = fn;
+}
+
+/* The one way out for the player: the menu's Exit, the window's close
+ * button, Alt+F4. Settings are saved, every area that asked is told (newest
+ * first), then the process ends. Any thread; a second call while the first
+ * is at work returns at once. */
+void btvs_quit(void)
+{
+    LONG i;
+    if (InterlockedExchange(&s_quitting, 1))
+        return;
+    btvs_log("boot", "quit");
+    btvs_settings_save();
+    for (i = (s_quit_hooks < QUIT_HOOKS ? s_quit_hooks : QUIT_HOOKS) - 1; i >= 0; i--)
+        if (s_quit_hook[i])
+            s_quit_hook[i]();
+    ExitProcess(0);
+}
+
+static void on_char(unsigned ch)
+{
+    btvs_menu_char(ch);                          /* (Menu: text typed on a PC page) */
+}
+
+/* Once a frame (game thread): settings changed in the menu take effect, and
+ * the input layer gets what the window collected. */
 void btvs_window_frame(void)
 {
+    static int wheel;
     if (InterlockedExchange(&s_dirty, 0)) {
         if (btvs_setting_int("display", "mode", 1) == s_applied_mode && s_applied_mode >= 0) {
             /* (the mode key's own write-back: nothing else to do) */
         }
         apply();
     }
+    wheel += nv2a_gpu_take_wheel();              /* 120 a notch */
+    if (wheel >= 120 || wheel <= -120) {
+        btvs_input_wheel(wheel / 120);
+        wheel %= 120;
+    }
+    if (!btvs_window_hidden())
+        nv2a_gpu_mouse_capture(btvs_input_mouse_captured());
+    btvs_input_frame();
 }
 
 /* ── what the GPU is, for the memory page and reports ─────────────────── */

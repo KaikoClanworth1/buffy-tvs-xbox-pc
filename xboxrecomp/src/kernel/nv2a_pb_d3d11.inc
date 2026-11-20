@@ -191,12 +191,26 @@ static const char *s_gpu_hlsl =
 static void gpu_create_window2(void);
 static void gpu_window2_fullscreen(int fs);
 
+/* The title's own say in two window messages (window thread): the window
+ * being closed (it quits in its own order; without one the process just
+ * exits), and a typed character (WM_CHAR, for a text field of its own). */
+static void (*s_close_cb)(void);
+static void (*s_char_cb)(unsigned ch);
+void nv2a_gpu_set_close_callback(void (*cb)(void)) { s_close_cb = cb; }
+void nv2a_gpu_set_char_callback(void (*cb)(unsigned ch)) { s_char_cb = cb; }
+
 static LRESULT CALLBACK gpu_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     if (m == WM_CLOSE) {
         fprintf(stderr, "[GPU11] window closed: exiting\n");
         fflush(stderr);
+        if (s_close_cb)
+            s_close_cb();
         ExitProcess(0);                     /* closing the game window quits */
+        return 0;
+    }
+    if (m == WM_CHAR && s_char_cb) {
+        s_char_cb((unsigned)w);
         return 0;
     }
     if (m == WM_GPU_MAKE_WINDOW2) {
@@ -2574,6 +2588,8 @@ static void gpu_clear(uint32_t p) { (void)p; }
 static void gpu_present(uint32_t o) { (void)o; }
 void nv2a_gpu_set_display(int w, int h, int vsync, int fullscreen) { (void)w; (void)h; (void)vsync; (void)fullscreen; }
 void nv2a_gpu_set_display_callback(void (*cb)(int)) { (void)cb; }
+void nv2a_gpu_set_close_callback(void (*cb)(void)) { (void)cb; }
+void nv2a_gpu_set_char_callback(void (*cb)(unsigned)) { (void)cb; }
 void nv2a_gpu_set_frame_widescreen(int wide) { (void)wide; }
 void nv2a_gpu_enable_second_window(void) {}
 int  nv2a_gpu_has_second_window(void) { return 0; }

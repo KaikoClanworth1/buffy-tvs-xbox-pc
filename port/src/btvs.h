@@ -31,6 +31,13 @@ int   btvs_screenshot(const char *path);
 int   btvs_screenshot_count(void);
 int   btvs_gpu_info(struct btvs_gpu_info *out);
 float btvs_fps(void);
+/* btvs_quit: the way out (the menu's Exit; the window's close button calls it
+ * too). Saves the settings, calls what btvs_on_quit registered (newest first,
+ * up to 8), ends the process. Any thread.
+ * The window also gives Menu its WM_CHAR (btvs_menu_char) and Controls the
+ * mouse wheel, the cursor capture and btvs_input_frame() once a frame. */
+void  btvs_quit(void);
+void  btvs_on_quit(void (*fn)(void));
 
 /* ---- Menu: the PC pages in the game's own menus (btvs_menu.c) -------------
  * btvs_menu_char: a character typed on the keyboard (the window's WM_CHAR;
