@@ -256,8 +256,7 @@ static LONG CALLBACK veh_handler(PEXCEPTION_POINTERS ep)
             /* the thread's TIB: SEH chain, fs:[4] (the CRT's and XAPI's per-thread data), KTHREAD */
             extern RECOMP_TLS uint32_t g_fs_base;
             const uint32_t *tib = (const uint32_t *)((uintptr_t)g_xbox_mem_offset + g_fs_base);
-            fprintf(stderr, "  fs base 0x%08X: [0]=%08X [4]=%08X [8]=%08X [20]=%08X [28]=%08X, thread %lu
-", g_fs_base,
+            fprintf(stderr, "  fs base 0x%08X: [0]=%08X [4]=%08X [8]=%08X [20]=%08X [28]=%08X, thread %lu\n", g_fs_base,
                     tib[0], tib[1], tib[2], tib[8], tib[10], GetCurrentThreadId());
         }
 
