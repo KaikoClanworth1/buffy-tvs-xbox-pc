@@ -296,6 +296,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     (void)lpCmdLine;
     (void)nCmdShow;
 
+#ifdef BTVS_GRAPHICS
+    {   /* The game restarts itself to load a level; this process only starts
+         * the game and starts it again when it asks (btvs_boot.c). */
+        int btvs_supervise(int *exit_code);
+        int code = 0;
+        if (btvs_supervise(&code))
+            return code;
+    }
+#endif
     /* Unbuffered output for immediate visibility during debugging */
     apply_test_guards();
     btvs_replay_init();     /* BTVS_REPLAY: before the settings and the save folder are read */

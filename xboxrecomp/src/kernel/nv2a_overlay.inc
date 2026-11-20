@@ -404,6 +404,38 @@ static int ov_upload(void)
 /* Over window 1's back buffer, after the frame's blit, before Present. */
 #endif
 
+/* A premultiplied-alpha picture laid over all of `target` (a title's own
+ * overlay, drawn into its frame before the frame is shown). */
+void nv2a_gpu_overlay_blit(GpuTexture *target, GpuTexture *tex)
+{
+#if defined(_WIN32) /* guard */
+    GpuTextureDesc td;
+    GpuViewport vp;
+    GpuTexture *none = NULL;
+    if (!target || !tex || !ov_init())
+        return;
+    gpu_texture_desc(target, &td);
+    vp.x = 0.0f; vp.y = 0.0f;
+    vp.w = (float)td.width; vp.h = (float)td.height;
+    vp.min_z = 0.0f; vp.max_z = 1.0f;
+    gpu_set_targets(target, NULL);
+    gpu_set_blend(s_ov_bs);
+    gpu_set_depth(NULL, 0);
+    gpu_set_raster(s_blit_rs);
+    gpu_set_viewport(&vp);
+    gpu_set_layout(NULL);
+    gpu_set_topology(GPU_TOPO_TRIANGLES);
+    gpu_set_shaders(s_blit_vs, s_ov_ps);
+    gpu_set_textures(0, 1, &tex);
+    gpu_set_samplers(0, 1, &s_gsamp[1]);
+    gpu_draw(3, 0);
+    gpu_set_textures(0, 1, &none);
+    gpu_set_targets(NULL, NULL);
+#else
+    (void)target; (void)tex;
+#endif
+}
+
 static void gpu_overlay_draw(GpuSwapchain *sc)
 {
 #if defined(_WIN32) /* guard */

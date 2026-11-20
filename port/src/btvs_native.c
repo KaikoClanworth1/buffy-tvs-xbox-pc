@@ -592,6 +592,16 @@ void btvs_native_start(void)
     nv2a_native_prewarm();
 }
 
+void btvs_native_overlay(void)
+{
+    void btvs_overlay_test(void);
+    void btvs_overlay_frame(GpuTexture *frame, uint32_t pw, uint32_t ph);
+    if (!s_up || !s_fb.tex)
+        return;
+    btvs_overlay_test();
+    btvs_overlay_frame(s_fb.tex, s_fb.pw, s_fb.ph);
+}
+
 void btvs_native_present(void)
 {
     if (!s_up || !fb_ready())

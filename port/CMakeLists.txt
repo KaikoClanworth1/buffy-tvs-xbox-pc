@@ -103,6 +103,8 @@ if(BTVS_GRAPHICS)
         src/btvs_native_gpuwait.c
         src/btvs_native_shot.c
         src/btvs_native_game.c
+        src/btvs_native_overlay.c
+        src/btvs_boot_restart.c
         src/btvs_window.c
         src/btvs_frame.c
     )

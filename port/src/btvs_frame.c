@@ -91,7 +91,8 @@ static void stats(void)
 /* DWORD D3DDevice_Swap(DWORD Flags) */
 void D3DDevice_Swap_00595DB0(void)
 {
-    btvs_shot_frame();              /* (the finished frame, before anything is drawn over it) */
+    btvs_native_overlay();          /* Menu's and Logs' text and rectangles: part of the frame */
+    btvs_shot_frame();
     btvs_native_present();
     btvs_window_frame();
     pace();
