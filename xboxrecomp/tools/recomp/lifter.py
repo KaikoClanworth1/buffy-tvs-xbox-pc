@@ -1762,6 +1762,11 @@ class Lifter:
             # Segment register pop → discard from stack
             if r in ("fs", "gs", "cs", "ds", "es", "ss"):
                 return [f"{{ uint32_t _tmp; POP32(esp, _tmp); }} /* pop {r} - segment register */"]
+            # 16-bit pop (operand-size prefix): two bytes off the stack into
+            # the low word. Only seen in data mis-disassembled as code, but it
+            # has to compile.
+            if r in ("ax", "bx", "cx", "dx", "si", "di", "bp"):
+                return [f"SET_LO16(e{r}, MEM16(esp)); esp += 2; /* pop {r} */"]
             # Sample esp at each pop in a traced function. An epilogue that ends
             # `mov esp, ebp` restores esp unconditionally, so any drift inside
             # the function is erased before a return-time trace can see it --

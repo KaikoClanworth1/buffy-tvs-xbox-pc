@@ -60,3 +60,4 @@ port/src/recomp/gen/
 btvs_log*.txt
 btvs_settings.ini
 port/.build.lock/
+port/.game.slot*/

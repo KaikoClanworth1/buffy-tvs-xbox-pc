@@ -15,6 +15,18 @@ export BTVS_NO_WINDOW=1          # hidden, never focused
 export BTVS_MUTE=1               # test runs are silent
 export BTVS_AFFINITY="${BTVS_AFFINITY:-FF00}"   # CPUs 8-15, below-normal priority
 export BTVS_EXIT_AFTER="$SECS"
+# At most 2 test games at once across every session: take one of two slots.
+SLOT=""
+for i in $(seq 1 180); do
+    for n in 1 2; do
+        L="$BTVS_MAIN/port/.game.slot$n"
+        [ -n "$(find "$L" -maxdepth 0 -mmin +30 2>/dev/null)" ] && rmdir "$L" 2>/dev/null
+        if mkdir "$L" 2>/dev/null; then SLOT="$L"; break 2; fi
+    done
+    sleep 5
+done
+[ -n "$SLOT" ] || { echo "no free test-game slot"; exit 1; }
+trap 'rmdir "$SLOT" 2>/dev/null' EXIT
 build/Release/buffy_tvs.exe > "runs/$NAME.out" 2> "runs/$NAME.err" &
 PID=$!
 ( sleep $((SECS + 15)); kill -9 $PID 2>/dev/null ) &
