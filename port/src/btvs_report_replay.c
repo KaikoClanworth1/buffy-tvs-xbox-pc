@@ -64,6 +64,31 @@ static int is_file(const char *p)
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
+/* The game keeps the running session (default.ses) on its cache drive, beside
+ * its files from the disc: of that folder only the session files travel. */
+static int copy_sessions(const char *from_save, const char *to_save)
+{
+    char pat[MAX_PATH], a[MAX_PATH], b[MAX_PATH];
+    WIN32_FIND_DATAA fd;
+    HANDLE h;
+    int n = 0;
+    sprintf_s(pat, MAX_PATH, "%s\Cache\*.ses", from_save);
+    h = FindFirstFileA(pat, &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+    CreateDirectoryA(to_save, NULL);
+    sprintf_s(b, MAX_PATH, "%s\Cache", to_save);
+    CreateDirectoryA(b, NULL);
+    do {
+        sprintf_s(a, MAX_PATH, "%s\Cache\%s", from_save, fd.cFileName);
+        sprintf_s(b, MAX_PATH, "%s\Cache\%s", to_save, fd.cFileName);
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && CopyFileA(a, b, FALSE))
+            n++;
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return n;
+}
+
 int btvs_replay_active(void) { return s_r.active; }
 
 void btvs_replay_init(void)
@@ -71,7 +96,8 @@ void btvs_replay_init(void)
     const char *src = getenv("BTVS_REPLAY");
     char path[MAX_PATH], base[MAX_PATH], line[400], *p;
     size_t len;
-    int partial = 0;
+    int partial = 0, later = btvs_restarts() > 0;   /* later: the replayed game restarted itself; only the folders still apply */
+    char launch[MAX_PATH] = "";
     FILE *f;
 
     if (!src || !*src)
@@ -91,14 +117,16 @@ void btvs_replay_init(void)
             name = name2;
         name = name ? name + 1 : path;
         sprintf_s(s_r.folder, MAX_PATH, "%s\\%.*s", base, (int)strlen(name) - 4, name);
-        delete_tree(s_r.folder);
-        n = btvs_unzip(path, s_r.folder);
+        if (!later)
+            delete_tree(s_r.folder);
+        n = later ? 1 : btvs_unzip(path, s_r.folder);
         if (n <= 0) {
             btvs_log("replay", "BTVS_REPLAY: can't unpack %s (%s). Unpack it yourself and give the folder.", path,
                      n == -2 ? "it was re-packed with compression" : "not found or not a zip");
             return;
         }
-        btvs_log("replay", "unpacked %s (%d files) to %s", path, n, s_r.folder);
+        if (!later)
+            btvs_log("replay", "unpacked %s (%d files) to %s", path, n, s_r.folder);
     } else if (is_dir(path)) {
         strcpy_s(s_r.folder, MAX_PATH, path);
     } else {
@@ -125,10 +153,11 @@ void btvs_replay_init(void)
         else if (!strcmp(line, "anchor_time")) s_r.anchor_time = atof(p);
         else if (!strcmp(line, "input") && *p) sprintf_s(s_r.input, MAX_PATH, "%s\\%s", s_r.folder, p);
         else if (!strcmp(line, "input_complete") && atoi(p) == 0) partial = 1;
+        else if (!strcmp(line, "launch") && *p) sprintf_s(launch, MAX_PATH, "%s\\%s", s_r.folder, p);
     }
     fclose(f);
-    if (!s_r.anchor[0])
-        strcpy_s(s_r.anchor, sizeof s_r.anchor, "boot");
+    /* (reports of the first format could name a level as the anchor; every replay starts at boot now) */
+    strcpy_s(s_r.anchor, sizeof s_r.anchor, "boot");
     if (s_r.input[0] && !is_file(s_r.input))
         s_r.input[0] = 0;
     if (s_r.input[0] && partial) {
@@ -149,7 +178,7 @@ void btvs_replay_init(void)
         static const char *const part[2] = { "UserData", "TitleData" };
         char from[MAX_PATH], to[MAX_PATH];
         int i;
-        for (i = 0; i < 2; i++) {
+        for (i = 0; i < 2 && !later; i++) {
             sprintf_s(from, MAX_PATH, "%s\\%s", path, part[i]);
             sprintf_s(to, MAX_PATH, "%s\\%s", base, part[i]);
             delete_tree(to);
@@ -157,12 +186,24 @@ void btvs_replay_init(void)
                 btvs_copy_tree(from, to, ~0ull, NULL);
         }
     }
+    if (!later)
+        copy_sessions(path, base);
     _putenv_s("BTVS_SAVE_DIR", base);
+    if (later) {
+        btvs_log("replay", "the replayed game restarted itself: playing on from here (settings and saves still the report's)");
+        return;
+    }
+    /* The game was in a level: start it the way it started itself then. */
+    if (launch[0] && is_file(launch))
+        _putenv_s("RECOMP_LAUNCH_DATA_FILE", launch);
+    else
+        launch[0] = 0;
 
     s_r.active = 1;
     btvs_log("replay", "replaying report %s", s_r.folder);
-    btvs_log("replay", "  go to: %s \"%s\" (level \"%s\", checkpoint \"%s\"), then %.1f s of recorded input (%s)",
-             s_r.anchor, s_r.anchor_name, s_r.level, s_r.checkpoint, s_r.report_time - s_r.anchor_time,
+    btvs_log("replay", "  start: %s (level \"%s\"), then %.1f s of recorded input (%s)",
+             launch[0] ? "with the report's launch data, straight into the level" : "a normal start (title screen)",
+             s_r.level, s_r.report_time - s_r.anchor_time,
              s_r.input[0] ? "input.rec" : "NONE in the report");
     btvs_log("replay", "  settings: %s; saves: %s", getenv("BTVS_SETTINGS_INI") ? getenv("BTVS_SETTINGS_INI") : "(defaults)", base);
 }

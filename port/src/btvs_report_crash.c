@@ -531,6 +531,11 @@ static void hang_report(const char *why)
     btvs_trail("hang", "why=%s", why);
 }
 
+/* Graphics' frames-per-second figure; 0 when its files are not in the build. */
+float btvs_fps(void);
+float btvs_fps_none(void) { return 0.0f; }
+#pragma comment(linker, "/alternatename:btvs_fps=btvs_fps_none")
+
 static DWORD WINAPI hang_thread(LPVOID arg)
 {
     const char *e = getenv("BTVS_HANG_SECS"), *b = getenv("BTVS_BOOT_HANG_SECS");
@@ -546,6 +551,13 @@ static DWORD WINAPI hang_thread(LPVOID arg)
         Sleep(1000);
         t++;
         now = xbox_HangMonitorFrames();
+        /* A movie (the attract movie after a while in the main menu, a
+         * cutscene file) is played inside one game frame: pictures still
+         * reach the screen, so that is not a hang. */
+        if (now != 0 && now == last && btvs_fps() >= 1.0f) {
+            still = 0;
+            continue;
+        }
         if (now == 0) {
             if (boot && t >= boot && !boot_reported) {
                 boot_reported = 1;

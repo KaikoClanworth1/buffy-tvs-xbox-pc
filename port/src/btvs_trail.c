@@ -57,7 +57,8 @@ static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
     InitializeCriticalSection(&s_cs);
     sprintf_s(path, MAX_PATH, "%s\\" BTVS_TRAIL_FILE, btvs_exe_dir());
     sprintf_s(prev, MAX_PATH, "%s\\" BTVS_TRAIL_PREVIOUS, btvs_exe_dir());
-    MoveFileExA(path, prev, MOVEFILE_REPLACE_EXISTING);
+    if (!btvs_restarts())
+        MoveFileExA(path, prev, MOVEFILE_REPLACE_EXISTING);
     s_file = CreateFileA(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
                          OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (e && atof(e) > 0.0)
@@ -101,9 +102,13 @@ static void value_of(const char *text, const char *key, char *out, size_t n)
     out[len] = 0;
 }
 
+/* Where a replay can start. The game loads every level by restarting itself
+ * with launch data (and has no checkpoints), so the start of a process is the
+ * one place that can be reached again exactly: a level's "boot" carries the
+ * launch data that leads to it. */
 static int is_anchor(const char *event)
 {
-    return !strcmp(event, "boot") || !strcmp(event, "level") || !strcmp(event, "checkpoint") || !strcmp(event, "load");
+    return !strcmp(event, "boot");
 }
 
 void btvs_trail(const char *event, const char *fmt, ...)
@@ -178,7 +183,28 @@ void btvs_trail(const char *event, const char *fmt, ...)
 void btvs_trail_init(void)
 {
     InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
-    btvs_trail("boot", "version=%s", BTVS_VERSION);
+    {
+        /* The launch data's command line, if the game started this run itself
+         * (kernel_bridge.c reads the same file). */
+        const char *file = getenv("RECOMP_LAUNCH_DATA_FILE");
+        char page[0x1000], cmd[120];
+        FILE *f = NULL;
+        size_t got = 0, i;
+        cmd[0] = 0;
+        if (file && *file && fopen_s(&f, file, "rb") == 0 && f) {
+            got = fread(page, 1, sizeof page, f);
+            fclose(f);
+        }
+        if (got > 0x400) {
+            for (i = 0; i + 1 < sizeof cmd && 0x400 + i < got && page[0x400 + i]; i++)
+                cmd[i] = (page[0x400 + i] >= 32 && page[0x400 + i] < 127) ? page[0x400 + i] : '.';
+            cmd[i] = 0;
+        }
+        if (got)
+            btvs_trail("boot", "version=%s run=%d launch=%s", BTVS_VERSION, btvs_restarts() + 1, cmd);
+        else
+            btvs_trail("boot", "version=%s run=%d", BTVS_VERSION, btvs_restarts() + 1);
+    }
     btvs_trail_start_watch();
 }
 
@@ -343,6 +369,8 @@ static const char *menu_name(uint32_t id)
     case 8: return "display";
     case 9: return "pause";
     case 10: return "title";
+    case 12: return "start_game";
+    case 13: return "difficulty";
     case 15: return "resurrect";
     default: return "?";
     }
@@ -444,15 +472,18 @@ static void hook_Map_Loaded(void)
     TManager_Buffy_Map_Loaded_0023D050();
     first_time(&seen, "TManager_Buffy::Map_Loaded");
     note_level("Map_Loaded");
+    btvs_trail("level_loaded", "name=%s", s_seen_level);
 }
 
 static void hook_Map_Completed(void)
 {
     static volatile LONG seen;
     first_time(&seen, "TManager_Buffy::Map_Completed");
-    btvs_trail("level_done", "name=%s", s_seen_level);
+    /* (also called when a new game leaves the menus: no level then) */
+    if (s_seen_level[0])
+        btvs_trail("level_done", "name=%s", s_seen_level);
     TManager_Buffy_Map_Completed_0023CC20();
-    btvs_trail("save", "why=level completed");
+    btvs_trail("save", "why=%s", s_seen_level[0] ? "level completed" : "leaving the menus");
 }
 
 static void hook_SetMenu(void)

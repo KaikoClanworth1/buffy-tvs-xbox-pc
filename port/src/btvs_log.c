@@ -204,7 +204,8 @@ static BOOL CALLBACK init_once(PINIT_ONCE once, PVOID param, PVOID *ctx)
 
     sprintf_s(path, MAX_PATH, "%s\\" BTVS_LOG_FILE, s_dir);
     sprintf_s(prev, MAX_PATH, "%s\\" BTVS_LOG_PREVIOUS, s_dir);
-    MoveFileExA(path, prev, MOVEFILE_REPLACE_EXISTING);
+    if (!btvs_restarts())           /* the game restarting itself for a level is the same session */
+        MoveFileExA(path, prev, MOVEFILE_REPLACE_EXISTING);
     s_file = CreateFileA(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
                          OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
@@ -223,6 +224,14 @@ static BOOL CALLBACK init_once(PINIT_ONCE once, PVOID param, PVOID *ctx)
             setvbuf(stdout, NULL, _IONBF, 0);
     }
     return TRUE;
+}
+
+/* How many times the game has restarted itself in this session (it does so to
+ * load a level: btvs_boot_restart.c). 0 in the first process. */
+int btvs_restarts(void)
+{
+    const char *e = getenv("BTVS_RESTARTS");
+    return e ? atoi(e) : 0;
 }
 
 void btvs_log_init(void)

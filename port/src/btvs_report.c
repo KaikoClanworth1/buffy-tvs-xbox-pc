@@ -374,6 +374,31 @@ static void first_line(const char *s, char *out, size_t n)
     out[i] = 0;
 }
 
+/* The game keeps the running session (default.ses) on its cache drive, beside
+ * its files from the disc: of that folder only the session files travel. */
+static int copy_sessions(const char *from_save, const char *to_save)
+{
+    char pat[MAX_PATH], a[MAX_PATH], b[MAX_PATH];
+    WIN32_FIND_DATAA fd;
+    HANDLE h;
+    int n = 0;
+    sprintf_s(pat, MAX_PATH, "%s\Cache\*.ses", from_save);
+    h = FindFirstFileA(pat, &fd);
+    if (h == INVALID_HANDLE_VALUE)
+        return 0;
+    CreateDirectoryA(to_save, NULL);
+    sprintf_s(b, MAX_PATH, "%s\Cache", to_save);
+    CreateDirectoryA(b, NULL);
+    do {
+        sprintf_s(a, MAX_PATH, "%s\Cache\%s", from_save, fd.cFileName);
+        sprintf_s(b, MAX_PATH, "%s\Cache\%s", to_save, fd.cFileName);
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && CopyFileA(a, b, FALSE))
+            n++;
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return n;
+}
+
 /* The newest `keep` files matching crashes\<prefix>* into <dir>\crashes. */
 static int copy_newest(const char *dir, const char *pattern, int keep)
 {
@@ -430,7 +455,7 @@ int btvs_report_make(const char *player_text, const char *trigger)
     SYSTEMTIME t;
     FILE *f;
     unsigned long long save_bytes = 0;
-    int have_shot = 0, have_input, input_complete, have_settings, save_files, crashes, i, files;
+    int have_shot = 0, have_input, input_complete, have_settings, have_launch, save_files, crashes, i, files;
     long long input_bytes;
     double t0 = btvs_uptime();
 
@@ -485,6 +510,10 @@ int btvs_report_make(const char *player_text, const char *trigger)
 
     btvs_settings_save();
     have_settings = copy_into(dir, btvs_settings_path(), "settings.ini");
+    {   /* the launch data this run of the game was started with (a level): the replay starts with it */
+        const char *lf = getenv("RECOMP_LAUNCH_DATA_FILE");
+        have_launch = lf && *lf && copy_into(dir, lf, "launch.bin");
+    }
     /* Only the saves: the save folder also holds the game's own cache drive
      * (its files from the disc: never in a report) and hard-disk images. */
     sprintf_s(path, MAX_PATH, "%s\\save", dir);
@@ -498,6 +527,7 @@ int btvs_report_make(const char *player_text, const char *trigger)
         if (GetFileAttributesA(from) != INVALID_FILE_ATTRIBUTES)
             save_files += btvs_copy_tree(from, to, 32ull << 20, &save_bytes);
     }
+    save_files += copy_sessions(btvs_save_dir(), path);
     if (!save_files)
         RemoveDirectoryA(path);
     crashes = copy_newest(dir, "crash_*.txt", 3) + copy_newest(dir, "hang_*.txt", 2) + copy_newest(dir, "crash_*.dmp", 1);
@@ -519,10 +549,10 @@ int btvs_report_make(const char *player_text, const char *trigger)
     if (fopen_s(&f, path, "w") == 0 && f) {
         fprintf(f, "format=1\nversion=%s\nanchor=%s\nanchor_name=%s\nlevel=%s\ncheckpoint=%s\n"
                    "anchor_time=%.3f\nanchor_frame=%ld\nreport_time=%.3f\nreport_frame=%ld\n"
-                   "input=%s\ninput_complete=%d\nsettings=%s\nsave=%s\n",
+                   "input=%s\ninput_complete=%d\nsettings=%s\nsave=%s\nlaunch=%s\n",
                 BTVS_VERSION, w.anchor_event, w.anchor_name, w.level, w.checkpoint, w.anchor_time, w.anchor_frame,
                 t0, w.frame, have_input ? "input.rec" : "", input_complete, have_settings ? "settings.ini" : "",
-                save_files ? "save" : "");
+                save_files ? "save" : "", have_launch ? "launch.bin" : "");
         if (w.have_pos)
             fprintf(f, "pos=%.3f %.3f %.3f\nhealth=%.1f\n", w.pos[0], w.pos[1], w.pos[2], w.health);
         fclose(f);
@@ -724,7 +754,8 @@ void btvs_report_init(void)
         if (h)
             CloseHandle(h);
     }
-    if (e && atoi(e) > 0) {
+    /* (in a session where the game restarts itself: in run BTVS_TEST_REPORT_RUN, 0 = the first) */
+    if (e && atoi(e) > 0 && btvs_restarts() == (getenv("BTVS_TEST_REPORT_RUN") ? atoi(getenv("BTVS_TEST_REPORT_RUN")) : 0)) {
         h = CreateThread(NULL, 0, test_thread, (LPVOID)(uintptr_t)atoi(e), 0, NULL);
         if (h)
             CloseHandle(h);
