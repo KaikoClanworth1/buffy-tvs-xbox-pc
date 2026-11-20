@@ -23,7 +23,7 @@ A game folder is:
   pak\  media\  interfc\  dialogue\  Sound\         the disc's folders, as on the disc
   buffy_tvs.exe, buffy_tvs.pdb                      the PC program (copied from beside the launcher)
   Buffy Launcher.exe, Read Me.txt                   so the folder stands on its own
-  vcruntime140*.dll, msvcp140.dll                   when they ship beside the launcher
+  SDL3.dll, vcruntime140*.dll, msvcp140.dll         when they ship beside the launcher
   SaveData\                                         the player's saves: created if missing, never touched
   btvs_settings.ini, btvs_log.txt, Reports\         written by the game later, never touched by install
 ```

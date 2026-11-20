@@ -38,6 +38,8 @@ elif [ "$ALLOW_MISSING" = 1 ]; then
 else
     echo "buffy_tvs.exe is not built (bash port/tools/build.sh); --allow-missing-game to test packaging without it"; exit 1
 fi
+S="$(pick "SDL3.dll")"   # controllers other than XInput (Controls area)
+[ -n "$S" ] && cp -f "$S" "$OUT/" || echo "note: no SDL3.dll beside the build"
 cp -f "$PORT/launcher/Read Me.txt" "$OUT/Read Me.txt"
 # Visual C++ runtime, app-local, for PCs without the redistributable.
 CRT="$(ls -d "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Redist/MSVC/"*/x64/Microsoft.VC142.CRT 2>/dev/null | tail -1 || true)"
@@ -56,7 +58,7 @@ if ! python - "$ZIP" "$NAME" "$BTVS_MAIN/game_files" <<'EOF'
 import hashlib, os, sys, zipfile
 zip_path, top, game = sys.argv[1:4]
 allowed = {"buffy launcher.exe", "buffy_tvs.exe", "buffy_tvs.pdb", "read me.txt",
-           "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"}
+           "sdl3.dll", "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"}
 disc_ext = {".xbe", ".iso", ".xiso", ".pak", ".wma", ".wmv", ".rpe", ".xpr", ".mtx", ".map", ".dat",
             ".bin", ".xbx", ".xmv", ".sav"}
 disc_names, disc_sizes = set(), {}
