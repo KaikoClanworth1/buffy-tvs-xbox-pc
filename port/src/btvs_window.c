@@ -130,6 +130,33 @@ void btvs_window_boot(void)
     env_default("RECOMP_VBLANK", "0");
     env_default("RECOMP_NV2A_ACK", "0");
     env_default("BUFFY_GPU_BACKEND", "d3d11");
+    {   /* BTVS_NO_DISC_INSTALL=1: no install, Z: read from the game folder (btvs_native_game.c: TLogo::ExecuteMovies) */
+        extern void xbox_path_set_cache_from_disc(int on);
+        const char *e = getenv("BTVS_NO_DISC_INSTALL");
+        xbox_path_set_cache_from_disc(e && e[0] == '1');
+    }
+    {   /* The game's threads share one CPU, as on the console. Its own lock
+         * (CLocker: a counter, incremented and looked at in separate steps) is
+         * only a lock there: on two CPUs the loader thread and the game both
+         * take it, both give up, and both wait for ever -- the first level
+         * load stopped that way. Rendering and audio run on the port's own
+         * threads and use the other CPUs. BTVS_GAME_CPUS=all turns it off;
+         * BTVS_GAME_CPUS=<hex mask> picks the CPUs. */
+        extern void xbox_set_guest_thread_affinity(uintptr_t mask);
+        const char *e = getenv("BTVS_GAME_CPUS");
+        DWORD_PTR proc = 0, sys = 0, mask = 0;
+        GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys);
+        if (e && *e && _stricmp(e, "all"))
+            mask = (DWORD_PTR)strtoull(e, NULL, 16) & proc;
+        else if (!(e && *e)) {
+            if (proc & 4)
+                mask = 4;                            /* the second core: the first is the busiest on most PCs */
+            else
+                mask = proc & (~proc + 1);           /* the lowest CPU this process may use */
+        }
+        xbox_set_guest_thread_affinity(mask);
+        btvs_log("boot", "the game's threads run on CPU mask %llX (process %llX)", (unsigned long long)mask, (unsigned long long)proc);
+    }
     apply();
     InterlockedExchange(&s_dirty, 0);
     btvs_setting_on_change("display", NULL, on_display_changed, NULL);

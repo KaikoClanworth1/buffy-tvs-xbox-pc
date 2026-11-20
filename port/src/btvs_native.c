@@ -542,8 +542,11 @@ void Direct3D_CreateDevice_005966E0(void)
         btvs_log("gfx", "CreateDevice: back buffer %ux%u format %X count %u, multisample %X, depth %X, flags %X, interval %X",
                  MEM32(pp), MEM32(pp + 4), MEM32(pp + 8), MEM32(pp + 12), MEM32(pp + 16), MEM32(pp + 36),
                  MEM32(pp + 40), MEM32(pp + 48));
-    Direct3D_CreateDevice_005966E0_orig();
+    { extern void btvs_gpu_registers_idle(void); btvs_gpu_registers_idle();
+      Direct3D_CreateDevice_005966E0_orig();
+      btvs_gpu_registers_idle(); }
     btvs_log("gfx", "CreateDevice -> %08X, device %08X", g_eax, MEM32(D3D_PDEVICE));
+    { extern volatile LONG g_btvs_watch_armed; static int made; if (++made >= 2) g_btvs_watch_armed = 1; }   /* (BTVS_WATCH_ARM, btvs_boot.c) */
     s_backbuffer = 0;
     s_vp_dirty = 1;
 }
@@ -555,6 +558,7 @@ void btvs_native_start(void)
     if (s_up)
         return;
     MEM32(D3D_NULL_HARDWARE) = 1;            /* the D3D library's own no-GPU mode (btvs_native_gpuwait.c) */
+    { extern void btvs_boot_watch_start(void); btvs_boot_watch_start(); }
     nv2a_native_rs_layout(RS_FIRST_DEFERRED, RS_FIRST_COMPLEX);
     if (!(s_up = nv2a_gpu_native_begin())) {
         btvs_log("gfx", "no Direct3D 11 device");

@@ -385,6 +385,14 @@ static int g_thread_call_count = 0;
 /* Set on threads this bridge spawned; see PsTerminateSystemThread. */
 static RECOMP_TLS int g_is_spawned_thread = 0;
 
+/* The host CPUs the title's own threads run on (0: wherever the system puts
+ * them). Set before the title starts. */
+static DWORD_PTR g_xbox_guest_thread_affinity;
+void xbox_set_guest_thread_affinity(uintptr_t mask)
+{
+    g_xbox_guest_thread_affinity = (DWORD_PTR)mask;
+}
+
 /* This thread's simulated stack, so both exits can give it back. Thread-local
  * for the obvious reason, and needed at all because the common exit is
  * ExitThread from PsTerminateSystemThread -- bridge_thread_main's own return
@@ -422,6 +430,13 @@ static DWORD WINAPI bridge_thread_main(LPVOID param)
      * for every thread, which is how two of them ended up inside _lock() each
      * holding the lock the other wanted. */
     g_is_spawned_thread = 1;
+    /* The console has one CPU, and titles lean on it: a home-made lock that
+     * is a plain counter, state shared between threads with no lock at all.
+     * A title that needs that asks for all its threads on one host CPU
+     * (xbox_set_guest_thread_affinity); the runtime's own threads -- the GPU
+     * layer's, audio -- are not the title's and stay where they are. */
+    if (g_xbox_guest_thread_affinity)
+        SetThreadAffinityMask(GetCurrentThread(), g_xbox_guest_thread_affinity);
     g_esp = s->stack_top;
     g_thread_stack_top = s->stack_top;
     {
@@ -3788,7 +3803,38 @@ static void bridge_ObReferenceObjectByHandle(void)
     uint32_t handle = STACK_ARG(0);
     uint32_t obj_type = STACK_ARG(1);
     uint32_t object_ptr = STACK_ARG(2);
-    if (object_ptr) BRIDGE_MEM32(object_ptr) = 0;
+    /* Anything but a thread: the "object" is the handle itself. The Ke*
+     * waits here take what this returns and resolve it as a handle
+     * (bridge_KeWaitForMultipleObjects), so a null object made such a wait
+     * fail at once -- XAPI's multimedia-timer thread, which waits on objects
+     * it referenced this way, then span in its loop at time-critical
+     * priority. */
+    uint32_t object = handle;
+    (void)obj_type;
+
+    /* A thread: XAPI's GetExitCodeThread reads the thread object itself --
+     * SignalState (+4, set once the thread has ended) and ExitStatus (+0x120)
+     * -- and a title that stops a worker by polling GetExitCodeThread until it
+     * is no longer STILL_ACTIVE waited for ever on a null object (Buffy 2002's
+     * TDiskManager destructor, at the first level load). The caller gets a
+     * small object of its own with those two fields filled in from the host
+     * thread; it is read at once and never written. */
+    {
+        static RECOMP_TLS uint32_t scratch;
+        DWORD code = 0;
+        if (handle && handle != 0xFFFFFFFFu && handle != 0xFFFFFFFEu
+                && GetExitCodeThread(bridge_resolve_handle(handle), &code)) {
+            if (!scratch)
+                scratch = xbox_HeapAlloc(0x200, 16);
+            if (scratch) {
+                memset((void *)((uintptr_t)scratch + g_xbox_mem_offset), 0, 0x200);
+                BRIDGE_MEM32(scratch + 4) = (code != STILL_ACTIVE) ? 1u : 0u;
+                BRIDGE_MEM32(scratch + 0x120) = code;
+                object = scratch;
+            }
+        }
+    }
+    if (object_ptr) BRIDGE_MEM32(object_ptr) = object;
     g_eax = 0;  /* STATUS_SUCCESS */
 }
 

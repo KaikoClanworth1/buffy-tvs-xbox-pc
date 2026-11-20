@@ -411,6 +411,17 @@ void xbox_path_set_hdd_dir(const char *dir)
     }
 }
 
+/* A title that copies its disc to the cache drive (Z:) before it plays: with
+ * this on, a read of a cache-drive file that was never copied finds the
+ * game folder's file, so the title can be told the copy is already done. */
+static int s_cache_from_disc;
+XBOX_THREAD_LOCAL int g_xbox_path_for_write;   /* set by a caller that will write, create or delete */
+
+void xbox_path_set_cache_from_disc(int on)
+{
+    s_cache_from_disc = on;
+}
+
 /* Mod overlays: folders laid over the game folder (the disc). A game file
  * found in one of them is read from there instead; the last one added wins.
  * The game folder itself is never written. */
@@ -496,6 +507,21 @@ translate:
             WCHAR sub_wide[MAX_PATH];
             MultiByteToWideChar(CP_ACP, 0, sub_dir, -1, sub_wide, MAX_PATH);
             swprintf_s(host_path_buf, buf_size, L"%s%s\\%s", base_dir, sub_wide, remainder_wide);
+
+            /* The cache drive read from the disc (xbox_path_set_cache_from_disc):
+             * what is not a file in the cache folder and is in the game folder
+             * is opened there. Never for an open that writes or creates. */
+            if (s_cache_from_disc && !g_xbox_path_for_write && !strcmp(sub_dir, "\\Cache")) {
+                const WCHAR *r = remainder_wide;
+                DWORD a = GetFileAttributesW(host_path_buf);
+                while (*r == L'\\') r++;
+                if (*r && (a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_DIRECTORY))) {
+                    WCHAR alt[MAX_PATH];
+                    swprintf_s(alt, MAX_PATH, L"%s\\%s", s_game_dir, r);
+                    if (GetFileAttributesW(alt) != INVALID_FILE_ATTRIBUTES)
+                        wcscpy_s(host_path_buf, buf_size, alt);
+                }
+            }
 
             WCHAR dir_path[MAX_PATH];
             swprintf_s(dir_path, MAX_PATH, L"%s%s", base_dir, sub_wide);

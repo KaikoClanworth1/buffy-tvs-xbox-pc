@@ -546,6 +546,11 @@ void xbox_path_set_user_mapper(BOOL (*mapper)(const char *rest, WCHAR *out, DWOR
 /* Where \Device\Harddisk0\Partition1\ (the hard disk: UDATA, TDATA) goes,
  * instead of the game folder. */
 void xbox_path_set_hdd_dir(const char *dir);
+/* The cache drive (Z:, partitions 3-5) read from the game folder: a file that
+ * is not in the cache folder is opened from the game folder instead, unless
+ * the open writes, creates or deletes. For a title that copies its disc to
+ * the cache drive before it plays. */
+void xbox_path_set_cache_from_disc(int on);
 #endif
 
 /*

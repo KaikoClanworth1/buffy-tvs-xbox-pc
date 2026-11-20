@@ -9,6 +9,7 @@
  * BTVS_SHOT_EVERY=<seconds> writes one that often.
  */
 #include <windows.h>
+#include <shlobj.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -148,6 +149,7 @@ static int save_frame(const char *path)
     GpuTextureDesc td;
     uint32_t *px;
     int ok = 0;
+    const char *why = "FAILED";
     if (!tex)
         return 0;
     gpu_texture_desc(tex, &td);
@@ -157,11 +159,24 @@ static int save_frame(const char *path)
         return 0;
     gpu_texture_copy(st, tex);
     px = (uint32_t *)malloc((size_t)td.width * td.height * 4);
-    if (px && gpu_texture_read(st, px, 0))
+    if (px && gpu_texture_read(st, px, 0)) {
+        char dir[MAX_PATH], *sl;
+        strcpy_s(dir, sizeof dir, path);              /* the folder, if it is not there yet */
+        for (sl = dir; *sl; sl++)
+            if (*sl == '/') *sl = '\\';
+        if ((sl = strrchr(dir, '\\')) != NULL) {
+            *sl = 0;
+            char full[MAX_PATH];
+            if (_fullpath(full, dir, MAX_PATH))
+                SHCreateDirectoryExA(NULL, full, NULL);
+        }
         ok = btvs_png_write(path, px, td.width, td.height, td.width);
+        if (!ok) why = "cannot write the file";
+    } else
+        why = "cannot read the frame back";
     free(px);
     gpu_texture_release(st);
-    btvs_log("gfx", "screenshot %s: %s (%ux%u)", path, ok ? "written" : "FAILED", td.width, td.height);
+    btvs_log("gfx", "screenshot %s: %s (%ux%u)", path, ok ? "written" : why, td.width, td.height);
     if (ok)
         InterlockedIncrement(&s_done);
     return ok;

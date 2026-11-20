@@ -144,6 +144,14 @@ void recomp_icall_fail_log(uint32_t va)
         if (g_icall_trace[idx])
             fprintf(stderr, "    [%2d] 0x%08X\n", i, g_icall_trace[idx]);
     }
+#ifdef BTVS_GRAPHICS
+    {   /* who made the call: the host stack, the first few times (btvs_boot.c) */
+        extern void btvs_boot_host_stack(const char *tag);
+        static int shown;
+        if (shown++ < 3)
+            btvs_boot_host_stack("ICALL");
+    }
+#endif
     fflush(stderr);
 }
 

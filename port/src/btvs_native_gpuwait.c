@@ -83,12 +83,32 @@ void D3DDevice_IsBusy_005937E0(void)
     D3DDevice_IsBusy_005937E0_orig();
 }
 
+/* The GPU's interrupt-status registers. D3D's start-up code (this XDK runs
+ * CMiniport::LoadEngines even with no GPU) acknowledges them the hardware's
+ * way, by writing ones; in plain memory that leaves them reading "pending"
+ * for good, and the next device start (the game makes one device for the
+ * logos and another for itself) then services an interrupt that never goes
+ * away: ServiceGrInterrupt and HalGrLoadChannelContext call each other until
+ * the stack is gone. Nothing is ever pending here, so they are zero before
+ * and after every device start. */
+void btvs_gpu_registers_idle(void)
+{
+    MEM32(0xFD000100u) = 0;      /* PMC_INTR_0 */
+    MEM32(0xFD002100u) = 0;      /* PFIFO_INTR_0 */
+    MEM32(0xFD400100u) = 0;      /* PGRAPH_INTR */
+    MEM32(0xFD600100u) = 0;      /* PCRTC_INTR_0 */
+}
+
 void D3D_CDevice_Init_00598510(void)
 {
+    btvs_gpu_registers_idle();
     D3D_CDevice_Init_00598510_orig();
+    btvs_gpu_registers_idle();
 }
 
 void D3D_InitializeHardware_00597D10(void)
 {
+    btvs_gpu_registers_idle();
     D3D_InitializeHardware_00597D10_orig();
+    btvs_gpu_registers_idle();
 }

@@ -115,6 +115,8 @@ static DWORD xbox_share_to_win32(ULONG Share)
 }
 
 /* Translate an Xbox OBJECT_ATTRIBUTES path to a Win32 wide path */
+extern __declspec(thread) int g_xbox_path_for_write;   /* kernel_path.c */
+
 static BOOL translate_obj_path(PXBOX_OBJECT_ATTRIBUTES ObjectAttributes,
                                WCHAR* win_path, DWORD buf_size)
 {
@@ -261,10 +263,16 @@ NTSTATUS __stdcall xbox_NtCreateFile(
         return STATUS_SUCCESS;
     }
 
+    /* (an open that can change the file is never sent to the game folder:
+     * xbox_path_set_cache_from_disc) */
+    g_xbox_path_for_write = CreateDisposition != XBOX_FILE_OPEN
+        || (DesiredAccess & (GENERIC_WRITE | GENERIC_ALL | FILE_WRITE_DATA | FILE_APPEND_DATA | DELETE)) != 0;
     if (!translate_obj_path(ObjectAttributes, win_path, MAX_PATH)) {
+        g_xbox_path_for_write = 0;
         xbox_log(XBOX_LOG_ERROR, XBOX_LOG_FILE, "NtCreateFile: path translation failed");
         return STATUS_OBJECT_PATH_NOT_FOUND;
     }
+    g_xbox_path_for_write = 0;
 
     /* A partition device opened as a directory.
      *
@@ -340,7 +348,9 @@ NTSTATUS __stdcall xbox_NtCreateFile(
             case ERROR_FILE_NOT_FOUND: return STATUS_OBJECT_NAME_NOT_FOUND;
             case ERROR_PATH_NOT_FOUND: return STATUS_OBJECT_PATH_NOT_FOUND;
             case ERROR_ACCESS_DENIED:  return STATUS_ACCESS_DENIED;
+            case ERROR_FILE_EXISTS:    /* (what CREATE_NEW says; the console's kernel has one answer for both) */
             case ERROR_ALREADY_EXISTS: return STATUS_OBJECT_NAME_COLLISION;
+            case ERROR_SHARING_VIOLATION: return (NTSTATUS)0xC0000043L;
             default:                   return STATUS_UNSUCCESSFUL;
         }
     }
@@ -446,7 +456,11 @@ NTSTATUS __stdcall xbox_NtClose(HANDLE Handle)
 NTSTATUS __stdcall xbox_NtDeleteFile(PXBOX_OBJECT_ATTRIBUTES ObjectAttributes)
 {
     WCHAR win_path[MAX_PATH];
-    if (!translate_obj_path(ObjectAttributes, win_path, MAX_PATH))
+    BOOL ok;
+    g_xbox_path_for_write = 1;
+    ok = translate_obj_path(ObjectAttributes, win_path, MAX_PATH);
+    g_xbox_path_for_write = 0;
+    if (!ok)
         return STATUS_OBJECT_PATH_NOT_FOUND;
     XBOX_TRACE(XBOX_LOG_FILE, "NtDeleteFile: %S", win_path);
     if (DeleteFileW(win_path))    return STATUS_SUCCESS;
