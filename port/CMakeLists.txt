@@ -172,6 +172,7 @@ if(EXISTS "${BTVS_SDL_DIR}/SDL3.dll")
         add_custom_command(TARGET ${_t} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${BTVS_SDL_DIR}/SDL3.dll" "$<TARGET_FILE_DIR:${_t}>")
     endforeach()
+endif()
 
 # -- "Buffy Launcher.exe": install from the disc image, then Play (launcher/) --
 add_executable(buffy_tvs_launcher WIN32 launcher/btvs_launcher.c)
