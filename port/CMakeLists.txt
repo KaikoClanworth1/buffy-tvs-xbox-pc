@@ -58,6 +58,29 @@ set(GAME_SOURCES
     src/recomp_manual.c
     src/btvs_settings.c
 )
+# Graphics area. Its files hook functions named in src/manual_functions.json,
+# so they join the build once the generated code has those hooks (after the
+# regen that follows a change to that file); before it, the game builds
+# without them.
+set(BTVS_GRAPHICS OFF)
+if(EXISTS "${BTVS_GEN_DIR}/recomp_funcs.h")
+    file(STRINGS "${BTVS_GEN_DIR}/recomp_funcs.h" _btvs_gfx_hooks REGEX "D3DDevice_Swap_00595DB0_orig|XGetVideoFlags_00579D81_orig")
+    list(LENGTH _btvs_gfx_hooks _btvs_gfx_n)
+    if(_btvs_gfx_n GREATER 1)
+        set(BTVS_GRAPHICS ON)
+    endif()
+endif()
+if(BTVS_GRAPHICS)
+    list(APPEND GAME_SOURCES
+        src/btvs_native.c
+        src/btvs_native_gpuwait.c
+        src/btvs_native_shot.c
+        src/btvs_native_game.c
+        src/btvs_window.c
+        src/btvs_frame.c
+    )
+endif()
+message(STATUS "Graphics area in the build: ${BTVS_GRAPHICS}")
 
 add_executable(${PROJECT_NAME} WIN32 ${GAME_SOURCES})
 
@@ -65,7 +88,12 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${BTVS_GEN_DIR} ${BTVS_GEN_DIR}/..
     ${XBOXRECOMP_DIR}/include
+    ${XBOXRECOMP_DIR}/src/gpu
 )
+
+if(BTVS_GRAPHICS)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE BTVS_GRAPHICS=1)
+endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
     btvs_recomp

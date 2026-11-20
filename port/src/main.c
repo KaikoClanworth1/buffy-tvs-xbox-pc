@@ -323,6 +323,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     /* Unbuffered output for immediate visibility during debugging */
     apply_test_guards();
+#ifdef BTVS_GRAPHICS
+    {
+        void btvs_window_boot(void);
+        btvs_window_boot();         /* runtime switches and display settings (btvs_window.c) */
+    }
+#endif
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
 
@@ -358,6 +364,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     }
 
     g_xbox_mem_offset = xbox_GetMemoryOffset();
+#ifdef BTVS_GRAPHICS
+    {
+        void btvs_native_start(void);
+        btvs_native_start();        /* the native renderer's device (btvs_native.c) */
+    }
+#endif
     printf("Xbox memory mapped. Offset: 0x%llX\n", (unsigned long long)g_xbox_mem_offset);
 
     /* Bring up the emulated APU.

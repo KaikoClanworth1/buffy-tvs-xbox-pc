@@ -9,4 +9,27 @@
  * BTVS_<SECTION>_<KEY> in the environment overrides a value for a test run. */
 #include "btvs_settings.h"
 
+/* ---- Graphics ------------------------------------------------------------
+ * btvs_screenshot: the next frame shown is written to `path` as a PNG (at
+ * the size the game is drawn at); returns 0 only for a bad path. The file is
+ * there one frame later -- btvs_screenshot_count() goes up when it is.
+ * btvs_gpu_info: the graphics card and its memory, for the memory page and
+ * reports; 0 if the device is not up yet (the names are still filled in).
+ * btvs_fps: frames shown per second, over the last second. */
+#include <stdint.h>
+struct btvs_gpu_info {
+    char     adapter[128];          /* "NVIDIA GeForce RTX ..." */
+    char     api[32];               /* "Direct3D 11" */
+    int      render_width, render_height;   /* what the game is drawn at now */
+    uint64_t vram_total;            /* the card's dedicated memory, bytes */
+    uint64_t vram_budget;           /* what Windows lets this game use of it now */
+    uint64_t vram_used_by_game;     /* what this game uses of it now */
+    uint64_t shared_total;          /* system memory the card may borrow */
+    uint64_t shared_used_by_game;
+};
+int   btvs_screenshot(const char *path);
+int   btvs_screenshot_count(void);
+int   btvs_gpu_info(struct btvs_gpu_info *out);
+float btvs_fps(void);
+
 #endif

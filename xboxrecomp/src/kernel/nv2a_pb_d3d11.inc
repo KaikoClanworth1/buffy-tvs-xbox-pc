@@ -80,6 +80,9 @@ typedef struct {
 #define GPU_MAX_VERTS 65536
 #define GPU_MAX_IDX   393216       /* triangle-list indices per batch */
 
+/* The window's title (the port sets it before the device comes up). */
+const char *g_nv2a_window_title = "Xbox game";
+
 static int                     s_gpu_state = -1;     /* -1 untried, 0 off, 1 on */
 static HWND                    s_gpu_hwnd;
 static ID3D11Device           *s_dev;
@@ -144,6 +147,7 @@ static volatile LONG s_mouse_want, s_mouse_on, s_wheel;
 static volatile LONG s_flipq[64];
 static volatile LONG s_flipq_w, s_flipq_r;
 static volatile LONG s_frame_wide;            /* present this frame 16:9, not 4:3 */
+static volatile float s_frame_aspect;        /* nv2a_gpu_set_frame_aspect */
 static int      s_rw = 640, s_rh = 480;       /* applied render size */
 static float    s_sx = 1.0f, s_sy = 1.0f;     /* ... as scale factors from 640x480 */
 static volatile int s_native;                  /* the native renderer draws (see gpu_show) */
@@ -408,6 +412,20 @@ void nv2a_gpu_set_frame_widescreen(int wide)
     InterlockedExchange(&s_frame_wide, wide != 0);
 }
 
+/* The shape frames are shown at: width / height (1.7778 for 16:9), 0 for the
+ * widescreen flag's 4:3 or 16:9, below 0 to fill the window whatever its
+ * shape. */
+void nv2a_gpu_set_frame_aspect(float aspect)
+{
+    s_frame_aspect = aspect;
+}
+
+/* The game's window (HWND), NULL before the device is up. */
+void *nv2a_gpu_window(void)
+{
+    return (void *)s_gpu_hwnd;
+}
+
 static DWORD WINAPI gpu_window_thread(LPVOID ready)
 {
     WNDCLASSEXA wc;
@@ -439,7 +457,7 @@ static DWORD WINAPI gpu_window_thread(LPVOID ready)
                                    GetSystemMetrics(SM_CYSMICON), 0);
     RegisterClassExA(&wc);
     AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-    s_gpu_hwnd = CreateWindowA(wc.lpszClassName, "Buffy the Vampire Slayer: Chaos Bleeds",
+    s_gpu_hwnd = CreateWindowA(wc.lpszClassName, g_nv2a_window_title,
                                WS_OVERLAPPEDWINDOW | (getenv("BUFFY_NO_WINDOW") ? 0 : WS_VISIBLE),
                                CW_USEDEFAULT, CW_USEDEFAULT,
                                r.right - r.left, r.bottom - r.top, NULL, NULL, wc.hInstance, NULL);
@@ -500,7 +518,7 @@ static void gpu_create_window2(void)
                     y = mi.rcWork.top;
             }
         }
-        s_gpu_hwnd2 = CreateWindowA("BuffyRecompGpu", "Buffy the Vampire Slayer: Chaos Bleeds - Player 2",
+        s_gpu_hwnd2 = CreateWindowA("BuffyRecompGpu", "Player 2",
                                     WS_OVERLAPPEDWINDOW | (getenv("BUFFY_NO_WINDOW") ? 0 : WS_VISIBLE),
                                     x, y, s_win2_w, s_win2_h, NULL, NULL, GetModuleHandleA(NULL), NULL);
     }
@@ -1136,7 +1154,12 @@ static void gpu_blit_region(GpuSurface *s, GpuSwapchain *sc, volatile LONG *resi
          * for a widescreen frame, 16:9 -- letterboxed or pillarboxed to the
          * window. */
         float aspect = s_frame_wide ? 16.0f / 9.0f : 4.0f / 3.0f;
-        float bw = (float)bd.width, bh = (float)bd.height, w = bw, h = bw / aspect;
+        float bw = (float)bd.width, bh = (float)bd.height, w, h;
+        if (s_frame_aspect > 0.0f)
+            aspect = s_frame_aspect;                 /* the port's own (any shape) */
+        else if (s_frame_aspect < 0.0f)
+            aspect = bw / bh;                        /* fill the window */
+        w = bw; h = bw / aspect;
         float fw = s->w > 640 ? 640.0f / (float)s->w : 1.0f, fh = s->h > 480 ? 480.0f / (float)s->h : 1.0f;
         if (h > bh) { h = bh; w = bh * aspect; }
         vp.x = (float)(int)((bw - w) * 0.5f);
@@ -1435,7 +1458,7 @@ static void gpu_show_after(void)
         if (GetTickCount() - t0 >= 1000) {
             char title[128];
             sprintf_s(title, sizeof title,
-                      "Buffy the Vampire Slayer: Chaos Bleeds  -  %u fps%s%s", frames,
+                      "%s  -  %u fps%s%s", g_nv2a_window_title, frames,
                       (int)(s_title_note_until - GetTickCount()) > 0 ? "  -  " : "",
                       (int)(s_title_note_until - GetTickCount()) > 0 ? s_title_note : "");
             SetWindowTextA(s_gpu_hwnd, title);

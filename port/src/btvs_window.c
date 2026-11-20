@@ -1,0 +1,189 @@
+/**
+ * The window and the display settings.
+ *
+ * The window itself, its three modes (windowed, borderless, fullscreen with
+ * the monitor's mode switched), Alt+Enter / F11 and the swap chain live in
+ * the runtime's GPU code (xboxrecomp/src/kernel/nv2a_pb_d3d11.inc); this file
+ * tells it what the player chose -- the [display] settings (btvs_settings.h)
+ * -- and applies changes while the game runs.
+ *
+ *   mode        0 windowed, 1 borderless, 2 fullscreen
+ *   width, height   the size the game is drawn at (0: the desktop's)
+ *   vsync       0/1
+ *   widescreen  0 the original 4:3 picture (bars at the sides), 1 16:9, 2 stretched to the window
+ *
+ * Test runs (BTVS_NO_WINDOW=1): the window is made hidden and is never
+ * shown, activated or resized, whatever the settings say; frames are drawn
+ * at 640x480 unless BTVS_DISPLAY_WIDTH / _HEIGHT ask for another size.
+ */
+#include <windows.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define COBJMACROS
+#include <d3d11.h>
+#include <dxgi1_4.h>
+
+#include "gpu.h"
+#include "btvs.h"
+#include "btvs_native.h"
+
+extern const char *g_nv2a_window_title;
+void nv2a_gpu_set_display(int width, int height, int vsync, int fullscreen);
+void nv2a_gpu_set_display_callback(void (*cb)(int fullscreen));
+void nv2a_gpu_set_frame_widescreen(int wide);
+void nv2a_gpu_set_frame_aspect(float aspect);
+void *nv2a_gpu_window(void);
+
+/* The log call until the Logs area's is linked (then the linker takes that
+ * one: /alternatename only fills in for a missing symbol). */
+void btvs_log_fallback(const char *area, const char *fmt, ...)
+{
+    char line[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(line, sizeof line, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "[%s] %s\n", area, line);
+}
+#pragma comment(linker, "/alternatename:btvs_log=btvs_log_fallback")
+
+static int s_hidden = -1;
+
+int btvs_window_hidden(void)
+{
+    if (s_hidden < 0) {
+        const char *e = getenv("BTVS_NO_WINDOW");
+        s_hidden = e && *e && *e != '0';
+    }
+    return s_hidden;
+}
+
+static void env_default(const char *name, const char *value)
+{
+    if (!getenv(name))
+        _putenv_s(name, value);
+}
+
+static volatile LONG s_dirty = 1;
+static int s_applied_mode = -1;
+
+static void on_display_changed(const char *section, const char *key, void *user)
+{
+    (void)section; (void)key; (void)user;
+    InterlockedExchange(&s_dirty, 1);
+}
+
+/* Alt+Enter / F11 changed the mode: remember it. (Window thread.) */
+static void on_mode_key(int mode)
+{
+    s_applied_mode = mode;
+    btvs_setting_set_int("display", "mode", mode);
+}
+
+static void apply(void)
+{
+    int mode = btvs_setting_int("display", "mode", 1);
+    int w = btvs_setting_int("display", "width", 0), h = btvs_setting_int("display", "height", 0);
+    int vsync = btvs_setting_int("display", "vsync", 1);
+    int wide = btvs_setting_int("display", "widescreen", 0);
+    int dw = GetSystemMetrics(SM_CXSCREEN), dh = GetSystemMetrics(SM_CYSCREEN);
+    if (btvs_window_hidden()) {
+        if (w <= 0 || h <= 0) { w = 640; h = 480; }
+        mode = 0;
+        vsync = 0;
+    }
+    if (w <= 0 || h <= 0) { w = dw; h = dh; }
+    if (mode < 0 || mode > 2) mode = 1;
+    /* The game draws a 4:3 picture. Shown as 4:3 it is drawn at that shape
+     * (the height asked for, 4/3 as wide), so nothing is drawn only to be
+     * squeezed; 16:9 and stretch use the whole size. */
+    if (wide == 0) {
+        int w43 = h * 4 / 3;
+        if (w43 < w) w = w43; else h = w * 3 / 4;
+        nv2a_gpu_set_frame_aspect(0.0f);
+        nv2a_gpu_set_frame_widescreen(0);
+    } else if (wide == 1) {
+        nv2a_gpu_set_frame_aspect((float)w / (float)h);
+    } else {
+        nv2a_gpu_set_frame_aspect(-1.0f);
+    }
+    nv2a_gpu_set_display(w, h, vsync, mode);
+    s_applied_mode = mode;
+    btvs_log("gfx", "display: %dx%d, %s, vsync %s, picture %s", w, h,
+             mode == 0 ? "windowed" : mode == 1 ? "borderless" : "fullscreen", vsync ? "on" : "off",
+             wide == 0 ? "4:3" : wide == 1 ? "widescreen" : "stretched");
+}
+
+void btvs_window_boot(void)
+{
+    g_nv2a_window_title = "Buffy the Vampire Slayer";
+    if (btvs_window_hidden())
+        _putenv_s("BUFFY_NO_WINDOW", "1");       /* the runtime's name for it */
+    /* No Xbox GPU is emulated: no pushbuffer thread, no vertical-blank
+     * interrupt, no register thread (btvs_native_gpuwait.c), and Direct3D 11
+     * for the GPU layer. */
+    env_default("RECOMP_PB_EXEC", "0");
+    env_default("RECOMP_VBLANK", "0");
+    env_default("RECOMP_NV2A_ACK", "0");
+    env_default("BUFFY_GPU_BACKEND", "d3d11");
+    env_default("RECOMP_LAZY_DIRS", "1");
+    apply();
+    InterlockedExchange(&s_dirty, 0);
+    btvs_setting_on_change("display", NULL, on_display_changed, NULL);
+    nv2a_gpu_set_display_callback(on_mode_key);
+}
+
+/* Once a frame (game thread): settings changed in the menu take effect. */
+void btvs_window_frame(void)
+{
+    if (InterlockedExchange(&s_dirty, 0)) {
+        if (btvs_setting_int("display", "mode", 1) == s_applied_mode && s_applied_mode >= 0) {
+            /* (the mode key's own write-back: nothing else to do) */
+        }
+        apply();
+    }
+}
+
+/* ── what the GPU is, for the memory page and reports ─────────────────── */
+
+int btvs_gpu_info(struct btvs_gpu_info *out)
+{
+    ID3D11Device *dev = (ID3D11Device *)gpu_d3d11_device();
+    IDXGIDevice *xd = NULL;
+    IDXGIAdapter *ad = NULL;
+    IDXGIAdapter3 *ad3 = NULL;
+    DXGI_ADAPTER_DESC desc;
+    const char *name = gpu_adapter_name();
+    uint32_t w = 0, h = 0;
+    memset(out, 0, sizeof *out);
+    strncpy_s(out->adapter, sizeof out->adapter, name ? name : "", _TRUNCATE);
+    strcpy_s(out->api, sizeof out->api, "Direct3D 11");
+    btvs_native_frame_size(&w, &h);
+    out->render_width = (int)w;
+    out->render_height = (int)h;
+    if (!dev || FAILED(ID3D11Device_QueryInterface(dev, &IID_IDXGIDevice, (void **)&xd)))
+        return 0;
+    if (SUCCEEDED(IDXGIDevice_GetAdapter(xd, &ad))) {
+        if (SUCCEEDED(IDXGIAdapter_GetDesc(ad, &desc))) {
+            out->vram_total = (uint64_t)desc.DedicatedVideoMemory;
+            out->shared_total = (uint64_t)desc.SharedSystemMemory;
+        }
+        if (SUCCEEDED(IDXGIAdapter_QueryInterface(ad, &IID_IDXGIAdapter3, (void **)&ad3))) {
+            DXGI_QUERY_VIDEO_MEMORY_INFO mi;
+            if (SUCCEEDED(IDXGIAdapter3_QueryVideoMemoryInfo(ad3, 0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mi))) {
+                out->vram_budget = mi.Budget;
+                out->vram_used_by_game = mi.CurrentUsage;
+            }
+            if (SUCCEEDED(IDXGIAdapter3_QueryVideoMemoryInfo(ad3, 0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &mi)))
+                out->shared_used_by_game = mi.CurrentUsage;
+            IDXGIAdapter3_Release(ad3);
+        }
+        IDXGIAdapter_Release(ad);
+    }
+    IDXGIDevice_Release(xd);
+    return 1;
+}

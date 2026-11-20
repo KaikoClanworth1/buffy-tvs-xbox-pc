@@ -45,11 +45,25 @@ enum {
     NRS_ZFUNC = 57, NRS_ALPHAFUNC = 58, NRS_ALPHABLEND = 59, NRS_ALPHATEST = 60, NRS_ALPHAREF = 61,
     NRS_SRCBLEND = 62, NRS_DSTBLEND = 63, NRS_ZWRITE = 64, NRS_COLORWRITE = 67, NRS_STENCILZFAIL = 68,
     NRS_STENCILPASS = 69, NRS_STENCILFUNC = 70, NRS_STENCILREF = 71, NRS_STENCILMASK = 72,
-    NRS_STENCILWRITEMASK = 73, NRS_BLENDOP = 74,
-    NRS_FOGENABLE = 92, NRS_FOGTABLEMODE = 93, NRS_FOGSTART = 94, NRS_FOGEND = 95, NRS_FOGDENSITY = 96,
-    NRS_PSTEXTUREMODES = 136, NRS_FOGCOLOR = 138, NRS_ZENABLE = 143, NRS_STENCILENABLE = 144,
-    NRS_STENCILFAIL = 145, NRS_FRONTFACE = 146, NRS_CULLMODE = 147, NRS_TEXTUREFACTOR = 148
+    NRS_STENCILWRITEMASK = 73, NRS_BLENDOP = 74
 };
+/* The states after the "simple" ones sit at other indices in other XDKs
+ * (the simple block is 57..91 from XDK 4627 on, 57..82 before): variables,
+ * set by the port with nv2a_native_rs_layout() before the first draw. */
+static int NRS_FOGENABLE = 92, NRS_FOGTABLEMODE = 93, NRS_FOGSTART = 94, NRS_FOGEND = 95, NRS_FOGDENSITY = 96,
+           NRS_PSTEXTUREMODES = 136, NRS_FOGCOLOR = 138, NRS_ZENABLE = 143, NRS_STENCILENABLE = 144,
+           NRS_STENCILFAIL = 145, NRS_FRONTFACE = 146, NRS_CULLMODE = 147, NRS_TEXTUREFACTOR = 148;
+
+/* first_deferred: the index of D3DRS_FOGENABLE (92; 83 in XDK 4432).
+ * first_complex: the index of D3DRS_PSTEXTUREMODES (136; 118 in XDK 4432). */
+void nv2a_native_rs_layout(int first_deferred, int first_complex)
+{
+    NRS_FOGENABLE = first_deferred; NRS_FOGTABLEMODE = first_deferred + 1; NRS_FOGSTART = first_deferred + 2;
+    NRS_FOGEND = first_deferred + 3; NRS_FOGDENSITY = first_deferred + 4;
+    NRS_PSTEXTUREMODES = first_complex; NRS_FOGCOLOR = first_complex + 2; NRS_ZENABLE = first_complex + 7;
+    NRS_STENCILENABLE = first_complex + 8; NRS_STENCILFAIL = first_complex + 9; NRS_FRONTFACE = first_complex + 10;
+    NRS_CULLMODE = first_complex + 11; NRS_TEXTUREFACTOR = first_complex + 12;
+}
 /* Texture-stage state indices (32 DWORDs a stage). */
 enum {
     NTS_ADDRESSU = 0, NTS_ADDRESSV = 1, NTS_ADDRESSW = 2, NTS_MAGFILTER = 3, NTS_MINFILTER = 4,
@@ -2311,7 +2325,7 @@ int nv2a_native_draw(const NativeDraw *d, GpuTexture *rt, GpuTexture *ds,
     }
     t->tex_rt[0] = d->tex[0].srv != NULL; t->tex_rt[1] = d->tex[1].srv != NULL;
     t->blend = d->rs[59]; t->src = d->rs[62]; t->dst = d->rs[63];
-    t->zen = d->rs[143]; t->zwrite = d->rs[64]; t->zfunc = d->rs[57]; t->cull = d->rs[147];
+    t->zen = d->rs[NRS_ZENABLE]; t->zwrite = d->rs[64]; t->zfunc = d->rs[57]; t->cull = d->rs[NRS_CULLMODE];
     t->alphatest = d->rs[60]; t->alpharef = d->rs[61]; t->colorwrite = d->rs[67];
     t->attr0_va = d->attr[0].va; t->attr0_stride = d->attr[0].stride; t->attr0_fmt = d->attr[0].fmt;
     if (d->attr[0].va && d->attr[0].stride) {
