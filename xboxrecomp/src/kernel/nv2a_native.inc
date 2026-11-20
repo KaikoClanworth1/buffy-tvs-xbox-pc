@@ -95,6 +95,8 @@ typedef struct {
     const uint32_t *rs;                /* D3D__RenderState */
     const uint32_t *tss;               /* D3D__TextureState, [4][32] */
     float clip_min, clip_max;          /* the depth range D3D clips to (W- or Z-buffer units); 0, 0: unknown */
+    int scratch;                       /* the vertices are in memory the title reuses within a frame (a
+                                        * Draw...UP call): looked at again for every draw */
 } NativeDraw;
 
 static uint32_t s_nvp_code[VP_SLOTS][4];     /* the program memory, as loaded */
@@ -866,7 +868,7 @@ static int nvb_supported(const NativeDraw *d, uint32_t *mask)
 }
 
 /* The buffer for `bytes` of vertex data at `va` (made or refreshed). */
-static GpuBuffer *nvb_stream(uint32_t va, uint32_t stride, uint32_t bytes)
+static GpuBuffer *nvb_stream(uint32_t va, uint32_t stride, uint32_t bytes, int scratch)
 {
     const uint8_t *mem = (const uint8_t *)xbox_GetMemoryOffset();
     NVbEntry *e = NULL;
@@ -886,7 +888,7 @@ static GpuBuffer *nvb_stream(uint32_t va, uint32_t stride, uint32_t bytes)
                 fprintf(stderr, "[NATIVE] stale VB va=%08X stride=%u bytes=%u frame=%u\n",
                         va, stride, e->bytes, s_frame_no);
         }
-        if (e->checked != s_frame_no) {
+        if (e->checked != s_frame_no || scratch) {
             uint64_t h = nvb_hash(mem + va, e->bytes);
             e->checked = s_frame_no;
             if (h != e->hash) {
@@ -970,7 +972,7 @@ static int nvb_bind(const NativeDraw *d, uint32_t vmax, uint32_t mask)
         }
     key[16] = mask;
     for (i = 0; i < nstream; i++) {
-        bufs[i] = nvb_stream(base[i], sstride[i], (vmax + 1) * sstride[i]);
+        bufs[i] = nvb_stream(base[i], sstride[i], (vmax + 1) * sstride[i], d->scratch);
         if (!bufs[i])
             return 0;
         strides[i] = sstride[i];

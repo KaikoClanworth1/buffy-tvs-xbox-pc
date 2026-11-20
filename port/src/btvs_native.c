@@ -38,6 +38,7 @@ typedef struct {
     int pixel_shader;
     const uint32_t *rs, *tss;
     float clip_min, clip_max;
+    int scratch;                       /* Draw...UP: the game reuses the memory within a frame */
 } NativeDraw;
 int  nv2a_native_draw(const NativeDraw *d, GpuTexture *rt, GpuTexture *ds,
                       uint32_t pw, uint32_t ph, uint32_t sw, uint32_t sh);
@@ -301,6 +302,25 @@ static void log_draw(int path, const NativeDraw *d, uint32_t dev, uint32_t up_st
             fprintf(stderr, " %d:%X/%u", i, d->attr[i].fmt, d->attr[i].stride);
     fprintf(stderr, " | z %u zfunc %X zw %u blend %u %X %X atest %u ref %X cop0 %u aop0 %u\n", r[RS_ZENABLE], r[57], r[64],
             r[59], r[62], r[63], r[60], r[61], d->tss[12], d->tss[16]);
+    {   /* the first vertices, attribute by attribute */
+        int v;
+        for (v = 0; v < 3 && (uint32_t)v < d->count; v++) {
+            uint32_t idx = d->index_va ? MEM16(d->index_va + v * 2) : (uint32_t)v;
+            fprintf(stderr, "[NATIVE]    v%u:", idx);
+            for (i = 0; i < 16; i++)
+                if (d->attr[i].fmt) {
+                    uint32_t p = d->attr[i].va + idx * d->attr[i].stride;
+                    int n = (d->attr[i].fmt >> 4) & 7, k;
+                    fprintf(stderr, " a%d(", i);
+                    if ((d->attr[i].fmt & 0xF) == 2)
+                        for (k = 0; k < n; k++) fprintf(stderr, "%s%.3f", k ? " " : "", MEMF(p + k * 4));
+                    else
+                        fprintf(stderr, "%08X", MEM32(p));
+                    fprintf(stderr, ")");
+                }
+            fprintf(stderr, "\n");
+        }
+    }
 }
 
 static void native_draw(int path, uint32_t prim, uint32_t count, uint32_t index_va, uint32_t up_data, uint32_t up_stride)
@@ -328,6 +348,7 @@ static void native_draw(int path, uint32_t prim, uint32_t count, uint32_t index_
     d.clip_min = MEMF(dev + DEV_CLIP_MIN);
     d.clip_max = MEMF(dev + DEV_CLIP_MAX);
     native_attrs(&d, dev, up_data, up_stride);
+    d.scratch = up_data != 0;
     for (st = 0; st < 4; st++) {
         d.tex[st].res = MEM32(dev + DEV_TEXTURES + st * 4);
         d.tex[st].palette = MEM32(dev + DEV_PALETTES + st * 4);
