@@ -317,8 +317,7 @@ static void live(double seconds, int device)
             Sleep(100);
             now = btvs_audio_clock();
             if (now - prev < BTVS_AUDIO_RATE / 25)
-                printf("  stall: at %.1f s only %d ms were mixed in 100 ms
-", (k + 1) / 10.0,
+                printf("  stall: at %.1f s only %d ms were mixed in 100 ms\n", (k + 1) / 10.0,
                        (int)((now - prev) * 1000 / BTVS_AUDIO_RATE));
             prev = now;
         }
@@ -329,8 +328,9 @@ static void live(double seconds, int device)
     wall = (double)(b.QuadPart - a.QuadPart) / (double)f.QuadPart;
     mixed = (double)(c1 - c0) / BTVS_AUDIO_RATE;
     btvs_audio_stats(&st);
-    printf("live: wall %.3f s, mixed %.3f s (%+.1f ms), audible %d, underruns %llu, peak %.3f\n",
+    printf("live: wall %.3f s, mixed %.3f s (%+.1f ms), audible %d, device stalled %llu ms, XAudio2 glitches %llu, underruns %llu, peak %.3f\n",
            wall, mixed, (mixed - wall) * 1000.0, btvs_audio_audible(),
+           (unsigned long long)(st.stalled_frames * 1000 / BTVS_AUDIO_RATE), (unsigned long long)st.device_glitches,
            (unsigned long long)(st.underruns - under0), st.peak);
     check(fabs(mixed - wall) < 0.08, "the mixer does not follow real time", "clock");
     expect = fmod(mixed * s->rate, (double)sound_frames(s)) / (double)sound_frames(s) * s->bytes;
@@ -368,7 +368,7 @@ int main(int argc, char **argv)
     _putenv_s("BTVS_AUDIO_DUMP", argv[1]);
     /* Tests never make a sound: "live" runs muted (no device), "device" opens
      * the XAudio2 device but mixes at zero volume, so only silence reaches it. */
-    if (is_device) _putenv_s("BTVS_MUTE", "0");
+    if (is_device) { _putenv_s("BTVS_MUTE", "0"); _putenv_s("BTVS_AUDIO_DEVICE_SILENT", "1"); }
     else if (is_live) _putenv_s("BTVS_MUTE", "1");
     if (!btvs_audio_init(is_live ? 0 : BTVS_AUDIO_OFFLINE)) return 2;
     if (is_device) btvs_audio_set_master(0.0f);

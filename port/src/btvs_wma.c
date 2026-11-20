@@ -66,6 +66,9 @@ void btvs_wma_test_cb(void)
     if (n > CHUNK) n = CHUNK;
     if (n) memcpy((void *)XBOX_PTR(buf), s_file + off, n);
     if (pp) MEM32(pp) = buf;
+    if (s_cb_calls < 12)
+        fprintf(stderr, "[wma] read #%llu: offset %u, %u bytes asked, %u given\n",
+                (unsigned long long)s_cb_calls, off, MEM32(g_esp + 12), n);
     s_cb_calls++;
     s_cb_bytes += n;
     g_eax = n;
@@ -161,7 +164,9 @@ int btvs_wma_selftest(void)
     a[0] = TEST_CB_VA; a[1] = 0x12345678u; a[2] = 1000; a[3] = wfx;
     hr = gcall(CWMAXMediaObject_InitializeIntermediate_005C3F4D, xmo, 4, a);
     if ((int32_t)hr < 0) {
-        fprintf(stderr, "[wma] FAIL: the decoder refused the file (0x%08X)\n", hr);
+        fprintf(stderr, "[wma] FAIL: the decoder refused the file (0x%08X); %llu read calls, "
+                        "process heap %08X, decoder state %08X\n", hr,
+                (unsigned long long)s_cb_calls, MEM32(0x00911BF4), MEM32(xmo + 0x2C));
         return 1;
     }
     rate = MEM32(wfx + 4); ch = MEM16(wfx + 2); bits = MEM16(wfx + 14);

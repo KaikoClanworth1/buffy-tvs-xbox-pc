@@ -81,3 +81,10 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   38 DSOUND entry points replaced by `port/src/btvs_audio_dsound.c`. Sound is linked in by the next
   `bash port/tools/regen.sh` + `bash port/tools/build.sh` in the main checkout; until then the build
   still links (the old bodies win) and the port is simply silent. Details: `docs/audio.md`.
+- **Audio → Graphics (regen owner), affects the boot too**: lifter bug fixed in
+  `xboxrecomp/tools/recomp/lifter.py`: the branch after `repe cmpsw/cmpsd` or `repne scasw/scasd` tested
+  stale flags (only the byte forms were tracked), so it always went one way. 38 sites in the game
+  (GUID, palette, wide-string compares); it is what stops the WMA decoder. Needs a regen. Also seen:
+  `[ICALL] Failed to resolve VA 0x005804A4` in `XapiInitProcess` (computed jump inside
+  `memmove_00580200`; Chaos Bleeds replaced `memmove` by host code). After the regen, run
+  `BTVS_WMA_TEST` (`docs/audio.md`).

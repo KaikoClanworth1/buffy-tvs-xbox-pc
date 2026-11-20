@@ -90,6 +90,8 @@ uint64_t btvs_audio_stream_played(int id);               /* bytes played since c
 struct btvs_audio_stats {
     int      voices, playing, streams;
     uint64_t frames_mixed, frames_clipped, underruns, device_restarts;
+    uint64_t stalled_frames;                             /* mixed but dropped: the device was not taking data */
+    uint64_t device_glitches;                            /* XAudio2's own glitch counter */
     float    peak;                                       /* since the last call */
 };
 void btvs_audio_stats(struct btvs_audio_stats *out);

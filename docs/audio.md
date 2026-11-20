@@ -16,13 +16,15 @@ image, no legacy DirectSound.
 
 | | State | How it was checked |
 |---|---|---|
-| Mixer: Xbox ADPCM and PCM buffers, looping, cursors, pitch, volume | **works** | `btvs_audio_test` on real dialogue and effects, see Checks |
-| Streams with packet completion | **works** (in the test program) | `btvs_audio_test scene` |
-| XAudio2 device path | see Checks | `btvs_audio_test device` (zero-volume mix) |
-| `BTVS_MUTE`, `BTVS_AUDIO_DUMP` | **works** | `btvs_audio_test live` |
-| WMA music through the game's own decoder | see Checks | `BTVS_WMA_TEST` self-test |
-| DSOUND replacement inside the game | **written, not yet linked in**: needs a regen with `manual_functions.json` (requested in `docs/AREAS.md`) and a game that boots | - |
-| Music / effects / dialogue at the title screen and in a level | **not checked yet**: the game does not boot yet (`docs/graphics.md`) | - |
+| Mixer: Xbox ADPCM buffers, looping, cursors, pitch, volume, 3D pan | **works** | `btvs_audio_test rpe / pak / scene` on real dialogue and effects (Results) |
+| Streams with packet completion | **works** in the test program | `btvs_audio_test scene`: 62 of 62 packets completed, byte count exact |
+| XAudio2 device path | **works** | `btvs_audio_test device`: 15 of 15 runs keep time within 10 ms, no underruns, no XAudio2 glitches |
+| `BTVS_MUTE` (no device, same timing), `BTVS_AUDIO_DUMP` | **works** | `btvs_audio_test live`: 6 of 6 runs within 15 ms of the wall clock on a loaded PC, no device opened |
+| Game exe links with the audio layer | **works** | `bash port/tools/build.sh` |
+| WMA music through the game's own decoder | **blocked by a recompiler bug, fixed in the lifter, needs a regen** | `BTVS_WMA_TEST`: the decoder starts, reads the ASF header through the callback, then rejects the file (Results) |
+| DSOUND replacement inside the game | **written, not yet active**: needs a regen with `manual_functions.json` (requested in `docs/AREAS.md`) and a game that boots | - |
+| Music / effects / dialogue at the title screen and in a level | **not checked**: the game does not boot yet (`docs/graphics.md`) | - |
+| PCM (non-ADPCM) buffers, stereo buffers | written, **not exercised**: every sound found on the disc so far is mono ADPCM; PCM is exercised only as a stream | - |
 
 ## How the game uses sound
 
@@ -112,7 +114,7 @@ stream is a voice:
   (left-handed, like D3D), over 80 % of the arc so the far ear is never empty;
 - the play cursor (`GetCurrentPosition`) is the mixer's own read position, in bytes.
 
-**Output**. With a device the thread keeps 4 periods (40 ms) queued on an XAudio2 source voice
+**Output**. With a device the thread keeps 5 periods (50 ms) queued on an XAudio2 source voice
 (48 kHz 16-bit stereo, no SRC) and is woken by XAudio2's buffer-end callback. If the device goes
 away the mixer carries on silently and tries again every 2 s.
 
@@ -153,7 +155,8 @@ above. Reasons:
 - it only calls `malloc`/`free`, `pow`, and for the unused file-handle mode a few Win32 file
   functions.
 
-`BTVS_WMA_TEST` (below) proves it by running the translated decoder over a real music file.
+`BTVS_WMA_TEST` runs the translated decoder over a real music file to prove this. It does not pass
+yet (Results).
 
 ### Not modelled
 
@@ -186,11 +189,60 @@ the looping sound keeps going. `live` checks that the mixer follows the wall clo
 device and that none is opened; `device` that the XAudio2 path keeps time with no underruns (the
 mix is at zero volume, so nothing is heard). None of these makes a sound.
 
-Results: see the end of this file.
+Results are below.
+
+## Results (2026-11-20)
+
+All runs: `btvs_audio_test` on CPUs 8-15 at low priority while other sessions were building (so
+the PC was busy), each with a timeout. **No run made a sound**: `rpe`, `pak` and `scene` use the
+offline mixer (no device, no thread); `live` runs with `BTVS_MUTE=1`; `device` opens the XAudio2
+device but mixes at zero gain *and* sets the device's master voice to volume 0, and every such run
+reported a mix peak of exactly 0.
+
+| Run | Result |
+|---|---|
+| `rpe G00_Dialogue.rpe` | 22 of 22 lines: right length, cursor at the middle at half time, peaks 0.99-1.00. Dump 161.6 s, RMS 0.168, 0.2 % of the energy above 8 kHz (speech, not decoder noise) |
+| `pak res_null.pak` | 137 of 137 effects pass the same checks. Dump 107.4 s |
+| `scene` | loop circling in 3D (left/right balance moves through the dump), pitch sweep, fade, one-shots, and a 44.1 kHz PCM stream: 62 of 62 packets completed. The scene clips on purpose (peak 1.28: full-scale dialogue plus a tone plus one-shots) to exercise the clamp |
+| `live` (muted, real-time thread) | 6 runs: mixed time within -9..+15 ms of the wall clock over 7-9 s; no device opened |
+| `device` (XAudio2, zero volume) | 15 runs after the fix below: within -5..+9 ms over 5-10 s, 0 underruns, 0 XAudio2 glitches, 0 ms stalled |
+| `BTVS_WMA_TEST doom_hit2.wma` | fails at start: see below |
+
+Two problems these runs found and fixed:
+
+- **Second-long freezes of the audio clock** with the device open (up to 1.9 s in 5 s). Cause: the
+  WAV dump was written from the mixer thread and the disk was busy. The dump now has its own
+  writer thread and an 8 s ring; the mixer thread never touches the disk. Independently of that,
+  if the device itself ever stops taking data for more than 60 ms, the mix now carries on by the
+  wall clock and drops those periods (counted in `btvs_audio_stats().stalled_frames`), so the
+  game's sound-timed logic cannot freeze with the device. The mixer thread runs under the
+  multimedia scheduler ("Pro Audio") when a device is open.
+- **The muted clock fell behind on a starved CPU** (it gave up after 0.5 s of lag). It now catches
+  up after hold-ups of up to 3 s.
+
+**WMA self-test.** `XapiInitProcess` runs, the process heap comes up, the decoder object is
+constructed, and it reads the file through the callback (30 bytes at 0, 24 bytes at 30: the ASF
+header and the first object header). Then it rejects the file with `0x80004005`. Cause: a
+recompiler bug, not the decoder. `WMA_ParseAsfHeader` compares each object's GUID with
+`repe cmpsd` + `jne`; the lifter only treated the *byte* forms (`cmpsb`/`scasb`) as setting the
+flags, so the branch after a `repe cmpsd` tested the flags of the instruction before it and always
+fell through to the first case. Every object was parsed as a File Properties object. **All 38**
+`repe cmpsw/cmpsd` / `repne scasw/scasd` sites in the game are affected (GUID, palette and
+wide-string compares), so this matters for the boot too. Fixed in
+`xboxrecomp/tools/recomp/lifter.py` (flag tracking now covers every width); it takes effect at the
+next regen. The self-test has to be run again after that; until it passes, "the game's own
+decoder works" is the plan, not a result. If it turns out not to (the decoder also has MMX paths
+picked by a CPUID check), the fallback is to replace `WmaCreateInMemoryDecoder` and the decoder's
+methods with Media Foundation.
+
+Also seen in that run, outside Audio: `[ICALL] Failed to resolve VA 0x005804A4` inside
+`XapiInitProcess` (a computed jump inside `memmove_00580200`). The Chaos Bleeds port replaced
+`memmove` with a host function for the same reason.
 
 ## To do once the game boots
 
-1. Regen with `manual_functions.json` (requested in `docs/AREAS.md`), rebuild.
+1. Regen with `manual_functions.json` and the lifter fix (requested in `docs/AREAS.md`), rebuild.
+   Then first: `BTVS_WMA_TEST` on a few music files (compare the dump's length with the file's).
 2. `bash port/tools/run.sh title 60 BTVS_AUDIO_DUMP=... BTVS_AUDIO_LOG=1`: the log should show
    `DirectSound replaced by the port's mixer`, buffers starting, and the dump should hold the
    title music.

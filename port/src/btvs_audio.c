@@ -78,14 +78,22 @@ static float    s_master = 1.0f, s_cat[BTVS_CAT_COUNT] = { 1.0f, 1.0f, 1.0f };
 static float    s_lpos[3], s_lfront[3] = { 0, 0, 1 }, s_ltop[3] = { 0, 1, 0 };
 static float    s_distance = 1.0f, s_rolloff = 1.0f;
 static volatile LONG64 s_clock;
-static uint64_t s_clipped, s_underruns, s_restarts;
+static uint64_t s_clipped, s_underruns, s_restarts, s_stalled, s_glitches;
 static float    s_peak;
 
 static HANDLE   s_thread, s_wake;
 static volatile LONG s_stop, s_audible, s_dev_error;
 
+/* The dump is written by its own thread: a disk write can block for seconds
+ * on a busy disk, and the mixer thread must never wait for one. */
+#define DUMP_RING (BTVS_AUDIO_RATE * 8)          /* frames: 8 s of slack */
 static FILE    *s_dump;
 static uint32_t s_dump_frames;
+static int16_t *s_dump_ring;
+static volatile LONG64 s_dump_w, s_dump_r;       /* frames written to / taken from the ring */
+static uint64_t s_dump_lost;
+static HANDLE   s_dump_thread;
+static volatile LONG s_dump_stop;
 
 static IXAudio2               *s_xa;
 static IXAudio2MasteringVoice *s_xmaster;
@@ -371,6 +379,32 @@ static void dump_header(void)
     fflush(s_dump);
 }
 
+static void dump_drain(void)
+{
+    LONG64 r = s_dump_r, w = s_dump_w;
+    while (r < w) {
+        uint32_t at = (uint32_t)(r % DUMP_RING), n = DUMP_RING - at;
+        if ((LONG64)n > w - r) n = (uint32_t)(w - r);
+        fwrite(s_dump_ring + at * 2, 4, n, s_dump);
+        s_dump_frames += n;
+        r += n;
+        InterlockedExchange64(&s_dump_r, r);
+    }
+}
+
+static DWORD WINAPI dump_thread(LPVOID arg)
+{
+    int ticks = 0;
+    (void)arg;
+    while (!s_dump_stop) {
+        Sleep(50);
+        dump_drain();
+        if (++ticks % 10 == 0) dump_header();
+    }
+    dump_drain();
+    return 0;
+}
+
 /* ---- one period ------------------------------------------------------------ */
 
 static void mix_period(int16_t *out, int frames)
@@ -396,10 +430,21 @@ static void mix_period(int16_t *out, int frames)
     LeaveCriticalSection(&s_lock);
     InterlockedAdd64(&s_clock, frames);
 
-    if (s_dump) {
+    if (s_dump && !s_dump_ring) {                /* offline: straight to the file */
         fwrite(out, 4, (size_t)frames, s_dump);
         s_dump_frames += (uint32_t)frames;
         if (s_dump_frames % (BTVS_AUDIO_RATE / 2) < (uint32_t)frames) dump_header();
+    } else if (s_dump) {
+        LONG64 w = s_dump_w;
+        if (w - s_dump_r + frames > DUMP_RING) {
+            s_dump_lost += (uint64_t)frames;     /* the disk is more than 8 s behind */
+        } else {
+            uint32_t at = (uint32_t)(w % DUMP_RING), first = DUMP_RING - at;
+            if (first > (uint32_t)frames) first = (uint32_t)frames;
+            memcpy(s_dump_ring + at * 2, out, first * 4u);
+            memcpy(s_dump_ring, out + first * 2, ((uint32_t)frames - first) * 4u);
+            InterlockedExchange64(&s_dump_w, w + frames);
+        }
     }
 }
 
@@ -451,6 +496,11 @@ static int device_open(void)
     if (FAILED(hr)) { s_xsrc = NULL; goto fail; }
     hr = IXAudio2SourceVoice_Start(s_xsrc, 0, XAUDIO2_COMMIT_NOW);
     if (FAILED(hr)) goto fail;
+    {   /* BTVS_AUDIO_DEVICE_SILENT=1 (the test program's "device" mode): the
+         * device is opened but its master voice is at volume 0 */
+        const char *e = getenv("BTVS_AUDIO_DEVICE_SILENT");
+        if (e && *e == '1') IXAudio2MasteringVoice_SetVolume(s_xmaster, 0.0f, XAUDIO2_COMMIT_NOW);
+    }
     InterlockedExchange(&s_dev_error, 0);
     InterlockedExchange(&s_audible, 1);
     return 1;
@@ -472,7 +522,7 @@ static double now_seconds(void)
 static DWORD WINAPI mixer_thread(LPVOID arg)
 {
     int have_com, started = 0;
-    double silent_t0 = 0, retry_at = 0;
+    double silent_t0 = 0, retry_at = 0, last_room = 0, perf_at = 0;
     uint64_t silent_f0 = 0;
     static int16_t scratch[BTVS_AUDIO_PERIOD * 2];
     (void)arg;
@@ -486,6 +536,7 @@ static DWORD WINAPI mixer_thread(LPVOID arg)
         if (!AvSetMmThreadCharacteristicsA("Pro Audio", &task))
             SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
     } else {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
         silent_t0 = now_seconds();
     }
     if (s_muted) alog("muted (BTVS_MUTE): no audio device opened");
@@ -500,6 +551,31 @@ static DWORD WINAPI mixer_thread(LPVOID arg)
             IXAudio2SourceVoice_GetState(s_xsrc, &st, XAUDIO2_VOICE_NOSAMPLESPLAYED);
             queued = st.BuffersQueued;
             if (started && queued == 0) s_underruns++;
+            {
+                /* The game's timing hangs on this clock (cursors, packet
+                 * completion, movie sync), so it must not stop when the device
+                 * does: an audio engine that stops taking data for a moment
+                 * (seen: 0.1-2 s, queue full, under CPU load) would freeze
+                 * every sound-timed thing in the game. While the queue stays
+                 * full for more than 60 ms the mix goes on by the wall clock
+                 * and those periods are dropped, exactly as a muted run mixes. */
+                double t = now_seconds();
+                const double per = (double)BTVS_AUDIO_PERIOD / BTVS_AUDIO_RATE;
+                if (queued < DEV_QUEUE || last_room == 0) last_room = t;
+                else if (t - last_room > 0.06) {
+                    while (last_room + per <= t) {
+                        mix_period(scratch, BTVS_AUDIO_PERIOD);
+                        s_stalled += BTVS_AUDIO_PERIOD;
+                        last_room += per;
+                    }
+                }
+                if (t - perf_at > 1.0) {
+                    XAUDIO2_PERFORMANCE_DATA pd;
+                    IXAudio2_GetPerformanceData(s_xa, &pd);
+                    s_glitches = pd.GlitchesSinceEngineStarted;
+                    perf_at = t;
+                }
+            }
             while (!failed && queued < DEV_QUEUE) {
                 XAUDIO2_BUFFER b;
                 int16_t *buf = s_devbuf[s_devnext];
@@ -529,8 +605,10 @@ static DWORD WINAPI mixer_thread(LPVOID arg)
             uint64_t due;
             if (silent_f0 == 0 && silent_t0 == 0) silent_t0 = t;
             due = silent_f0 + (uint64_t)((t - silent_t0) * BTVS_AUDIO_RATE);
-            if (due > (uint64_t)s_clock + BTVS_AUDIO_RATE / 2) {
-                /* the thread was held up (debugger, suspend): don't burst */
+            if (due > (uint64_t)s_clock + BTVS_AUDIO_RATE * 3) {
+                /* the thread was held up for seconds (debugger, suspend):
+                 * don't burst. Shorter hold-ups (a starved CPU) are caught up,
+                 * so the clock keeps to real time. */
                 silent_t0 = t; silent_f0 = (uint64_t)s_clock; due = silent_f0;
             }
             while ((uint64_t)s_clock + BTVS_AUDIO_PERIOD <= due && !s_stop)
@@ -565,6 +643,13 @@ int btvs_audio_init(int flags)
     }
     s_inited = 1;
     if (!s_offline) {
+        if (s_dump) {
+            s_dump_ring = (int16_t *)malloc(sizeof(int16_t) * 2 * DUMP_RING);
+            s_dump_stop = 0;
+            s_dump_w = s_dump_r = 0;
+            if (s_dump_ring) s_dump_thread = CreateThread(NULL, 0, dump_thread, NULL, 0, NULL);
+            if (!s_dump_thread) { free(s_dump_ring); s_dump_ring = NULL; }
+        }
         s_wake = CreateEventA(NULL, FALSE, FALSE, NULL);
         s_stop = 0;
         s_thread = CreateThread(NULL, 0, mixer_thread, NULL, 0, NULL);
@@ -594,7 +679,16 @@ void btvs_audio_shutdown(void)
         memset(v, 0, sizeof *v);
     }
     LeaveCriticalSection(&s_lock);
-    if (s_dump) { dump_header(); fclose(s_dump); s_dump = NULL; }
+    if (s_dump_thread) {
+        InterlockedExchange(&s_dump_stop, 1);
+        WaitForSingleObject(s_dump_thread, 30000);
+        CloseHandle(s_dump_thread); s_dump_thread = NULL;
+    }
+    if (s_dump) {
+        if (s_dump_lost) alog("dump: %llu frames not written (disk too slow)", (unsigned long long)s_dump_lost);
+        dump_header(); fclose(s_dump); s_dump = NULL;
+    }
+    free(s_dump_ring); s_dump_ring = NULL;
     s_inited = 0;
 }
 
@@ -900,6 +994,8 @@ void btvs_audio_stats(struct btvs_audio_stats *out)
     out->frames_clipped = s_clipped;
     out->underruns = s_underruns;
     out->device_restarts = s_restarts;
+    out->stalled_frames = s_stalled;
+    out->device_glitches = s_glitches;
     out->peak = s_peak;
     s_peak = 0.0f;
     UNLOCK();

@@ -3754,10 +3754,15 @@ def lift_basic_block(lifter, bb, flag_state=None):
             # repe cmpsb/repne scasb = comparison, sets flags
             rest = curr.op_str.strip() if hasattr(curr, 'op_str') else ""
             raw_m = curr.mnemonic
-            if "cmpsb" in raw_m or "scasb" in raw_m:
+            # Every width: `repe cmpsd` / `repne scasw` set the flags exactly as
+            # the byte forms do. Recognising only cmpsb/scasb left the previous
+            # flag setter in place, so the jcc after a `repe cmpsd` tested a
+            # stale value (Buffy's WMA parser compares GUIDs this way and took
+            # the first branch for every object).
+            if "cmps" in raw_m or "scas" in raw_m:
                 last_flag_setter = raw_m
                 last_flag_ops = list(curr.operands)
-            elif "cmpsb" in rest or "scasb" in rest:
+            elif "cmps" in rest or "scas" in rest:
                 last_flag_setter = raw_m
                 last_flag_ops = list(curr.operands)
             else:

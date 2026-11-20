@@ -28,8 +28,6 @@ fi
 if [ ! -f build/CMakeCache.txt ]; then
     CFG=(-S . -B build -G "Visual Studio 16 2019" -A x64)   # MSVC 14.29, as the Chaos Bleeds port
     [ "$(cd "$BTVS_MAIN" && pwd)" != "$(cd "$PORT/.." && pwd)" ] && CFG+=("-DBTVS_MAIN=$(cd "$BTVS_MAIN" && pwd -W)")
-    # a worktree has no copy of the toolkit's submodules: use the main checkout's toolkit
-    [ ! -f "$PORT/../xboxrecomp/third_party/glslang/CMakeLists.txt" ] && [ -f "$BTVS_MAIN/xboxrecomp/third_party/glslang/CMakeLists.txt" ]         && CFG+=("-DXBOXRECOMP_DIR=$(cd "$BTVS_MAIN/xboxrecomp" && pwd -W)")
     cmake "${CFG[@]}" > build_configure.log 2>&1 || { tail -30 build_configure.log; exit 1; }
 fi
 ARGS=(--build build --config Release)
