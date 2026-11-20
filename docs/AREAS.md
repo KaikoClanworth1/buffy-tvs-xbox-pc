@@ -74,6 +74,8 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   `btvs_input_mouse_captured()`. Input decides focus itself (foreground window of this process).
 - **Controls -> Extras**: ship `SDL3.dll` (zlib licence; the build puts it beside the exe) in the
   package. It is optional at run time.
-- **Controls -> anyone who finds them**: the points where the main menu is ready and where a level
-  starts (for `btvs_input_script_mark`), and how to tell menu / pause / cutscene from play (for
-  `btvs_input_allow_mouse_look`).
+- **Controls -> whoever first gets the game to its menus**: the input layer reads the menu id at
+  `0x7F0408` and the player at `[[0x7D0090]+0xF0]` (from Logs' notes) to name script marks
+  (`title`, `menu`, `pause`, `level`) and to release the mouse outside play. Check the
+  `[INPUT] game: menu id N` / `level running` lines in the first runs' `.err` and tell Controls if
+  they do not match what is on screen.

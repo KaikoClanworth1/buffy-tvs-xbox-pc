@@ -151,8 +151,8 @@ to be released (the button that opened the prompt does not bind itself).
 - Forward `WM_MOUSEWHEEL` as `btvs_input_wheel(GET_WHEEL_DELTA_WPARAM(wp) / WHEEL_DELTA)`.
 - Hide the cursor (`WM_SETCURSOR`) while `btvs_input_mouse_captured()`.
 
-`btvs_input_allow_mouse_look(0/1)`: whoever knows the game is in a menu, paused or in a cutscene
-should turn mouse capture off there (default: allowed whenever the window has focus).
+`btvs_input_allow_mouse_look(0/1)` turns mouse capture on and off; the input layer drives it itself
+from the game's state (see "Where the game is").
 
 ## Test runs: `BTVS_PAD_SCRIPT`
 
@@ -188,11 +188,22 @@ port 2                     # following lines are player 2
 - **every**: repeat with this period until the next part starts.
 - **after `<name>`** starts a new part that begins when some code calls
   `btvs_input_script_mark("<name>")`; the earlier part stops then. Loading time therefore does not
-  matter. No marks are placed in the game yet (see "Not done").
+  matter. Marks the input layer places itself (see "Where the game is"): `title`, `menu` (main
+  menu), `pause`, `menu<id>` for any menu, `level`.
 - `BTVS_INPUT_LOG=1` logs every change of the pad the game was given (`[INPUT] t … p1 pad btn …`).
 - `btvs_input_script_done()` is 1 when everything has played.
 
 Without the game: `port/build/Release/btvs_input_test.exe script <file|text> [seconds]`.
+
+### Where the game is
+
+Ten times a second, from player 1's pad read, `btvs_input_xapi.c` looks at two of the game's
+globals: the current menu id (`0x7F0408`; 1 main, 9 pause, 10 title, 15 resurrect) and the player
+object (`[[0x7D0090] + 0xF0]`, non-zero while a level runs). Changes are logged
+(`[INPUT] game: menu id 1`), named for scripts (`title`, `menu`, `pause`, `menu<id>`, `level`), and
+mouse look is allowed only while a level runs and neither the pause nor the resurrect menu is up.
+The addresses come from the Logs area's reading of `final.map` and are **not confirmed at run time**;
+the log lines of the first runs will show. `BTVS_INPUT_NO_PROBE=1` turns the probe off.
 
 ## Recording and playback (for Logs' trail)
 
@@ -258,8 +269,7 @@ Not verified:
 
 ## Not done
 
-- Script marks in the game (`btvs_input_script_mark("menu")`, `("level")`): they belong where the
-  main menu and a level become ready; add them once those points are known.
+- Confirming the game-state probe's addresses (marks and mouse-look gating depend on them).
 - A pad script that goes from boot through the main menu into a level (needs the game running).
-- Telling the layer when the game is in a menu / cutscene (`btvs_input_allow_mouse_look`).
+- Cutscenes: the mouse is still captured during them (only menus and "no level" release it).
 - The Menu area's Controls page (the functions it needs are above).

@@ -137,6 +137,12 @@ else()
                     "run tools/regen.sh in the main checkout to switch to the PC input layer")
 endif()
 
+# Compile-only check of the XAPI replacements, for before that regen:
+#   bash tools/build.sh btvs_input_xapi_check
+add_library(btvs_input_xapi_check OBJECT EXCLUDE_FROM_ALL src/btvs_input_xapi.c)
+target_include_directories(btvs_input_xapi_check PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src ${BTVS_GEN_DIR} ${BTVS_GEN_DIR}/.. ${XBOXRECOMP_DIR}/include)
+
 # The input layer on its own: self-test, pad-script player, live pad printer.
 add_executable(btvs_input_test src/btvs_input_test.c ${BTVS_INPUT_SOURCES} src/btvs_settings.c)
 target_include_directories(btvs_input_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
