@@ -13,7 +13,7 @@
  *     btvs_trail.txt, btvs_trail_previous.txt
  *     input.rec         the input recording since the last anchor
  *     settings.ini      btvs_settings.ini
- *     save\             the Xbox save drives (XboxData) as they are now
+ *     save\             the player's saves (UserData, TitleData of the save folder)
  *     crashes\          the newest crash / hang reports of this install
  *     memory.txt
  *
@@ -485,8 +485,21 @@ int btvs_report_make(const char *player_text, const char *trigger)
 
     btvs_settings_save();
     have_settings = copy_into(dir, btvs_settings_path(), "settings.ini");
+    /* Only the saves: the save folder also holds the game's own cache drive
+     * (its files from the disc: never in a report) and hard-disk images. */
     sprintf_s(path, MAX_PATH, "%s\\save", dir);
-    save_files = btvs_copy_tree(btvs_save_dir(), path, 32ull << 20, &save_bytes);
+    CreateDirectoryA(path, NULL);
+    save_files = 0;
+    for (i = 0; i < 2; i++) {
+        static const char *const part[2] = { "UserData", "TitleData" };
+        char from[MAX_PATH], to[MAX_PATH];
+        sprintf_s(from, MAX_PATH, "%s\\%s", btvs_save_dir(), part[i]);
+        sprintf_s(to, MAX_PATH, "%s\\save\\%s", dir, part[i]);
+        if (GetFileAttributesA(from) != INVALID_FILE_ATTRIBUTES)
+            save_files += btvs_copy_tree(from, to, 32ull << 20, &save_bytes);
+    }
+    if (!save_files)
+        RemoveDirectoryA(path);
     crashes = copy_newest(dir, "crash_*.txt", 3) + copy_newest(dir, "hang_*.txt", 2) + copy_newest(dir, "crash_*.dmp", 1);
 
     btvs_system_text(sys, sizeof sys);

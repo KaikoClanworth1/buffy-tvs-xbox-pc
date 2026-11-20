@@ -36,6 +36,15 @@ float btvs_fps(void);
  * up to 8), ends the process. Any thread.
  * The window also gives Menu its WM_CHAR (btvs_menu_char) and Controls the
  * mouse wheel, the cursor capture and btvs_input_frame() once a frame. */
+/* Overlay: the port's own text and rectangles over the game's picture, for
+ * Menu's and Logs' pages and messages. Immediate mode: ask again every frame
+ * for what should be on screen (any thread). Coordinates and sizes are in the
+ * game's 640x480 screen whatever the picture's real size; colours are
+ * 0xAARRGGBB; `height` is the letter height. Part of the frame, so also in
+ * screenshots. btvs_overlay_text_width: for centring and right-aligning. */
+void  btvs_overlay_rect(float x, float y, float w, float h, uint32_t argb);
+void  btvs_overlay_text(float x, float y, float height, uint32_t argb, const char *text);
+float btvs_overlay_text_width(float height, const char *text);
 void  btvs_quit(void);
 void  btvs_on_quit(void (*fn)(void));
 

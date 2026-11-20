@@ -50,6 +50,7 @@ void btvs_window_frame(void);            /* once a frame, game thread */
 
 /* btvs_native.c */
 void btvs_native_start(void);            /* the device comes up; game thread, after the guest memory is mapped */
+void btvs_native_overlay(void);           /* this frame's overlay items onto the frame (btvs_native_overlay.c) */
 void btvs_native_present(void);          /* show the frame (from the Swap hook) */
 void btvs_native_frame_size(uint32_t *w, uint32_t *h);   /* internal render size now */
 

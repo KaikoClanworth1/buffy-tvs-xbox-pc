@@ -206,6 +206,24 @@ static void kernel_data_init(void)
             BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_LAUNCH_DATA_PAGE) = 0;
         }
     }
+    /* A title that launched itself again (XLaunchNewImage of its own image:
+     * how some titles load a level with all memory free): the launch data
+     * page the previous run left (RECOMP_LAUNCH_DATA_FILE, written at
+     * HalReturnToFirmware below) is this run's, whole. */
+    {
+        const char *file = getenv("RECOMP_LAUNCH_DATA_FILE");
+        FILE *lf = file && *file ? fopen(file, "rb") : NULL;
+        if (lf) {
+            uint32_t page = xbox_HeapAlloc(0x1000, 4096);
+            if (page) {
+                size_t got = fread((void *)((uintptr_t)page + g_xbox_mem_offset), 1, 0x1000, lf);
+                BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_LAUNCH_DATA_PAGE) = page;
+                fprintf(stderr, "  Launch data: %u bytes from the run before, type %u, \"%.60s\"\n",
+                        (unsigned)got, BRIDGE_MEM32(page), (const char *)((uintptr_t)page + g_xbox_mem_offset + 0x400));
+            }
+            fclose(lf);
+        }
+    }
 
     /* Object-type exports. Each gets a DISTINCT non-zero value rather than 0.
      *
@@ -1171,6 +1189,25 @@ static void bridge_HalReturnToFirmware(void)
     fprintf(stderr, "  [KERNEL] HalReturnToFirmware: routine=%u - title is exiting\n",
             routine);
     fflush(stderr);
+
+    /* The title launching its own image again: the launch data page goes to
+     * RECOMP_RELAUNCH_FILE and the process ends with XBOX_EXIT_RELAUNCH, for
+     * whoever started it to start it again with RECOMP_LAUNCH_DATA_FILE. */
+    {
+        uint32_t page = BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_LAUNCH_DATA_PAGE);
+        const char *file = getenv("RECOMP_RELAUNCH_FILE");
+        if (page && file && *file && BRIDGE_MEM32(page) == 0 /* LDT_TITLE */) {
+            FILE *lf = fopen(file, "wb");
+            if (lf) {
+                fwrite((const void *)((uintptr_t)page + g_xbox_mem_offset), 1, 0x1000, lf);
+                fclose(lf);
+                fprintf(stderr, "  [KERNEL] the title launches itself again: launch data saved, exiting to be restarted\n");
+                fflush(stderr);
+                RECOMP_ICALL_FEEDBACK_DUMP();
+                ExitProcess(0x42544C52u);                  /* XBOX_EXIT_RELAUNCH */
+            }
+        }
+    }
 
     /* Write the indirect-branch targets before the process goes away. This
      * path ends in ExitProcess, which does not run atexit handlers, so the

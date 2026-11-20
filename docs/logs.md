@@ -78,7 +78,7 @@ Controls' `btvs_input_record_begin()`, so `btvs_input.rec` always holds "the inp
 How the game is read (addresses in `btvs_trail.c`, section GAME HOOKS; found in `final.map` + disassembly):
 
 - **wrappers on virtual functions**, through `recomp_lookup_manual` -> `btvs_trail_lookup()` (no regen needed):
-  they run on the game thread at the exact moment. `TGame::ExecFrame` gives the once-a-frame tick that drives the
+  they run on the game thread at the exact moment. `TGameManagerImplementation::Frame` gives the once-a-frame tick that drives the
   replay. Each logs `game hook live: <name>` the first time it runs.
 - **a watcher thread** reading the game's globals 10 times a second: level name
   (`[[0x7D0090]+0x40]+0x40`), menu id (`0x7F0408`), player position/health (`[[0x7D0090]+0xF0]` +0x240 / +0x90).
@@ -103,7 +103,7 @@ front, so it works when the game is frozen), or `BTVS_TEST_REPORT_AT=<seconds>` 
 | `btvs_log.txt`, `btvs_log_previous.txt`, `btvs_trail.txt`, `btvs_trail_previous.txt` | |
 | `input.rec` | the recording since the last anchor (absent until Controls provides it) |
 | `settings.ini` | `btvs_settings.ini` |
-| `save\` | the Xbox save drives (`XboxData`), 32 MB at most |
+| `save\` | the player's saves only (`UserData`, `TitleData` of the save folder; never the game's cache drive or the disk images), 32 MB at most |
 | `crashes\` | the 3 newest crash reports, 2 newest hang reports, the newest minidump |
 | `memory.txt` | |
 
@@ -172,58 +172,85 @@ blocks the game holds of the console's 64 MB, and the high-water mark.
 
 ## What was verified, and what wasn't
 
-State on 20 Nov 2026. The game does not boot yet (it faults about a second in, inside the translated Xbox
-library start-up: Graphics' bring-up), so everything that needs a running level is **unverified**.
+State on 20 Nov 2026, late. The game boots to its title screen and menus; **no level loads yet** (Graphics: a
+missing map list), so everything that needs a level is still **unverified**.
 
-Verified in hidden test runs (`port/tools/run.sh`, build `d06ba57c3a` + this work):
+Verified in hidden test runs (`port/tools/run.sh`, main at `c94366a` + this work, menus driven by
+`BTVS_PAD_SCRIPT`):
+
+- **Trail in the menus**: `boot`, `game_start`, then one `menu` line per screen as it is asked for
+  (`GUI::TBuffyManager::SetMenu` hook, `game hook live:` in the log): 10 title, 1 main, 4 options, 8 display.
+  Menu's own PC pages add their own lines (`menu screen=pc_audio`). Frame numbers count
+  (`TGameManagerImplementation::Frame` hook: the once-a-frame tick; it also feeds the hang monitor).
+- **Report at a menu** (`BTVS_TEST_REPORT_AT=25`, in Options): folder + zip of 11 files in 2.4 s: the
+  screenshot (Graphics' `btvs_screenshot`, 640x480, shows the Options screen), log and previous log, trail,
+  `settings.ini`, `input.rec` (8 records: the script's Start, Down, Down, A), memory, `report.json` (parses), `replay.txt`; the zip
+  passes `zipfile.testzip()`. "Where the game thread is" names game functions
+  (`TGame_Render`, `TGame_ExecFrame`, `ExecuteGame`).
+- **`report_open.py`** on that zip: summary, trail, memory, game-thread stack, replay commands.
+- **`BTVS_REPLAY=<zip>`** in a fresh run: unpacked, the report's settings used, the recorded input played
+  from boot, and the game was on the same Options screen 11.7 s after start (the report's screenshot and a frame
+  dump of the replay show the same screen and the same highlighted item). One report, one replay: not a
+  statistic. Playback is by pad-read count, so it does not depend on how long loading takes.
+- **Memory figures in that report**: 251.8 MB working set, 24.4 MB video memory by this game (Graphics'
+  device now exists), game heap 9.06 MB in 13 blocks. Not re-compared with Windows in this round; the
+  comparison below is from the earlier round.
+
+Fixed after seeing the first menu runs:
+
+- the frame tick was hooked on `TGame::ExecFrame`, which the game reaches by a direct call: it never fired
+  (frame count 0, no replay tick). Now on `TGameManagerImplementation::Frame` (called through a vtable).
+- reports copied the whole save folder, which holds the game's cache drive (its dialogue and movie files from
+  the disc) and the hard-disk images. Now only `UserData` and `TitleData`. A replay keeps the cache from one
+  replay to the next instead of installing it again.
+- a menu was logged twice when the watcher read the old id during a fade.
+
+Verified earlier (before the game booted; not re-run since):
 
 - **Log**: header (version, commit, Windows 11 25H2, CPU, RAM, GPU + driver), previous run kept, lines on stderr
   in test runs. The player-run path (no stderr: toolkit output redirected into the log) was **not** run, since a
   visible run is not allowed in tests.
 - **Forced crash** (`BTVS_TEST_CRASH=1`): `crashes\crash_*.txt` + a 166 KB `.dmp`; the fault shown as guest
-  address `0xBAD00010`; guest registers; the two planted guest return addresses named from the 42,786 names
+  address `0xBAD00010`; guest registers; the two planted guest return addresses named from the names
   loaded from the `.pdb` (`cvcolor_setstring+0x1C0`, `TString_SetLength+0x10`); host stack with file:line; trail
-  tail; memory. The process then ends through the unhandled-exception filter. The `.dmp` was not opened in a
-  debugger.
-- **A real crash**: the game's own boot fault was caught and reported the same way
-  (`buffy_tvs!SetLastError_00577605+0x90 (recomp_0039.c:29391)`), which is the evidence that game functions
-  are named in real faults.
-- **Report** (`BTVS_TEST_REPORT_AT=2`): folder + zip of 14 files in about 2.5 s; `report.json` parses; the zip
-  passes Python's `zipfile.testzip()`; save copied (2 files); the newest crash reports included.
-- **`report_open.py`** on that zip: summary, trail, symbolized crash, replay commands.
-- **`BTVS_REPLAY=<zip>`**: unpacked, the throw-away save copy used as the save folder, the `boot` anchor
-  reached, Controls' player started on the report's `input.rec` (it held 0 records: the game never read a pad).
+  tail; memory. The `.dmp` was not opened in a debugger.
+- **A real crash**: a boot fault of that time was caught and reported the same way
+  (`buffy_tvs!SetLastError_00577605+0x90 (recomp_0039.c:29391)`).
 - **Memory against Windows** (PowerShell `Get-Process` / `Get-Counter` / `Win32_OperatingSystem`, same second):
   working set 125.7 vs 125.4 MB; commit 135.5 vs 135.4 MB; RAM total 65,442 MB both; free 31,509 vs 32,007 MB;
   video memory in use by all programs 7,182 vs 7,246 MB (the counter Task Manager graphs); total 16,047 MB.
-  `vram_used` (this game) read 0: no device existed. Task Manager itself was not opened (no windows in tests).
-- **Game heap figures**: 1.01 MB in 14 blocks at the time of the report (the toolkit's heap). "peak" is that
-  heap's high-water mark, which is its bump pointer (32 MB at boot: it starts with a large reservation), so
-  treat peak as rough.
+  Task Manager itself was not opened (no windows in tests). The game's own video memory figure (now non-zero)
+  has not been compared with anything.
+- **Game heap figures**: "peak" is the toolkit heap's high-water mark, which is its bump pointer (32 MB at
+  boot), so treat peak as rough.
 
-Not verified (needs a game that boots, or another area):
+Not verified:
 
-- every **game hook**: none of the wrappers (`ExecFrame`, `Map_Loaded`, `SetMenu`, `DieAsPlayer`, cutscenes,
-  autosave) has fired, the watcher has never seen a level name, a menu id or the player. The addresses come
-  from the map and disassembly only. Look for `game hook live:` lines in the log on the first run that reaches
-  the menu.
+- **anything in a level**: `Map_Loaded` / `Map_Completed`, the level name, player position and health, death,
+  cutscenes, autosave: none has fired; the addresses come from the map and disassembly only. They are in
+  place and need no regen: the first run that loads a level should log `game hook live: TManager_Buffy::Map_Loaded`
+  and a `level name=...` trail line. If the wrappers stay silent (the game may call them directly, as it did
+  `ExecFrame`), the 10 Hz watcher still writes the level line, and the hooks then need `wrap:` entries in
+  `manual_functions.json` (a regen: ask Graphics).
 - **the level jump** (`TGO::Map_QueueChange` called from the frame tick): never run. Unknowns: whether the
   front end accepts a queued map without a session being created first, and whether level changes go through
   `ShellRelaunch` (then the jump must pass launch parameters instead).
-- **replay of real input**, and so the task's goal "a report made mid-level that `BTVS_REPLAY` takes back to
-  the same place in under a minute": **not reached**.
-- **hang report**: the code path ran only as far as starting its thread (the game dies before 20 s).
-- **screenshot** in a report: Graphics' files are not in the build until its regen; reports say "no".
+- so the task's goal "a report made mid-level that `BTVS_REPLAY` takes back to the same place in under a
+  minute": **not reached**.
+- **Report a Problem chosen in the game's Options menu** (Menu's item calling `btvs_report_create`): my
+  scripted run did not land on the item; only the test trigger was used.
+- **hang report**: never triggered. Note: frames are counted at the game loop's frame call, so a load that
+  takes more than 20 s without returning to the loop would be reported as a hang (`BTVS_HANG_SECS`).
 - **hotkey thread** (F12 / left stick): disabled in test runs by design, so never exercised.
-- **settings in a report / replay**: no `btvs_settings.ini` existed in the test build folder.
+- **a save in a report**: no save existed (0 files).
+- **menu ids** other than 1, 4, 8, 10 are numbers in the trail (9 pause and 15 resurrect are from the
+  disassembly, unseen).
 
 Known gaps:
 
-- Controls' recorder has no "write it now": a report closes the recording, takes the file and starts a new
-  one, so a second report before the next anchor carries a partial recording (`input_complete=0`, which the
-  replay refuses to play). Asked for `btvs_input_record_flush()` in AREAS.md.
-- Menu ids in the trail are numbers.
+- Controls writes the recording to disk once a second: a report can miss the last second of input. If the
+  file is still empty, the report closes and restarts the recording, and a later report before the next
+  anchor then carries a partial one (`input_complete=0`, which the replay refuses to play).
 - No privacy pass on logs (user name in paths) before any future upload.
 - `btvs_symbols.txt` for builds without a `.pdb` is generated by `report_symbols.py` but nothing runs it.
 - DXGI lists this PC's one RTX 4080 SUPER three times (three LUIDs); the header prints all three.
-

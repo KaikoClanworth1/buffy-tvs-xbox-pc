@@ -158,6 +158,32 @@ static LONG CALLBACK watch_veh(PEXCEPTION_POINTERS ep)
             fprintf(stderr, "[BREAK] #%ld %s guest eax=%08X ecx=%08X edx=%08X ebx=%08X esi=%08X edi=%08X esp=%08X ebp=%08X [esp]=%08X %08X %08X\n",
                     s_break_hits, s_break_name[which], g_eax, g_ecx, g_edx, g_ebx, g_esi, g_edi, g_esp, g_ebp,
                     MEM32(g_esp), MEM32(g_esp + 4), MEM32(g_esp + 8));
+            if (getenv("BTVS_BREAK_ARG")) {          /* what the first argument points at, and what its DWORDs point at, as text */
+                uint32_t a1 = MEM32(g_esp + 4), q4, q5;
+                if (a1 >= 0x10000u && a1 < 0x04000000u) {
+                    fprintf(stderr, "[BREAK]   arg1 +10 \"");      /* (a TFileName keeps its text there) */
+                    for (q5 = 0; q5 < 96; q5++) {
+                        unsigned char ch = MEM8(a1 + 10 + q5);
+                        if (ch < 32 || ch > 126) break;
+                        fputc(ch, stderr);
+                    }
+                    fprintf(stderr, "\" ->");
+                    for (q4 = 0; q4 < 6; q4++) {
+                        uint32_t v = MEM32(a1 + q4 * 4);
+                        fprintf(stderr, " %08X", v);
+                        if (v >= 0x10000u && v < 0x04000000u) {
+                            fprintf(stderr, "(\"");
+                            for (q5 = 0; q5 < 48; q5++) {
+                                unsigned char ch = MEM8(v + q5);
+                                if (ch < 32 || ch > 126) break;
+                                fputc(ch, stderr);
+                            }
+                            fprintf(stderr, "\")");
+                        }
+                    }
+                    fprintf(stderr, "\n");
+                }
+            }
             if (s_watch_depth > 0)
                 btvs_boot_host_stack("BREAK");
             fflush(stderr);

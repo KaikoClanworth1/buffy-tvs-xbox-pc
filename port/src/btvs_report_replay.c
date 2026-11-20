@@ -142,10 +142,21 @@ void btvs_replay_init(void)
         _putenv_s("BTVS_SETTINGS_INI", path);
     sprintf_s(path, MAX_PATH, "%s\\save", s_r.folder);
     sprintf_s(base, MAX_PATH, "%s\\replay\\save_run", btvs_exe_dir());
-    delete_tree(base);
+    /* (the game's cache drive in there is kept from one replay to the next:
+     * it is the same for every report and takes a while to install) */
     CreateDirectoryA(base, NULL);
-    if (is_dir(path))
-        btvs_copy_tree(path, base, ~0ull, NULL);
+    {
+        static const char *const part[2] = { "UserData", "TitleData" };
+        char from[MAX_PATH], to[MAX_PATH];
+        int i;
+        for (i = 0; i < 2; i++) {
+            sprintf_s(from, MAX_PATH, "%s\\%s", path, part[i]);
+            sprintf_s(to, MAX_PATH, "%s\\%s", base, part[i]);
+            delete_tree(to);
+            if (is_dir(from))
+                btvs_copy_tree(from, to, ~0ull, NULL);
+        }
+    }
     _putenv_s("BTVS_SAVE_DIR", base);
 
     s_r.active = 1;

@@ -2329,7 +2329,7 @@ class Lifter:
         """Check if a jump target is outside the current function."""
         return not (self.func_start <= addr < self.func_end)
 
-    def _read_jump_table(self, table_va, max_entries=256):
+    def _read_jump_table(self, table_va, max_entries=4096):
         """Read 32-bit jump table entries from the XBE at a given VA.
         Returns list of target addresses. Stops when an entry is not a
         valid code address or max_entries is reached."""
