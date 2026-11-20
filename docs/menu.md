@@ -9,7 +9,8 @@ Owner: the Menu session. Files: `port/src/btvs_menu.c`, `btvs_settings.c/.h`, th
 | Settings store (`btvs_settings.c`) | Done. Tested standalone: defaults, set, callbacks, save, reload, environment overrides |
 | Front end reversed (below) | Done, from `final.map`, the disassembly and `interfc\buffy.mbf` |
 | PC entries and pages (`btvs_menu.c`) | Written. Compiles. Page logic exercised against a **fake** menu (a harness that imitates the game's list and selection), not the game |
-| Anything in the real game | **Not verified.** The game does not boot yet and the translated-code library is not built, so the port has never been linked with this code and no frame dump exists |
+| Link | Done: `buffy_tvs.exe` builds and links with this code (worktree build against main's `btvs_recomp.lib`, Graphics sources not yet in the build) |
+| Anything in the real game | **Not verified.** A hidden test run (`run.sh menu1 40`) crashes during boot, in the game's first file opens (`CreateFileA` under `File_Exists`, after 129 indirect calls), long before any menu; that is boot bring-up (Graphics). No frame dump exists |
 
 What a first run in the game has to prove, in order: the hooks are reached (log lines
 `options: PC entries added`, `main menu: Exit added`, `pause menu: Report a Problem added`);

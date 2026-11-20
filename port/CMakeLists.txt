@@ -38,7 +38,6 @@ add_subdirectory(${XBOXRECOMP_DIR} ${CMAKE_BINARY_DIR}/xboxrecomp)
 # is not in git). A git worktree has no copy, so it uses the main checkout's
 # generated code and its already-built library (BTVS_MAIN, set by build.sh):
 # a worktree build then compiles only the port's own sources.
-set(BTVS_MAIN "" CACHE PATH "The main checkout, when building in a git worktree")
 set(BTVS_GEN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/recomp/gen")
 set(BTVS_PREBUILT "")
 if(BTVS_MAIN AND NOT EXISTS "${BTVS_GEN_DIR}/recomp_funcs.h")
@@ -71,6 +70,7 @@ set(GAME_SOURCES
     src/btvs_audio.c
     src/btvs_audio_dsound.c
     src/btvs_wma.c
+    src/btvs_xbecheck.c
 )
 # Graphics area. Its files hook functions named in src/manual_functions.json,
 # so they join the build once the generated code has those hooks (after the
@@ -86,6 +86,7 @@ if(EXISTS "${BTVS_GEN_DIR}/recomp_funcs.h")
 endif()
 if(BTVS_GRAPHICS)
     list(APPEND GAME_SOURCES
+        src/btvs_boot.c
         src/btvs_native.c
         src/btvs_native_gpuwait.c
         src/btvs_native_shot.c
@@ -140,6 +141,12 @@ else()
                     "run tools/regen.sh in the main checkout to switch to the PC input layer")
 endif()
 
+# Compile-only check of the XAPI replacements, for before that regen:
+#   bash tools/build.sh btvs_input_xapi_check
+add_library(btvs_input_xapi_check OBJECT EXCLUDE_FROM_ALL src/btvs_input_xapi.c)
+target_include_directories(btvs_input_xapi_check PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src ${BTVS_GEN_DIR} ${BTVS_GEN_DIR}/.. ${XBOXRECOMP_DIR}/include)
+
 # The input layer on its own: self-test, pad-script player, live pad printer.
 add_executable(btvs_input_test src/btvs_input_test.c ${BTVS_INPUT_SOURCES} src/btvs_settings.c)
 target_include_directories(btvs_input_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -171,3 +178,12 @@ if(EXISTS "${BTVS_SDL_DIR}/SDL3.dll")
 endif()
 # -- Audio: stand-alone mixer test (game sound data -> WAV, no game running) ---
 add_executable(btvs_audio_test src/btvs_audio_test.c src/btvs_audio.c)
+
+# -- "Buffy Launcher.exe": install from the disc image, then Play (launcher/) --
+add_executable(buffy_tvs_launcher WIN32 launcher/btvs_launcher.c)
+set_target_properties(buffy_tvs_launcher PROPERTIES OUTPUT_NAME "Buffy Launcher")
+target_compile_definitions(buffy_tvs_launcher PRIVATE UNICODE _UNICODE)
+target_link_libraries(buffy_tvs_launcher PRIVATE comdlg32 shell32 ole32 uuid dwmapi bcrypt)
+if(MSVC)
+    target_link_options(buffy_tvs_launcher PRIVATE /ENTRY:wWinMainCRTStartup)
+endif()

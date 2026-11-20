@@ -17,6 +17,7 @@
  */
 #include <windows.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "recomp_types.h"
@@ -94,6 +95,65 @@ void XInputClose_006105E3(void)
     ret_stdcall(0, 4);
 }
 
+/* Where the game is.
+ * Ten times a second, from player 1's pad read: which menu is up and whether a
+ * level is running, read from the game's own globals. It names moments for pad
+ * scripts ("title", "menu", "pause", "menu<id>", "level") and keeps the mouse
+ * free outside play. Addresses are from the Logs area's reading of final.map
+ * and have NOT been seen at run time yet: every change is logged so the first
+ * runs show whether they are right. BTVS_INPUT_NO_PROBE=1 turns it off. */
+#define G_MENU_ID   0x007F0408u     /* GUI s_menuID: 1 main, 9 pause, 10 title, 15 resurrect (docs/menu.md) */
+#define G_GAME      0x007D0090u     /* gGame (TGame *) */
+#define GAME_PLAYER 0xF0u           /* TGO::GetPlayer() = [gGame + 0xF0] */
+
+static int guest_readable(uint32_t va)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    if (va < 0x10000u || !VirtualQuery((void *)XBOX_PTR(va), &mbi, sizeof mbi))
+        return 0;
+    return mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD));
+}
+
+static void game_probe(void)
+{
+    static int off = -1;
+    static DWORD last;
+    static uint32_t was_menu = 0xFFFFFFFFu, was_player;
+    uint32_t menu = 0, game = 0, player = 0;
+    DWORD now = GetTickCount();
+    char name[24];
+
+    if (off < 0) {
+        const char *e = getenv("BTVS_INPUT_NO_PROBE");
+        off = e && *e && *e != '0';
+    }
+    if (off || now - last < 100)
+        return;
+    last = now;
+    if (guest_readable(G_MENU_ID))
+        menu = MEM32(G_MENU_ID);
+    if (guest_readable(G_GAME) && (game = MEM32(G_GAME)) != 0 && guest_readable(game + GAME_PLAYER))
+        player = MEM32(game + GAME_PLAYER);
+    if (menu != was_menu) {
+        IN_LOG("game: menu id %u", menu);
+        if (menu && menu < 64) {
+            sprintf_s(name, sizeof name, "menu%u", menu);
+            btvs_input_script_mark(name);
+            if (menu == 1)  btvs_input_script_mark("menu");
+            if (menu == 9)  btvs_input_script_mark("pause");
+            if (menu == 10) btvs_input_script_mark("title");
+        }
+        was_menu = menu;
+    }
+    if (!player != !was_player) {
+        IN_LOG("game: %s", player ? "level running (player exists)" : "no level");
+        if (player)
+            btvs_input_script_mark("level");
+        was_player = player;
+    }
+    btvs_input_allow_mouse_look(player != 0 && menu != 9 && menu != 15);
+}
+
 /* DWORD XInputGetState(HANDLE, PXINPUT_STATE): DWORD packet number, then the 18-byte pad. */
 void XInputGetState_006105EF(void)
 {
@@ -105,6 +165,8 @@ void XInputGetState_006105EF(void)
     int have = 0;
 
     memset(&g, 0, sizeof g);
+    if (port == 0)
+        game_probe();
     if (port >= 0)
         have = btvs_input_poll(port, &g);
     if (out) {
