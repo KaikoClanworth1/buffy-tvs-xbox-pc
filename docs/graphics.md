@@ -30,7 +30,12 @@ Known faults and things not done:
 - Fixed-function draws (the level geometry) get no lighting and no texture transforms: right for light-mapped
   walls, unknown elsewhere.
 - `CopyRects` (the game's screen captures: `Buffer_DrawImage`, `Buffer_Capture`) is not drawn.
-- Only the first level's opening minutes have been seen. Nothing beyond, no fights, no other level.
+- Seen so far: the first level's opening (four minutes of scripted, blind stick input: no crash), and, started
+  directly with `BTVS_MAP`, the first minute of `m01_highschool_1` (corridor) and `m03_cemetery_1` (a fight
+  with skeletons, blue fire, the enemy's health bar). No level has been played through, and no level-to-level
+  change has been made by playing.
+- The picture in play looks dark next to the cutscenes. The game's gamma (`State_SetGamma`,
+  `D3DDevice_SetGammaRamp`) is hooked but not applied: the likely cause, not looked into.
 - Loading is slow (about 25 s for the first level from the menu in a test run).
 - 2D text and HUD are drawn with nearest-pixel sampling: blocky at 4K.
 
@@ -294,6 +299,8 @@ Debugging tools that found these (all in `btvs_boot.c`, off unless asked for):
 | `BTVS_STACK_GAME=1`, `BTVS_STACK_RUN=<n>` | with `BTVS_STACK_AT`: only the thread that shows the frames; only in the game's n-th restart. 150 samples of the game thread make a usable profile |
 | `BTVS_PAD_SCRIPT_<n>` | the pad script for the game's n-th restart (a script is for one run of the game; the level is restart 1) |
 | `BTVS_NO_FIXED_FUNCTION=1` | the level geometry is not drawn |
+| `BTVS_MAP=<map>` (`BTVS_MAP_OPTIONS`) | the game starts straight in that map (`m03_cemetery_1`, `hub01`, ...: the names of `pak/res_*.pak`), through the launch data it would write itself; more of its own options can be added (`cheats:1`) |
+| `BTVS_HITCH_LOG=<ms>` | every frame longer than that, with what the game thread was doing |
 | `BTVS_OVERLAY_TEST=1` | a sample panel through the overlay API |
 | `BTVS_NO_SUPERVISOR=1` | the game runs in the process that was started; a restart ends it |
 | `BTVS_GAME_CPUS=all` / `=<mask>` | the game's own threads on all CPUs / on those (default: one) |
