@@ -46,6 +46,29 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 (Add a line here when you need something from another area.)
 
+- **Extras → Graphics (21 Nov, from the owner's first play: "i dont like the app 'restartes' when starting
+  the game"): one window from Play to gameplay.** What the owner sees is the game's restart into a level
+  (`btvs_boot_restart.c`): the menus and the level are two processes, and each makes and loses its own
+  window, so between them the window closes, the desktop (and the launcher behind it) shows, and a new
+  window opens that may not get the focus. Evidence, hidden run of `GAME/` at `2e73139` through the
+  launcher (title -> Start Game -> difficulty -> level 1): three processes, launcher aside --
+  supervisor pid 38468; `started 2026-11-21 11:02:48, pid 24304` (run=1, menus, `save why=leaving the
+  menus` at 11.2 s); `[boot] the game restarts itself (run 2)`; `started 2026-11-21 11:02:59, pid 31096`
+  (`BTVS_RESTARTS=1`, `level_loaded name=m00_spanishmission_1` at 32.1 s). The same happens at every level
+  change and on the way back to the menu. It is not the launcher (it starts one process and stays as it
+  is) and not a window remade inside one process (`nv2a_pb_d3d11.inc` makes the window once in
+  `gpu_startup` and never destroys it; the two `CreateDevice` lines per run reuse it).
+  **Asked for:** the window belongs to the process that lives for the whole session. Suggested shape: the
+  supervisor makes the one top-level window (title, icon, mode and size from the settings), pumps its
+  messages while it waits for the child (`MsgWaitForMultipleObjects`), and hands its handle to each child
+  in the environment; the runtime then makes its window as a child window filling it (`WS_CHILD`, parent
+  = that handle) instead of a top-level one, so the swap chain, the window procedure and the input stay
+  in the game process. Between two children the top-level window stays up, black or with a "Loading"
+  picture, and keeps the focus. Closing it ends the child; Alt+Enter / F11 and the display settings resize
+  the top-level window. Hidden test runs and `BTVS_NO_SUPERVISOR=1` stay as they are. Showing the next
+  window before the old one goes is not an option while `install.dat` and `dsstdfx.bin` are opened
+  unshared. Please also log each window creation (`[gfx] window ...` with the handle and the process),
+  so a log can show one window for a session; today nothing in the log says a window was made.
 - **Graphics → Menu (21 Nov): a Brightness line on the PC Graphics page.** The game's own brightness
   (its Options -> Display slider) works now: the renderer applies the gamma ramp the game sets
   (`docs/graphics.md`, "Brightness"). The levels are dark at the game's default (slider 50) because that is
