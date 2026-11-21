@@ -21,6 +21,7 @@ pictures are in the main checkout's `port/runs/shots/` (`*_menu_*.png`).
 | PC wording | Verified: the Start Game page says "Launch a New Game on this PC called", centred, with no block count and no picture of the console, and A still goes on to the difficulty page and the level; the game's message "Buffy The Vampire Slayer only allows 10 saved games. ..." without "your Xbox Hard Disk". The other nine reworded messages were written (log: 10 of 10) but not brought up |
 | Typing the report's details on a keyboard | Verified: `WM_CHAR` messages posted to the hidden window ("Hi 42!") appeared in Details and went into the report. Real key presses on a visible window: not checked |
 | Highlighted line without its black copy | Verified at 640x480 and 1920x1080 widescreen, on the game's own pages (main menu, Options, Display) and a PC page: one bright line on the glow, no dark copy. With `Menu Shadow: Original` (`BTVS_MENU_HIGHLIGHT_SHADOW=1`) the game's own look is back. The Graphics line itself was not pressed in a run (the value was set through the environment). In a level (pause menu): not looked at |
+| The game restarting inside the process (`btvs_menu_reboot`) | Verified with `BTVS_REBOOT=inplace` in one process, four runs of the game: main menu (Options -> PC Audio, Master 100 -> 90) -> new game -> level 1 (pause -> Options -> PC Audio shows 90, set to 85; Memory) -> second level by `BTVS_TEST_RELAUNCH` (pause -> Options -> Graphics; Report a Problem page) -> Quit -> Yes -> main menu (Exit is there; Options -> PC Audio shows 85). The pages drew in the game's fonts in every run, "PC wording: 10 of 10" each run, `master=85` in the `.ini`. Audio, Controls and Logs had no restart function yet in that build; a restart while a report is being saved or a key is being captured was not driven |
 | A real controller, a visible window | Not checked: every run was hidden and scripted |
 
 Faults found by these runs and fixed: Send Report froze the game (the report maker waited on the
@@ -210,6 +211,22 @@ stand-ins through `/alternatename` until the real ones are linked.
   10 GB and more are shown without decimals.
 - The highlighted line has a dark double in every menu, the game's own lines too (Graphics' known fault).
 - No overlay fallback was needed (task step 4); nothing here uses `btvs_draw_text`.
+
+## When the game restarts inside the process
+
+Level loads used to start a new process (and a new window). With Graphics' in-process restart
+(`btvs_boot_restart.c`) the process lives for the session, so what this file remembered "for the
+process" has to be forgotten at each restart. `void btvs_menu_reboot(void)` (end of
+`btvs_menu.c`) is called on the game thread before the game's memory is wiped:
+
+- a key capture under way is cancelled; a report being saved is waited for (3 s at most), since
+  it reads the game's memory;
+- the settings are saved (they are kept in the store, outside the game, so they hold across runs);
+- `s_scratch` (a block of the old run's heap), `s_options`, the open and pending page, the rows,
+  the shown texts, the saved list states, the four font resources, the bindings and report
+  editing state are cleared; `s_messages_done` is cleared so the exe's messages are reworded again.
+
+Everything else is made again when the next run's menus load (their `OnLoad` hooks).
 
 ## The highlighted line's black copy
 

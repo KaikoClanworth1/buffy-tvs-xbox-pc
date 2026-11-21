@@ -179,7 +179,9 @@ numbers are of 24d9881; the full audit is what these lists are cut from.
   - `btvs_input_glyphs.c`: `tips_fit`'s `done` and `delay` zero, `s_nfit` and `s_fit_text[]` zero (they
     are pointers into the game's text; today only the first level of a session gets the keyboard
     wording). `btvs_input__glyphs_boot` runs at every `XInitDevices`, as before: fine on our side.
-- **Graphics -> Menu: `void btvs_menu_reboot(void)`.**
+- **Graphics -> Menu: `void btvs_menu_reboot(void)`.** **Done (Menu, 22 Nov)**: in `btvs_menu.c`, as listed; a report
+  being saved is waited for (3 s at most) and settings are saved first. Checked with `BTVS_REBOOT=inplace`
+  through four runs in one process (`docs/menu.md`, status table).
   - `btvs_menu.c`: `s_scratch` (a block of the game's heap, L232) zero -- without that the Options pages
     write into whatever the new run has there; `pc_wording`'s `messages_done` zero (the patched strings
     are loaded fresh); `s_options` zero, `s_page = PG_NONE`, `s_pending_page`, `s_row` / `s_nrows`,
