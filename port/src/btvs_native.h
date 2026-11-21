@@ -51,6 +51,8 @@ void btvs_window_frame(void);            /* once a frame, game thread */
 /* btvs_native.c */
 void btvs_native_start(void);            /* the device comes up; game thread, after the guest memory is mapped */
 void btvs_native_overlay(void);           /* this frame's overlay items onto the frame (btvs_native_overlay.c) */
+void btvs_native_set_wide(float aspect_over_43);   /* widescreen: the frame's aspect over 4:3 (1: not wide) */
+float btvs_native_fov_factor(void);      /* for View_SetFOV */
 void btvs_native_present(void);          /* show the frame (from the Swap hook) */
 void btvs_native_frame_size(uint32_t *w, uint32_t *h);   /* internal render size now */
 

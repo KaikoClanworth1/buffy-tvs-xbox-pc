@@ -112,10 +112,14 @@ static void apply(void)
         if (w43 < w) w = w43; else h = w * 3 / 4;
         nv2a_gpu_set_frame_aspect(0.0f);
         nv2a_gpu_set_frame_widescreen(0);
+        btvs_native_set_wide(1.0f);
     } else if (wide == 1) {
+        /* a wider view in the levels, 4:3 in the middle for the rest (btvs_native.c) */
         nv2a_gpu_set_frame_aspect((float)w / (float)h);
+        btvs_native_set_wide(((float)w / (float)h) / (4.0f / 3.0f));
     } else {
         nv2a_gpu_set_frame_aspect(-1.0f);
+        btvs_native_set_wide(1.0f);
     }
     nv2a_gpu_set_display(w, h, vsync, mode);
     s_applied_mode = mode;

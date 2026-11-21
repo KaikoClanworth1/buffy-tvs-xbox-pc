@@ -9,6 +9,7 @@
 #include <windows.h>
 #include <shlobj.h>
 #include <stdio.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -160,7 +161,27 @@ void TLogo_ExecuteMovies_00062DB0(void)
     TLogo_ExecuteMovies_00062DB0_orig();
     s_in_logos = 0;
 }
-PASS(TIF_Render_Implement_View_SetFOV_002A5110, 8)
+/* bool TIF_Render_Implement::View_SetFOV(float radians), thiscall: the
+ * horizontal field of view; the game works the vertical one out for its 4:3
+ * screen. Widescreen in a level: the horizontal angle is widened so that its
+ * tangent grows by the frame's aspect over 4:3 (the same picture height, more
+ * at the sides); btvs_native.c cuts the extra height the game then adds. */
+void TIF_Render_Implement_View_SetFOV_002A5110_orig(void);
+void TIF_Render_Implement_View_SetFOV_002A5110(void)
+{
+    float f = btvs_native_fov_factor();
+    if (f > 1.0f) {
+        float rad = MEMF(g_esp + 4);                 /* (radians: the game halves it and takes the tangent) */
+        if (rad > 0.05f && rad < 3.0f) {
+            float wider = 2.0f * (float)atan(tan((double)rad * 0.5) * (double)f);
+            static int shown;
+            if (shown++ < 3)
+                btvs_log("gfx", "widescreen: field of view %.1f -> %.1f degrees", rad * 57.29578f, wider * 57.29578f);
+            MEMF(g_esp + 4) = wider;
+        }
+    }
+    TIF_Render_Implement_View_SetFOV_002A5110_orig();
+}
 PASS(TIF_Render_Implement_View_InternalSetup_002A4870, 4)
 PASS(TIF_Render_Implement_State_SetGamma_002A32D0, 8)
 PASS(TIF_EngineAPI_Implement_SysInfo_Video_0001DC30, 8)

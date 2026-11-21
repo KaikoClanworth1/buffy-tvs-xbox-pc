@@ -692,8 +692,55 @@ void btvs_native_start(void)
     nv2a_native_prewarm();
 }
 
+/* ── widescreen ──────────────────────────────────────────────────────
+ * [display] widescreen = 1 and a frame wider than 4:3. In a level the 3D
+ * view is really wider: the game is given a wider horizontal field of view
+ * (btvs_native_game.c: View_SetFOV), which with its own 4:3 arithmetic also
+ * makes it taller, and the extra height is cut off again here (y scaled up
+ * by the same factor). HUD, menus and movies are drawn for a 4:3 screen and
+ * stay 4:3 in the middle. In the menus (no level loaded) everything stays
+ * 4:3, bars at the sides. */
+static float s_wide = 1.0f;            /* the frame's aspect over 4:3; 1: not wide */
+static int s_fov_wide;                 /* the game's last SetFOV was widened */
+
+void btvs_native_set_wide(float aspect_over_43)
+{
+    s_wide = aspect_over_43 > 1.001f ? aspect_over_43 : 1.0f;
+}
+
+/* A level is loaded (the map manager has a map name; "" in the menus). */
+static int level_loaded(void)
+{
+    uint32_t game = MEM32(0x7D0090u), mgr, str;
+    if (game < 0x10000u || game >= 0x04000000u) return 0;
+    mgr = MEM32(game + 0x40);
+    if (mgr < 0x10000u || mgr >= 0x04000000u || !MEM8(mgr + 0x3E)) return 0;
+    str = MEM32(mgr + 0x40);
+    if (str < 0x10000u || str >= 0x04000000u) return 0;
+    return MEM8(str) >= 0x20 && MEM8(str) < 0x7F;
+}
+
+/* For View_SetFOV: the factor to widen the horizontal field of view by. */
+float btvs_native_fov_factor(void)
+{
+    s_fov_wide = s_wide > 1.0f && level_loaded();
+    return s_fov_wide ? s_wide : 1.0f;
+}
+
+static void wide_frame(void)
+{
+    void nv2a_native_view(float y3d, float x2d, float x3d);
+    if (s_wide <= 1.0f)
+        nv2a_native_view(1.0f, 1.0f, 1.0f);
+    else if (s_fov_wide && level_loaded())
+        nv2a_native_view(s_wide, 1.0f / s_wide, 1.0f);
+    else
+        nv2a_native_view(1.0f, 1.0f / s_wide, 1.0f / s_wide);
+}
+
 void btvs_native_overlay(void)
 {
+    wide_frame();                                /* (for the frame that starts after this one is shown) */
     void btvs_overlay_test(void);
     void btvs_overlay_frame(GpuTexture *frame, uint32_t pw, uint32_t ph);
     if (!s_up || !s_fb.tex)
