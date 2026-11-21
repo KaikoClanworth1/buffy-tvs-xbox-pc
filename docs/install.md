@@ -191,8 +191,10 @@ Same rules: hidden, muted, CPUs 8-15, self-exit, no `BTVS_GAME_DIR`, from `GAME/
   90 s): the game made its own `btvs_console.txt` (182 KB, the runtime's lines in it), title 4.2 s, **main
   menu 5.3 s**, Start Game, difficulty, restart, **first level `m00_spanishmission_1` loaded at 34.1 s** of
   the second process, positions logged in play, exit code 0.
-- The same through the normal Play path with the final committed build: see the commit that added this
-  section for the exe's commit and build time (`btvs_log.txt` line 1 names them).
+- **The final deployed build** (`btvs_log.txt` line 1: commit `f7488c3345`, built Nov 21 2026 03:28:59)
+  through the normal Play path (`--play`, scripted Start button, 90 s): title 4.6 s, main menu 5.7 s, Start
+  Game, difficulty, restart, first level loaded 45 s into the second process, exit code 0. The three saved
+  games the test runs made were removed from `GAME\XboxData\HardDisk` afterwards.
 
 Not checked: a real double-click in Explorer (it would show the window); the `[crash]` call-stack lines
 of `btvs_console.c` (nothing has triggered them).
