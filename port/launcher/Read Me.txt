@@ -24,9 +24,6 @@ move it away after installing.
 
 The next time you start the launcher it opens straight on PLAY.
 
-Always start the game with the launcher's PLAY button. Starting
-buffy_tvs.exe by itself does not work in this build.
-
 The first start takes a little longer: the game sets up its own cache
 (about 105 MB, in XboxData\Cache), as it did on the console's hard disk.
 

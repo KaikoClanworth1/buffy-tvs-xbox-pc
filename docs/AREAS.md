@@ -127,20 +127,14 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   `[INPUT] game: menu id N` / `level running` lines in the first runs' `.err` and tell Controls if
   they do not match what is on screen.
 
-- **Extras → Logs / Audio / Graphics (a player's first start fails)**: started with **no stdout/stderr at
-  all** (how Explorer's double-click and a plain `CreateProcess` start a window program; every `run.sh` run
-  has them redirected, so no test run sees this) the game **ends itself about a second into the boot,
-  exit code `0xC0000409`** (the C runtime's fast-fail). Seen twice on 21 Nov, both times the same: the last
-  log line is `[boot] logo movies (install asked: 0)`, the last `xbox_kernel.log` line the failed open of
-  `Cache\Sound\dsstdfx.bin` (err=80), i.e. just before `[audio] DirectSound replaced...` would be printed,
-  and none of the runtime's `fprintf(stderr)` lines are in `btvs_log.txt` (so `btvs_log.c`'s `freopen_s` of
-  stderr onto the log does not take in that case). Suspects: `dlog()` in `btvs_audio_dsound.c` /
-  `btvs_audio.c` (`fputs`/`vfprintf`/`fflush` on that stderr), or whatever else first touches it there.
-  To reproduce hidden: `BTVS_NO_WINDOW=1 BTVS_MUTE=1 BTVS_AFFINITY=FF00 BTVS_EXIT_AFTER=30` and start the
-  exe from a program that passes no handles (not from bash with `>`/`2>`). **Workaround in the launcher**
-  (done): Play gives the game `btvs_console.txt` in the game folder as stdout and stderr, and with that it
-  runs. A double-click on `buffy_tvs.exe` itself still fails until the game is fixed; when it is, say so
-  and Extras drops the note from the Read Me. Details: `docs/install.md`, "Play".
+- **Extras → Logs / Audio / Graphics (a player's first start failed; settled 21 Nov 03:25)**: started with
+  no stdout/stderr (a double-click), builds up to 02:17 ended themselves a second into the boot with
+  `0xC0000409`, at Audio's first write to `stderr`. Gone since Audio's lines go to the game log (`dae87b9`).
+  `port/src/btvs_console.c` (first call in `WinMain`) now gives a console-less process `btvs_console.txt`
+  as stdout/stderr and logs a call stack when the C runtime ends the process silently. **Everyone**: write
+  through `btvs_log`, not `fputs`/`fprintf(stderr)`; a test run cannot show this fault because `run.sh`
+  redirects both. To test as a player starts it: `"GAME/Buffy Launcher.exe" --play` with
+  `BTVS_LAUNCHER_NO_CONSOLE=1` and the usual test variables. Details: `docs/install.md`.
 - **Extras → Logs** (save folder name, was asked of Graphics): the owner's rule is saves in `SaveData\`
   beside the exe; the game uses `XboxData\` (`btvs_log.c`, `btvs_save_dir()`). The launcher, deploy and the
   Read Me now say `XboxData\`. If it is renamed, tell Extras (one constant, `SAVE_DIR`, and the docs).

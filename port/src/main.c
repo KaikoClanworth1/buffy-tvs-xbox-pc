@@ -296,6 +296,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     (void)lpCmdLine;
     (void)nCmdShow;
 
+    {   /* stdout/stderr for a double-clicked exe; silent runtime exits go to the log (btvs_console.c) */
+        extern void btvs_console_init(void);
+        btvs_console_init();
+    }
 #ifdef BTVS_GRAPHICS
     {   /* The game restarts itself to load a level; this process only starts
          * the game and starts it again when it asks (btvs_boot.c). */

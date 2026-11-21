@@ -76,6 +76,7 @@ set(GAME_SOURCES
     src/btvs_audio_dsound.c
     src/btvs_wma.c
     src/btvs_xbecheck.c
+    src/btvs_console.c
     # Logs: the log, crash/hang reports, the trail, Report a Problem, memory statistics
     src/btvs_log.c
     src/btvs_trail.c
