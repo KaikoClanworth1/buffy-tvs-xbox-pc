@@ -165,7 +165,7 @@ What a report stores for this (`replay.txt`): `launch`, `level`, `player_matrix`
   where she had stood (three replays; she is about 60 units tall), which the placement then corrects.
   A fight will not repeat.
 - **Time** (hidden test runs on four shared CPU cores at below-normal priority): 2 s after the level is
-  playable. The level's loading was 33 to 81 s that night depending on what else the PC was doing (other
+  playable; 32.9 s from start in the quickest run. The level's loading was 31 to 81 s that night depending on what else the PC was doing (other
   sessions' builds and test games); on an idle PC at normal priority it has not been measured.
 
 ## Memory
@@ -212,7 +212,8 @@ Verified:
   report made on Menu's helper thread (`trigger=menu`), with save, launch data and spot;
   `report_open.py` on it; replay with input: the replay walks, pauses, opens the report page, presses Send
   (no second report is made: "this is the replay arriving at the report it replays"), then the player is
-  placed (3.4 units of drift). Its direct replay is the one run not finished when this was written.
+  placed (3.4 units of drift). Its direct replay: on the spot 32.9 s after start (level playable at 31.3 s);
+  pictures `logs_pause_report.png` (the report's: the menu, see Known gaps) and `logs_pause_report_replay_direct.png`.
 - **Clean save folder per run** (`run.sh`): `runs/<name>.save`, emptied at the start; Start Game works again
   and names its session `Buffy_1`. The game's cache copy and the disk images are deleted from it after the run.
 - **Trail** in menus and level, **hang report** (two real ones), **menu report and its replay**: as before.
