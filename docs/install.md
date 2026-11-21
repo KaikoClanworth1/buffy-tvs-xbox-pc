@@ -178,6 +178,19 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
+## What was checked on 21 Nov 2026, 20:47 build (main at 17cdffd)
+
+`GAME/buffy_tvs.exe` reports commit `c5ad4f473c`, built Nov 21 2026 20:47:13 (main with Controls'
+17cdffd). No regen was needed. A game was running from `GAME` when the build finished (started 20:18);
+it was left alone and the deploy waited until it had ended. The owner's `btvs_settings.ini` and save
+files have the same checksums before and after; the checks used a copy of the settings and their own
+save and log folders.
+
+- Through the launcher's Play path: main menu and `m00_spanishmission_1` reached, exit code 0.
+- The same with no console: main menu at 1.9 s, level loaded at 8.9 s, exit code 0.
+- The launcher deployed with it is newer than before (it can build the game's code for a release); with
+  this prebuilt exe, which has the game code inside, that part does nothing.
+
 ## What was checked on 21 Nov 2026, 19:21 build (main at 9ee65f8)
 
 `GAME/buffy_tvs.exe` reports commit `1912eafbe5`, built Nov 21 2026 19:21:53 (main at 9ee65f8 plus

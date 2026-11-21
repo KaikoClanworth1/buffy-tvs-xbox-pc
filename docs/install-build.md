@@ -100,6 +100,34 @@ provoked.
 Studio, LLVM or Python installed; all processors at once (4 were used here; a guess for an 8-core PC is
 1.5 to 2 minutes of compiling plus the 5 of translating, which is one processor's work whatever the PC).
 
+### The launcher's window during a build
+
+![the launcher while it builds](launcher-build.png)
+
+Drawn by the launcher itself into a file, with no window shown (`"Buffy Launcher.exe" --capture build
+<out.bmp>`; also `translate` and `buildfail`): the views are set to what the build posts mid-way. The
+bar, the line "Building the game for this PC: 21 of 46 parts done, 1:12 so far (8 at a time)", the
+Cancel button and the red two-line failure message all fit. **Not seen**: a real build driving the
+window live (the builds ran in the console form).
+
+## What a second PC could trip on
+
+Checked here means on the developer's PC; nothing has run on another.
+
+| Risk | What is known | State |
+|---|---|---|
+| **CPU without AVX** | The DLL is compiled for plain x86-64 (no `-march`): a disassembly of the 48 MB DLL has no AVX register in it. The port's exe is MSVC's default (SSE2). | DLL checked. Not checked: whether `clang.exe`, `lld-link.exe` or the frozen Python themselves need more than SSE2 (LLVM's and Python's official builds are for any x86-64, by their makers' word, not by a test here). |
+| **Antivirus** | Two things look odd to one: `btvs_translate.exe` is a PyInstaller one-file program (it unpacks itself to `%TEMP%\_MEI...` and runs from there; such programs are often flagged), and `btvs_game.dll` is a fresh unsigned DLL. A scanner holding a just-written file made a rename fail: the launcher now retries for 5 s. | Not tested against any scanner but this PC's Defender (nothing was flagged in four installs). If the translate exe is flagged, the cure is the one-folder form of PyInstaller (no self-unpacking), a small change to `freeze_translate.sh`. A quarantined exe shows as "could not start translating" or "the release is incomplete". |
+| **Paths with spaces** | The release folder in every test had spaces (`...\Buffy the Vampire Slayer PC\build\...`), and so did the disc image's path. | Checked. |
+| **Non-ASCII paths** | Install into `Büffy 日本 test é` worked from start to finish (translate, compile, link, shaders). **The game then could not start**: `[boot] cannot start the game process (error 123)`: the supervisor starts its child by the ANSI name (`CreateProcessA`, `btvs_boot_restart.c`), and Japanese letters do not exist in this PC's code page. The same is true of the prebuilt exe; it is not about the DLL. | The launcher now refuses such an install folder before copying, with a message. Asked of Graphics in `docs/AREAS.md`. Not tested: a non-ASCII **Windows user name** (then `%TEMP%`, where the translate exe unpacks, is such a path), and the release unpacked in a non-ASCII folder. |
+| **Low disk space** | Before copying: the disc's size plus 64 MB. Before building: 0.9 GB free in the game folder, else a message with the numbers. The translate exe also unpacks about 60 MB into `%TEMP%`. | The checks exist; not provoked. A disk that fills mid-build ends as a compiler or linker failure with its message in `install_log.txt`; installing again carries on. |
+| **Memory** | Compilers at once = processors, but no more than total memory / 1.5 GB. Measured: 628 MB peak for the largest file (19 MB of C). | The allowance is generous; a 4 GB PC compiles 2 at a time. Not tested on a small PC. |
+| **Windows 10** | Nothing used is newer than Windows 10: the launcher's DPI call is from version 1703; the DLL imports only `ucrtbase.dll` (part of Windows 10) and two `KERNEL32` functions; `clang.exe`, `lld-link.exe` and the translate exe are marked for Windows Vista and later, Python 3.12 inside it needs 8.1. The game's own needs (Direct3D 11) are the other areas'. | By reading, not by running: no Windows 10 PC was tried. Windows 7/8 are out (no `ucrtbase.dll` as standard). |
+| **Protected folders** | Installing under `C:\Program Files` needs rights the launcher does not ask for: "Could not create the folder". Windows' "Controlled folder access" blocks unknown programs writing in Documents, Desktop and the like. | Not tested. `Read Me.txt` should say: install to a folder of your own such as `C:\Games`. |
+| **Thread-local index** | The DLL reads the exe's thread-local block at index 0 and ends the process (code B7500001, no message) if the exe's index is another. The exe is the first module with thread-local data, so 0 is what Windows gives. | Held in every run here. A message for that case is missing. |
+| **Windows on ARM** | The exe and DLL are x64; under emulation the `gs:[58h]` read should work, but that is a guess. | Not tested. |
+| **Time** | Translating is one processor's work: about 5 minutes here, more on a slow CPU, and nothing shortens it. | Known. |
+
 ## The translate step
 
 `port/tools/gamedll/translate.py` runs `regen.sh`'s steps in one process with every in-between file
@@ -202,8 +230,8 @@ with exit code 0, and all held the 60 frames a second limit (median frame 16.7 m
 
 - **A second PC.** Everything above ran on the developer's PC, which has Visual Studio, LLVM and Python.
   The compile was given no Microsoft header (`-nostdlibinc`) and the frozen exe no Python, but nothing
-  has been tried on a PC that has none of them.
-- The launcher's window was not looked at during a build.
+  has been tried on a PC that has none of them. See "What a second PC could trip on".
+- A real build was not watched in the launcher's window (its views were captured, see above).
 - **Crash reports** name game functions from `buffy_tvs.pdb`; with the code in the DLL they are in
   `btvs_game.pdb` (asked of Logs in `docs/AREAS.md`).
 - **Thread-local index 0** holds for the process exe in practice; the DLL refuses to load otherwise, but

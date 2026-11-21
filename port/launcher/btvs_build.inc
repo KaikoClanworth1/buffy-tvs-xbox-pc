@@ -210,6 +210,22 @@ static HANDLE spawn(WCHAR *cmd, const WCHAR *cwd, HANDLE out)
     return pi.hProcess;
 }
 
+/* Rename a file a program has just written. A virus scanner may be reading
+ * it at that moment and the rename is then refused: try for five seconds. */
+static int move_patiently(const WCHAR *from, const WCHAR *to, DWORD flags)
+{
+    int i;
+    for (i = 0; i < 25; i++) {
+        if (MoveFileExW(from, to, flags))
+            return 1;
+        if (GetLastError() != ERROR_SHARING_VIOLATION && GetLastError() != ERROR_ACCESS_DENIED)
+            break;
+        Sleep(200);
+    }
+    blog(L"could not rename %s (error %lu)", from, GetLastError());
+    return 0;
+}
+
 static HANDLE open_out(const WCHAR *path)
 {
     SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, TRUE };
@@ -455,7 +471,7 @@ static int build_compile(const WCHAR *work)
                 running--;
                 swprintf_s(a, MAX_PATH, L"%s\\%s.obj.tmp", obj, src[s].name);
                 swprintf_s(b, MAX_PATH, L"%s\\%s.obj", obj, src[s].name);
-                if (code == 0 && MoveFileExW(a, b, MOVEFILE_REPLACE_EXISTING)) {
+                if (code == 0 && move_patiently(a, b, MOVEFILE_REPLACE_EXISTING)) {
                     src[s].state = 2;
                     done += src[s].size;
                     compiled++;
@@ -556,7 +572,7 @@ static int build_link(const WCHAR *target, const WCHAR *work)
     blog_file(out, 30);
     if (code)
         return build_fail(L"Putting the game together failed (code %lu). The details are in " INSTALL_LOG L" in the game folder.", code);
-    if (!MoveFileExW(tmp, dll, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED))
+    if (!move_patiently(tmp, dll, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED))
         return build_fail(L"Could not put " GAME_DLL L" in the game folder (error %lu). Is the game running?", GetLastError());
     return 1;
 }
