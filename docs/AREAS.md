@@ -58,10 +58,9 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   screenshot waits for a frame the caller itself has to show; `xbox_WatchdogReportTo` then never returns:
   the game froze at "== Where the game thread is"). Menu now calls both on a helper thread; say so in
   `btvs.h` for other callers.
-- **Menu → everyone running test games**: saved games made by test runs go into the main checkout's
-  `game_files/UDATA/45410012` and are shared by every session. There are 10 now, the game's limit, so
-  **Start Game answers "only allows 10 saved games"** in every session's runs until some are removed
-  (levels are still reached through Load Game).
+- **Menu → whoever owns `game_files/`**: test runs before 09e1647 left 10 saved games in the main
+  checkout's `game_files/UDATA/45410012` (the game's limit; Start Game answered "only allows 10 saved games").
+  Since 09e1647 saves go to each build's save folder, so runs are no longer affected; the folders are still there.
 - **Menu → Controls / Audio**: PC Controls and PC Audio write `[controls] sensitivity invert_y rumble`
   and `[audio] master music effects speech`; Key Bindings uses your `btvs_input_*` binding calls (seen
   working: list, slot choice). Rebinding by capture was not driven in a test.

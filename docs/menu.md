@@ -18,7 +18,7 @@ pictures are in the main checkout's `port/runs/shots/` (`*_menu_*.png`).
 | **Memory** page | Verified: system memory, this game, video memory (total / in use / this game), the game heap and its peak, from Logs' `btvs_mem_stats` |
 | **Report a Problem** (Options) | Verified: category, writing details with the controller, Send Report, "Saving the report...", then the folder it was saved in; Back returns. The report held the picture, log, trail, settings, input recording |
 | **Report a Problem** (pause menu) | Verified in the first level: the line is in the pause menu, A opens the report page, Send saves a report, Back and B return to the pause menu and the game. Its picture is the pause menu, not the game (see Open points) |
-| PC wording | Verified: "Launch a New Game on this PC called" on the Start Game page and "Buffy The Vampire Slayer only allows 10 saved games. ..." (the game's message without "your Xbox Hard Disk"). Written but not seen: the block count gone from the Start Game page and its first line centred (Start Game is closed by the 10 test saves, `docs/AREAS.md`), the other nine messages |
+| PC wording | Verified: the Start Game page says "Launch a New Game on this PC called", centred, with no block count; the game's message "Buffy The Vampire Slayer only allows 10 saved games. ..." without "your Xbox Hard Disk". The other nine reworded messages were written (log: 10 of 10) but not brought up |
 | Typing the report's details on a keyboard | Not checked (test runs have no window input) |
 | A real controller, a visible window | Not checked: every run was hidden and scripted |
 
