@@ -317,11 +317,15 @@ static void dev_seen(int kind, uint32_t id, const in_host_pad *pad, const char *
     d->seen = 1;
 }
 
+static int s_test_rumble[3] = { -1, 0, 0 };    /* the last send: player, left, right (for the self-test) */
+
 static void dev_send_rumble(host_dev *d, uint16_t l, uint16_t r)
 {
     if (d->sent_l == l && d->sent_r == r)
         return;
     d->sent_l = l; d->sent_r = r;
+    IN_LOG("rumble -> %s (%s, player %d): left %u right %u", d->name, d->kind == DEV_XINPUT ? "XInput" : "SDL", d->port + 1, l, r);
+    s_test_rumble[0] = d->port; s_test_rumble[1] = l; s_test_rumble[2] = r;
     if (s_test_pad)
         return;
     if (d->kind == DEV_XINPUT)
@@ -455,6 +459,8 @@ static int s_capture_active, s_capture_release;
 /* Keys a pad script holds down right now ("K:Space"): they go through the
  * bindings like real keys, with or without focus. */
 static int s_script_key[16], s_script_nkey;
+/* Mouse movement a pad script makes right now ("M:20,0"), counts per pad read. */
+static int s_script_mouse, s_script_mdx, s_script_mdy;
 
 static int key_value(int code, int mouse_ok, int hw)
 {
@@ -494,6 +500,11 @@ static void live_pad(int port, btvs_pad *g, int hw)
         for (a = 0; a < ACT_COUNT; a++)
             if (key_value(C.key[a][0], 1, 0) || key_value(C.key[a][1], 1, 0))
                 v[a] = 1.0f;
+        /* the script's mouse is the camera under the same rules as a real one */
+        if (s_script_mouse && C.mouse_look && s_allow_mouse_look) {
+            mlx = (float)s_script_mdx * 0.04f * C.mouse_sens;
+            mly = (float)-s_script_mdy * 0.04f * C.mouse_sens;
+        }
     } else if (port == C.kb_port && !s_test_pad) {
         double t = now_ms();
         int cap, dx, dy;
@@ -561,6 +572,7 @@ typedef struct {
     btvs_pad pad;
     int has_ls, has_rs;
     int key[4], nkey;               /* "K:<key name>": keyboard keys held, through the bindings */
+    int has_mouse, mdx, mdy;        /* "M:<dx>,<dy>": mouse movement, counts for each pad read */
 } sc_event;
 typedef struct { char mark[24]; int fired; double t0; uint32_t f0; } sc_segment;
 
@@ -616,6 +628,15 @@ static int script_token(sc_event *e, char *tok)
         if (!code || e->nkey >= 4)
             return 0;
         e->key[e->nkey++] = code;
+        return 1;
+    }
+    if ((tok[0] == 'M' || tok[0] == 'm') && tok[1] == ':') {
+        char *comma = strchr(tok + 2, ',');
+        if (!comma)
+            return 0;
+        e->has_mouse = 1;
+        e->mdx = atoi(tok + 2);
+        e->mdy = atoi(comma + 1);
         return 1;
     }
     if (!_stricmp(tok, "LS") || !_stricmp(tok, "RS")) {
@@ -721,7 +742,7 @@ static int script_load_locked(const char *text)
         prev_frames = frames;
         if (s_nev < SC_MAX_EV) {
             s_ev[s_nev++] = e;
-            if (!e.nkey)
+            if (!e.nkey && !e.has_mouse)
                 s_script_ports |= 1u << e.port;
         }
     }
@@ -760,6 +781,35 @@ int btvs_input_script_load_file(const char *path)
     return n;
 }
 
+/* BTVS_PAD_SCRIPT: a file, or the script itself with ';' between lines.
+ * Called with the lock held. */
+static void script_env_load_locked(void)
+{
+    const char *e;
+    FILE *f;
+    if (s_script_env_done)
+        return;
+    s_script_env_done = 1;
+    e = getenv("BTVS_PAD_SCRIPT");
+    if (!e || !*e)
+        return;
+    f = fopen(e, "rb");
+    if (f) {
+        long size;
+        char *buf;
+        fseek(f, 0, SEEK_END);
+        size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        buf = (char *)calloc(1, (size_t)size + 1);
+        fread(buf, 1, (size_t)size, f);
+        fclose(f);
+        script_load_locked(buf);
+        free(buf);
+    } else {
+        script_load_locked(e);
+    }
+}
+
 static int script_current(void)
 {
     int i, cur = 0;
@@ -775,6 +825,7 @@ void btvs_input_script_mark(const char *name)
 {
     int i;
     LOCK();
+    script_env_load_locked();                   /* a mark can come before the first pad read */
     i = script_current() + 1;
     if (i < s_nseg && !_stricmp(s_seg[i].mark, name)) {
         s_seg[i].fired = 1;
@@ -802,25 +853,22 @@ int btvs_input_script_done(void)
     return done;
 }
 
-/* BTVS_PAD_SCRIPT: a file, or the script itself with ';' between lines */
 static void script_env_load(void)
 {
-    const char *e;
-    if (s_script_env_done)
-        return;
-    s_script_env_done = 1;
-    e = getenv("BTVS_PAD_SCRIPT");
-    if (e && *e && btvs_input_script_load_file(e) < 0)
-        btvs_input_script_load_text(e);
+    script_env_load_locked();
 }
 
+/* The clock starts at the game's first read that the script may answer. A
+ * recording plays first: marks reached meanwhile still count, and the part the
+ * script is in by then starts its clock when the recording ends. */
 static void script_start(void)
 {
     script_env_load();
-    if (s_nev && !s_seg[0].fired) {             /* the clock starts at the game's first read */
+    if (s_nev && !s_seg[0].fired) {
+        int cur = script_current();
         s_seg[0].fired = 1;
-        s_seg[0].t0 = now_ms();
-        s_seg[0].f0 = s_frame;
+        s_seg[cur].t0 = now_ms();
+        s_seg[cur].f0 = s_frame;
     }
 }
 
@@ -842,14 +890,22 @@ static void script_keys(void)
 {
     int i, k, cur;
     s_script_nkey = 0;
+    s_script_mouse = s_script_mdx = s_script_mdy = 0;
     script_start();
     if (!s_nev)
         return;
     cur = script_current();
-    for (i = 0; i < s_nev; i++)
-        if (s_ev[i].nkey && script_event_on(&s_ev[i], cur))
-            for (k = 0; k < s_ev[i].nkey && s_script_nkey < 16; k++)
-                s_script_key[s_script_nkey++] = s_ev[i].key[k];
+    for (i = 0; i < s_nev; i++) {
+        if ((!s_ev[i].nkey && !s_ev[i].has_mouse) || !script_event_on(&s_ev[i], cur))
+            continue;
+        for (k = 0; k < s_ev[i].nkey && s_script_nkey < 16; k++)
+            s_script_key[s_script_nkey++] = s_ev[i].key[k];
+        if (s_ev[i].has_mouse) {
+            s_script_mouse = 1;
+            s_script_mdx += s_ev[i].mdx;
+            s_script_mdy += s_ev[i].mdy;
+        }
+    }
 }
 
 static void script_apply(int port, btvs_pad *g)
@@ -861,7 +917,7 @@ static void script_apply(int port, btvs_pad *g)
     cur = script_current();
     for (i = 0; i < s_nev; i++) {
         const sc_event *e = &s_ev[i];
-        if (e->nkey || e->port != port || !script_event_on(e, cur))
+        if (e->nkey || e->has_mouse || e->port != port || !script_event_on(e, cur))
             continue;
         g->buttons |= e->pad.buttons;
         for (a = 0; a < 8; a++)
@@ -1433,6 +1489,16 @@ static void log_change(int port, int conn, const btvs_pad *g)
                g->analog[5], g->analog[6], g->analog[7], g->lx, g->ly, g->rx, g->ry);
 }
 
+static const char *run_env(const char *name)
+{
+    const char *r = getenv("BTVS_RESTARTS");
+    char full[64];
+    if (!r || !*r || !strcmp(r, "0"))
+        return getenv(name);
+    sprintf_s(full, sizeof full, "%s_%s", name, r);
+    return getenv(full);
+}
+
 static void env_start(void)
 {
     static int done;
@@ -1440,9 +1506,12 @@ static void env_start(void)
     if (done)
         return;
     done = 1;
-    if ((e = getenv("BTVS_INPUT_PLAYBACK")) != NULL && *e)
+    /* Like pad scripts, these are for one run of the game: the game restarts
+     * itself for a level, and that run (BTVS_RESTARTS = n) reads
+     * BTVS_INPUT_PLAYBACK_<n> / BTVS_INPUT_RECORD_<n>. */
+    if ((e = run_env("BTVS_INPUT_PLAYBACK")) != NULL && *e)
         btvs_input_playback(e);
-    if ((e = getenv("BTVS_INPUT_RECORD")) != NULL && *e)
+    if ((e = run_env("BTVS_INPUT_RECORD")) != NULL && *e)
         btvs_input_record_begin(e);
 }
 
@@ -1465,7 +1534,7 @@ int btvs_input_poll(int port, btvs_pad *g)
         memset(g, 0, sizeof *g);
         f = focused();
         script_keys();
-        if (!f && s_script_nkey)
+        if (!f && (s_script_nkey || s_script_mouse))
             live_pad(port, g, 0);
         if (f) {
             capture_step();
@@ -1483,7 +1552,7 @@ int btvs_input_poll(int port, btvs_pad *g)
             rumble_apply(f);
         s_was_focused = f;
         script_apply(port, g);
-        conn = port == 0 || (f && dev_on_port(port)) || (s_script_ports >> port & 1) || (port == C.kb_port && s_script_nkey);
+        conn = port == 0 || (f && dev_on_port(port)) || (s_script_ports >> port & 1) || (port == C.kb_port && (s_script_nkey || s_script_mouse));
         if (!conn)
             memset(g, 0, sizeof *g);
     }
@@ -1587,6 +1656,11 @@ void btvs_input__test_host_pad(const in_host_pad *pad)
         s_test_pad = NULL;
     }
     UNLOCK();
+}
+
+void btvs_input__test_last_rumble(int *port, int *left, int *right)
+{
+    *port = s_test_rumble[0]; *left = s_test_rumble[1]; *right = s_test_rumble[2];
 }
 
 void btvs_input__test_reset(void)

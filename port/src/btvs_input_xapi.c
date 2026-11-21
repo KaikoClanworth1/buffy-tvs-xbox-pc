@@ -290,6 +290,28 @@ static void game_probe(void)
     btvs_input_allow_mouse_look(player != 0 && menu != 9 && menu != 15);
 }
 
+/* BTVS_INPUT_POS_LOG=<n>: every n reads of player 1's pad, where the player
+ * is and its health, with the read count. Two runs given the same input
+ * (a recording and its playback) can then be compared read for read. */
+static void pos_log(void)
+{
+    static int every = -1;
+    static uint32_t reads;
+    uint32_t game, player;
+    if (every < 0) {
+        const char *e = getenv("BTVS_INPUT_POS_LOG");
+        every = e ? atoi(e) : 0;
+    }
+    reads++;
+    if (every <= 0 || reads % (uint32_t)every)
+        return;
+    if (!guest_readable(G_GAME) || (game = MEM32(G_GAME)) == 0 || !guest_readable(game + GAME_PLAYER)
+        || (player = MEM32(game + GAME_PLAYER)) == 0 || !guest_readable(player + 0x248u))
+        return;
+    IN_LOG("pos r%u x %.2f y %.2f z %.2f health %.0f", reads, guest_float(player + 0x240u), guest_float(player + 0x244u),
+           guest_float(player + 0x248u), guest_float(player + 0x90u));
+}
+
 /* DWORD XInputGetState(HANDLE, PXINPUT_STATE): DWORD packet number, then the 18-byte pad. */
 void XInputGetState_006105EF(void)
 {
@@ -305,8 +327,10 @@ void XInputGetState_006105EF(void)
         s_ver[port].busy = 1;
         s_ver[port].self = g_edi;               /* TInputDeviceController::Poll's this */
     }
-    if (port == 0)
+    if (port == 0) {
         game_probe();
+        pos_log();
+    }
     if (port >= 0)
         have = btvs_input_poll(port, &g);
     if (out) {
