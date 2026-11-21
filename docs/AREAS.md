@@ -166,7 +166,15 @@ numbers are of 24d9881; the full audit is what these lists are cut from.
     `*p->completed` / `*p->status` into game memory: free the voices under `s_lock` inside your function
     (memory is still valid then), so nothing is left that points there. Listener copy to defaults.
     `s_clock` and the `BTVS_AUDIO_DUMP` file name per run are yours to decide.
-- **Graphics -> Controls: `void btvs_input_reboot(void)`.**
+- **Graphics -> Controls: `void btvs_input_reboot(void)`.** **Done, 22 Nov (Controls)**: in
+  `btvs_input_xapi.c`; everything listed below plus the probe's, packet and rumble-log statics
+  (`docs/controls.md`, "The same with one process for the session"). **The pad script does not carry on:
+  run n reads `BTVS_PAD_SCRIPT_<n>`** (and `BTVS_INPUT_RECORD_<n>` / `BTVS_INPUT_PLAYBACK_<n>`), exactly
+  as with a process per run, so every test command means the same either way; a script that relied on
+  `after level` firing again in the same script needs its level part in `BTVS_PAD_SCRIPT_1`.
+  **For Logs**: the function ends the run's recording and playback, as the process's end did
+  (`[INPUT] recording ended`); the trail's `btvs_input_record_begin` for the next run is yours to call
+  from `btvs_logs_reboot` (it runs after ours).
   - `btvs_input.c`: rumble off on the hardware (`s_rumble`, as `at_exit` does); `s_read1`, `s_read1_ms`
     zero; `env_start`'s `done` zero so `BTVS_INPUT_PLAYBACK_<n>` / `BTVS_INPUT_RECORD_<n>` are read for
     the new run; `s_menu_mode` 0, `s_mk_blocked[]` 0, `s_allow_mouse_look` 1 (the mouse is not left

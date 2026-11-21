@@ -74,4 +74,9 @@ int  btvs_input__glyph_device(void);
 /* How often that has changed in this run (the first finding counts). */
 uint32_t btvs_input__device_changes(void);
 
+/* The game restarts itself inside the process (btvs_input_reboot, in
+ * btvs_input_xapi.c): each file forgets what it knew of the last run. */
+void btvs_input__core_reboot(void);
+void btvs_input__glyphs_reboot(void);
+
 #endif
