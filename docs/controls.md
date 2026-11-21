@@ -120,8 +120,11 @@ between keys and pad buttons every 5 s, changed set eight times with no load: ea
 RS and LT pictures and "thumbstick" / "trigger", the next with mouse and key pictures and the
 keyboard wording, then the controller's again (`btn_auto_live_switch_six_tips_one_level.png`).
 **Not checked:** a real controller's buttons and sticks while playing, plugging one in and pulling
-it out in a real session, a PlayStation controller's name, the Controls page and the menus'
-SELECT / BACK changing while open (the tips were what was on screen), and a rebind redrawing live.
+it out in a real session, a PlayStation controller's name, and a rebind redrawing live.
+The Controls page was left open in a second hidden run while its script touched a pad stick and
+then a key: frames 1.5 s apart show the keyboard and mouse page, the controller page, and the
+keyboard page again, CONFIRM / CANCEL changing with it
+(`btn_auto_live_controls_page_keyboard_controller_keyboard.png`).
 
 ## Defaults
 
