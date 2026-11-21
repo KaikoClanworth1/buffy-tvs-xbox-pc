@@ -54,8 +54,11 @@ static void pace(void)
         return;
     }
     step = 1.0 / (double)limit;
-    if (next == 0 || t - next > 0.1)
-        next = t;                                  /* first frame, or far behind: start again from now */
+    /* first frame, or more than a frame late: start again from now. (It used
+     * to wait until it was 100 ms behind, and ran the frames after a slow one
+     * with no pause at all to catch up: a hitch followed by a burst.) */
+    if (next == 0 || t - next > step)
+        next = t;
     next += step;
     for (;;) {
         double left = next - now_s();
