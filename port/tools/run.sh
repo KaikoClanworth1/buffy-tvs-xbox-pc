@@ -11,6 +11,14 @@ mkdir -p runs
 export BTVS_GAME_DIR="$(cd "$BTVS_MAIN/game_files" && pwd -W | tr '/' '\134')"
 export RECOMP_WATCHDOG_SECS="${RECOMP_WATCHDOG_SECS:-600}"
 for kv in "$@"; do export "$kv"; done
+# Every run gets its own empty save folder (runs/<name>.save), so runs never share
+# or pile up saved games (the game allows ten). BTVS_SAVE_DIR=<folder> keeps one instead.
+OWN_SAVE=""
+if [ -z "${BTVS_SAVE_DIR:-}" ] && [ -n "$NAME" ]; then
+    OWN_SAVE="$PORT/runs/$NAME.save"
+    rm -rf "$OWN_SAVE"; mkdir -p "$OWN_SAVE"
+    export BTVS_SAVE_DIR="$(cd "$OWN_SAVE" && pwd -W | tr '/' '\')"
+fi
 export BTVS_NO_WINDOW=1          # hidden, never focused
 export BTVS_MUTE=1               # test runs are silent
 export BTVS_AFFINITY="${BTVS_AFFINITY:-FF00}"   # CPUs 8-15, below-normal priority
@@ -33,5 +41,7 @@ PID=$!
 KILLER=$!
 wait $PID; echo "exit=$?"
 kill $KILLER 2>/dev/null
+# (the game's copy of its disc files and the disk images are not worth keeping: saves and settings stay)
+[ -n "$OWN_SAVE" ] && rm -rf "$OWN_SAVE/Cache" "$OWN_SAVE"/Partition*.img
 grep -E "^\[ICALL\]|\[CRASH\]|WATCHDOG|Cannot open" "runs/$NAME.err" | head -25
 python tools/sym.py "runs/$NAME.err" | head -16

@@ -227,3 +227,23 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 - **Logs -> everyone** (FYI): a replay of a report made in a level boots straight into it
   (`BTVS_REPLAY=<report>`; the report holds the game's launch data), about 35-50 s in a test run: a quick way
   into a level without menus. `BTVS_TEST_REPORT_AT=<s> BTVS_TEST_REPORT_RUN=1` makes such a report.
+
+**From Logs, 21 Nov 02:00:**
+
+- **Everyone using `port/tools/run.sh`**: every run now gets its own empty save folder,
+  `port/runs/<name>.save` (emptied at the start of the run; the game's cache copy and disk images are deleted
+  from it afterwards, saves and settings stay for a look). Runs no longer share or pile up saved games.
+  `BTVS_SAVE_DIR=<folder>` on the command line keeps a folder of your own instead. The old shared saves in
+  `port/build/Release/XboxData/HardDisk` and `game_files/UDATA` are no longer read by test runs; Logs has not
+  deleted them.
+- **Toolkit, `xboxrecomp/src/kernel/kernel_file.c`** (small): a file opened without write access is opened
+  with read sharing. Two test games at once collided on `Sound\dsstdfx.bin` (sharing violation -> the game's
+  disk-error screen at boot, about one boot in two that night). It only helps once both games have it:
+  **rebuild after pulling**.
+- **Logs -> Graphics**: the hard-disk folder works (saved games are in `<save folder>\HardDisk\UDATA`, and
+  reports and replays carry them); the earlier note about old saves being found in the game folder was from
+  builds before it took effect. Still wanted: the last frame shown, for the picture in a pause-menu report.
+- **Logs -> Controls**: `BTVS_PAD_SCRIPT_<n>` solved the scripts-across-restarts problem, thanks.
+- **For getting to a spot in a level fast** (any area): `BTVS_REPLAY=<report zip>` loads the report's level
+  and saved game, skips cutscenes and puts the player on the report's spot about 2 s after the level is
+  playable. Make one with `BTVS_TEST_REPORT_AFTER_LEVEL=<s> BTVS_TEST_REPORT_RUN=1` or from the pause menu.
