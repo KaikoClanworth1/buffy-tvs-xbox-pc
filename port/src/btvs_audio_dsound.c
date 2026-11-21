@@ -792,6 +792,46 @@ static void wma_read(void)
     ret_stdcall(n, 16);
 }
 
+/* The game is about to be put back to its start inside this process
+ * (btvs_boot_restart.c). Called on the game thread: the game's other threads
+ * have ended and its memory is still there, to be wiped right after. All
+ * that is known about the game by address is forgotten: the handle pool (a
+ * block of the game's heap), the device handle, every buffer and stream with
+ * its mixer voice, the listener, the music tracks held for the game's music
+ * objects. The mixer thread, the sound device, the audio clock and a
+ * BTVS_AUDIO_DUMP stay: one device and one dump file for the session. */
+void btvs_audio_reboot(void)
+{
+    int i, slots = 0, tracks = 0, voices;
+
+    if (!s_ready) return;
+    /* First the voices, under the mixer's lock: after this the mixer thread
+     * reads no sample from game memory and writes no packet status there. */
+    voices = btvs_audio_reset_voices();
+
+    EnterCriticalSection(&s_cs);
+    for (i = 0; i < SLOTS; i++) slots += s_slot_used[i] != 0;
+    memset(s_slot_used, 0, sizeof s_slot_used);
+    memset(s_stream_max, 0, sizeof s_stream_max);
+    memset(s_tr, 0, sizeof s_tr);
+    s_pool = s_device = s_fx_desc = 0;          /* the new run's heap owns that address again */
+    s_lpos[0] = s_lpos[1] = s_lpos[2] = 0.0f;
+    s_lfront[0] = 0.0f; s_lfront[1] = 0.0f; s_lfront[2] = 1.0f;
+    s_ltop[0] = 0.0f; s_ltop[1] = 1.0f; s_ltop[2] = 0.0f;
+    s_distance = 1.0f; s_rolloff = 1.0f;
+    for (i = 0; i < MUSIC_FILES; i++) {
+        tracks += s_music[i].data != NULL;
+        free(s_music[i].data);
+    }
+    memset(s_music, 0, sizeof s_music);
+    s_music_next = 0;
+    LeaveCriticalSection(&s_cs);
+
+    dlog("the game restarts in this process: %d voices stopped and freed (%d handles, %d music tracks held); "
+         "device, clock and dump carry on at %.1f s", voices, slots, tracks,
+         (double)btvs_audio_clock() / 48000.0);
+}
+
 recomp_func_t btvs_audio_lookup(uint32_t va)
 {
     return va == 0x00067100u ? wma_read : NULL;

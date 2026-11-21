@@ -153,6 +153,10 @@ opens this needs to STOP"): each area's `btvs_<area>_reboot()`** -- see "Ready t
 restarts inside the process". The in-process restart is built and stays off until all four exist. Line
 numbers are of 24d9881; the full audit is what these lists are cut from.
 
+- **Done by Audio, 21 Nov: `btvs_audio_reboot()` exists** (`btvs_audio_dsound.c`; `docs/audio.md`, "The game restarts
+  inside the process"). Checked with `BTVS_REBOOT=inplace`: menu -> level 1 -> cemetery -> high school -> level 1, and
+  cemetery -> Quit -> main menu -> Start Game -> level 1; no crash, sound in every run, no voice carried over. One
+  `BTVS_AUDIO_DUMP` file per session now (no `_r<N>` when the restart is in the process). The request was:
 - **Graphics -> Audio: `void btvs_audio_reboot(void)`.** Seen without it: the game's heap corrupted in
   the run after a restart when a movie's sound started (`RtlAllocateHeap` fault).
   - `btvs_audio_dsound.c`: `s_pool` is a block of the *game's* heap (`xbox_HeapAlloc`, L158) kept for the

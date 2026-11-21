@@ -416,6 +416,9 @@ static void resampler_init(void)
     }
 }
 
+static volatile LONG s_duck;         /* 1: the mix fades to silence and stays there */
+static float s_duck_gain = 1.0f;
+
 /* Add `frames` frames of voice v to acc (interleaved float stereo). */
 static void voice_mix(Voice *v, float *acc, int frames)
 {
@@ -559,6 +562,17 @@ static void mix_period(int16_t *out, int frames)
         if (!v->used || !v->playing || v->paused) continue;
         if (!v->is_stream && !v->data) continue;
         voice_mix(v, acc, frames);
+    }
+    {   /* a fade-out asked for by btvs_audio_reset_voices, one period long */
+        float to = s_duck ? 0.0f : 1.0f;
+        if (s_duck_gain != 1.0f || to != 1.0f) {
+            float g = s_duck_gain, d = (to - g) / (float)frames;
+            for (i = 0; i < frames; i++) {
+                acc[i * 2] *= g; acc[i * 2 + 1] *= g;
+                g += d;
+            }
+            s_duck_gain = to;
+        }
     }
     for (i = 0; i < frames * 2; i++) {
         float s = acc[i], m = fabsf(s) / 32768.0f;
@@ -946,6 +960,53 @@ void btvs_audio_voice_free(int id)
         memset(v, 0, sizeof *v);
     }
     UNLOCK();
+}
+
+/* Every voice freed at once, the thread, the device, the clock and the dump
+ * kept: for a game that restarts inside the process. Sample data and stream
+ * packets point into the game's memory, which is wiped right after, so
+ * nothing may be left that reads it or writes a packet's status there. Done
+ * under the lock: the mixer is either before or after it, never in between.
+ * Returns how many voices were in use. */
+int btvs_audio_reset_voices(void)
+{
+    int i, n = 0;
+    /* Cutting sound off in mid-wave clicks: let the mixer fade it out first
+     * (one period, then one of silence; at most 60 ms if it is held up). */
+    if (s_inited && !s_offline && s_thread) {
+        LONG64 c0 = s_clock;
+        int waited = 0;
+        InterlockedExchange(&s_duck, 1);
+        while (s_clock < c0 + 2 * BTVS_AUDIO_PERIOD && waited++ < 30) Sleep(2);
+    }
+    LOCK();
+    for (i = 0; i < MAX_VOICES; i++) {
+        Voice *v = &s_voice[i];
+        if (!v->used) continue;
+        n++;
+        if (v->is_stream && v->q) {
+            int k;
+            for (k = 0; k < MAX_PACKETS; k++) free(v->q[k].data);    /* no status written back */
+            free(v->q);
+        }
+        memset(v, 0, sizeof *v);
+    }
+    s_lpos[0] = s_lpos[1] = s_lpos[2] = 0.0f;
+    s_lfront[0] = 0.0f; s_lfront[1] = 0.0f; s_lfront[2] = 1.0f;
+    s_ltop[0] = 0.0f; s_ltop[1] = 1.0f; s_ltop[2] = 0.0f;
+    s_distance = 1.0f; s_rolloff = 1.0f;
+    UNLOCK();
+    InterlockedExchange(&s_duck, 0);
+    return n;
+}
+
+int btvs_audio_voices_in_use(void)
+{
+    int i, n = 0;
+    LOCK();
+    for (i = 0; i < MAX_VOICES; i++) n += s_voice[i].used != 0;
+    UNLOCK();
+    return n;
 }
 
 void btvs_audio_voice_format(int id, int tag, int channels, int rate, int bits, int block_align)

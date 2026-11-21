@@ -546,6 +546,47 @@ ending, `Stop` ignored, stale buffer data, the new resampler's end handling) wer
 recording of their fight exists (`btvs_frames.rec` covered other levels). If it is still there
 after this build, a Report a Problem in the fight, or the name of the sound, is needed.
 
+## The game restarts inside the process: `btvs_audio_reboot` (2026-11-21)
+
+Graphics' in-process restart (`btvs_boot_restart.c`; `docs/AREAS.md`, "The game restarts inside the
+process") calls `void btvs_audio_reboot(void)` on the game thread when the game has asked to be
+started again; the game's memory is wiped right after. It is in `btvs_audio_dsound.c`:
+
+- `btvs_audio_reset_voices()` (`btvs_audio.c`): the mix fades out over one period (a cut in
+  mid-wave clicks), then every voice is freed under the mixer's lock. Stream packets are dropped
+  without writing their status words. After it nothing reads a sample from game memory or writes
+  there. Listener back to defaults.
+- The handle pool (a block of the game's heap), the device handle and the effects descriptor are
+  forgotten (the next `DirectSoundCreate` allocates them again from the new heap), the slot tables
+  and stream counters zeroed, the music tracks held for the game's music objects freed.
+- **Kept for the session**: the mixer thread, the XAudio2 device, the audio clock (it does not go
+  back) and the `BTVS_AUDIO_DUMP` file. With restarts inside the process a session is **one dump
+  file**; `<name>_r<N>.wav` only appears when a restart is a new process (`BTVS_REBOOT=process`).
+- The log says what it found: `the game restarts in this process: N voices stopped and freed (...)`.
+
+Checked in muted, hidden runs with `BTVS_REBOOT=inplace` (no crash, no heap fault in any):
+
+| Run | Restarts in one process | Sound in the dump |
+|---|---|---|
+| `aud_rb1`: main menu -> Start Game -> level 1 -> cemetery -> high school -> level 1 (the three level changes by `BTVS_TEST_RELAUNCH`) | 4 | every leg: menu music; 125 / 62 / 113 / 96 buffers started, 7 / 3 / 14 / 7 speech lines, a music track and 9-13 loading-screen streams each |
+| `aud_rb3`: cemetery -> pause -> Quit -> Yes -> main menu -> Start Game -> level 1 (all the game's own) | 2 | cemetery, then menu music (rms 0.021), then level 1 with its cutscene |
+| `aud_rb2`: menu -> level 1 -> cemetery | 2 | the last 20 ms before the restart taper from 0.03 to 0.007: the fade, not a cut |
+
+Voices in use when each restart came: 0, 8, 7, 7 (`aud_rb1`): none carried over, no growth. The
+loading screen's movie stream started in every run after a restart (the symptom without this
+function was a heap fault there).
+
+```bash
+bash port/tools/run.sh aud_rb1 250 BTVS_REBOOT=inplace BTVS_SKIP_MOVIES=1 BTVS_AUDIO_LOG=1 BTVS_AUDIO_DUMP=runs/audio/rb1.wav   "BTVS_TEST_RELAUNCH=95:m03_cemetery_1,140:m01_highschool_1,185:m00_spanishmission_1"   "BTVS_PAD_SCRIPT=1.0 START every 1.5; after menu; 2.5 A every 2.5; after menu12; 2.5 A every 2.5; after menu13; 2.5 A every 2.5; after level; 300 A"
+bash port/tools/run.sh aud_rb3 160 BTVS_REBOOT=inplace BTVS_SKIP_MOVIES=1 BTVS_MAP=m03_cemetery_1 BTVS_AUDIO_LOG=1 BTVS_AUDIO_DUMP=runs/audio/rb3.wav   "BTVS_PAD_SCRIPT=after level; 8 START; 14 START; 17 DOWN; 18.5 DOWN; 20 A; 22 LEFT; 23.5 A; 26 START every 1.5; after menu; 2.5 A every 2.5; after menu12; 2.5 A every 2.5; after menu13; 2.5 A every 2.5; after level; 300 A"
+```
+
+**Not checked**: with the sound device open (all runs were muted; the device is not touched by the
+function), the logo movies in a run after a restart (`BTVS_SKIP_MOVIES=1` throughout), more than
+four restarts in a row. **Seen on the way, not part of this**: with master at 100 the mix clipped
+1442 samples in `aud_rb1` during loud moments in the cemetery and the high school (speech, music
+and effects together; the owner plays at master 70, where it does not).
+
 ## Still to do
 
 1. An unloaded run at normal priority (or the owner listening): movies, menu music and a level
