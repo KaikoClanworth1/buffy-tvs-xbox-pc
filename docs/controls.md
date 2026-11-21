@@ -96,7 +96,10 @@ Controller (any pad, by position; Black / White are the bumpers):
 | Stick clicks | L3 / R3 | Left Ctrl / V |
 
 Mouse buttons act only while the mouse is the camera. The keyboard defaults are the Chaos Bleeds
-port's and are provisional until the game can be played.
+port's and are provisional. What the buttons do in this game, as seen in the first level: B jumps,
+A and X strike, Start pauses (and skips a cutscene), Black and White open the inventory screens
+(B closes them), the right stick turns the camera and the left trigger resets it (the game's own
+tip). So jump is on Backspace today, which wants changing once the owner has played.
 
 ## Settings (`[controls]` in `btvs_settings.ini`)
 
@@ -300,24 +303,49 @@ A record is written only when a port's pad changes, so a resting pad costs nothi
 play is a few kilobytes. The file is flushed within a second of each record; one without an end
 record (a crash, or a test run's timed exit) plays to its last complete record.
 
-Playback is keyed by **read count** by default: the n-th `XInputGetState` of a port returns what
-the n-th returned when recording. That is exact with respect to the game's input sampling.
-`BTVS_INPUT_REPLAY_CLOCK=frame` or `time` keys by frame number or milliseconds instead. During
-playback the player's devices are ignored and the recorded connect/disconnect of ports 2–4 is
-reproduced.
+**The playback clock.** A recording made from the start of a run (it has the "first read" record)
+and played from the start of a run goes by **time from the game's first pad read**: the game
+starts reading the pad when it is ready to run (in a level's run: when the level has loaded), so
+that moment is the same in both runs however long the load took, and from there a pad change
+recorded at 14.016 s is given at 14.016 s. Anything else (a recording begun or played in mid-game)
+goes by **read count**: the n-th read of a port returns what the n-th returned when recording.
+`BTVS_INPUT_REPLAY_CLOCK=poll`, `frame` or `time` forces read count, frame number or plain time
+since playback began. During playback the player's devices are ignored and the recorded
+connect/disconnect of ports 2-4 is reproduced. The log says which clock a playback uses.
 
-**How deterministic is it?** The input stream is reproduced exactly. Whether the *game* ends up in
-the same spot also depends on the game: it samples pads on a 16 ms timer and consumes the buffered
-samples per frame, so frame timing (and anything random) can shift how samples fall into frames. A
-recording that starts at a level load or checkpoint and is replayed at the same frame rate is the
-best case. Measured so far only in the menus: a 29 s recording of `menu_path.txt` from boot, played
-back in a second run, gave the game the same 29 pad changes and the game went through the same
-menus in the same order (10, 1, 12, 1, 5, 1, 11, 1, 11, 1). Not measured in a level.
+Why not read count everywhere: the game reads the pad from a timer whose rate is not steady (58 to
+68 reads a second across test runs, none at all during a hitch), so the same read number is a
+different moment in another run.
+
+**How deterministic is it?** Measured in the first level (21 Nov, hidden test runs; `level_walk.txt`
+recorded with `BTVS_INPUT_RECORD_1`, then two more runs playing it with `BTVS_INPUT_PLAYBACK_1`,
+`BTVS_INPUT_POS_LOG=30` in all three):
+
+- **The input is reproduced.** By the default clock each of the 18 pad changes of the 28 s recording
+  reached the game within 0.01 to 0.09 s of its recorded time (most within 0.03 s). By read count
+  the same recording ran up to 0.53 s early.
+- **The player's position is not reproduced exactly.** After the first two legs (3.5 s of walking,
+  about 430 units) the three runs stood within 10 units of each other. The next leg, after a
+  0.7 s camera turn, passes a ramp: in the recorded run she walked past it, in both replays she
+  walked onto it, and at the end of the walk the replays stood 130 units from where the recorded
+  run ended (she is about 60 units tall) and 7 units from each other. So: a few units of drift
+  per leg, which an obstacle can turn into a different path.
+- The cause is the game, not the input: it steps by measured frame time and the frame rate
+  differed between the runs (38 to 56 frames a second during the same camera turn). Nothing
+  in the port pins the game's clock or its random numbers.
+
+For Logs' replay this means what `docs/logs.md` already does: play the input to make the same
+things happen in roughly the same place, then put the player on the report's exact spot. A replay
+that lands exactly would need the game's own clock recorded and played back frame by frame
+(the runtime's time functions, not Controls); see `docs/AREAS.md`.
+
+In the menus: a 29 s recording of `menu_path.txt` from boot, played back in a second run, gave the
+same 29 pad changes and the same menus in the same order (10, 1, 12, 1, 5, 1, 11, 1, 11, 1).
 
 ## Verified / not verified
 
 **In the running game** (hidden, muted test runs through `port/tools/run.sh`; no window, no focus,
-no hardware; 20 Nov 2026):
+no hardware; menus 20 Nov 2026, the first level 21 Nov):
 
 - The XAPI replacements: the game calls `XInitDevices`, `XGetDevices`, `XInputOpen`,
   `XGetDeviceChanges` and `XInputGetState`, gets a pad on port 1 and runs on; the stack handling is
@@ -336,6 +364,34 @@ no hardware; 20 Nov 2026):
   Credits → back, d-pad and left stick both moving the selection, waiting on the menu marks.
 - **Recording then playback** of that run: same pad changes, same menus, same order (above).
 - The menu id of the game-state probe (above).
+- **A script from boot into the first level** (`boot_to_level.txt`, then the level's own script in
+  the run after the game restarts itself).
+- **Every kind of control in the level** (`level_controls.txt`, `BTVS_INPUT_VERIFY=1`: 54 pad values,
+  no mismatch; effects read from the player's position and frame dumps):
+  - Start skips the opening cutscene;
+  - left stick: forward, back, left and right each move her the right way (forward is -z at the
+    start, left is +x);
+  - right stick: a second held left turns the camera (frame dumps), and forward then moves her
+    the other way along z;
+  - B jumps (66 units up and down in a second), A and X strike and step her forward, Y does
+    nothing where she stood; all four are named as the game's own tips name them;
+  - triggers at part values reach the game as part values (LT 128 as 0.502, RT 64 as 0.251);
+  - White and Black each open an inventory screen, B closes it;
+  - Start opens the pause menu and Start closes it (`game: pause screen open` / `closed`);
+  - **the mouse as the right stick**: a scripted mouse movement of 25 counts a read gave the game a
+    full right stick and turned the camera (forward on the keyboard, `K:W`, then moved her back along
+    -z); the same movement while paused gave the game nothing.
+- **The player object and the pause screen** of the game-state probe: `level` fires when the level
+  has loaded, `pause` / `resume` when the pause menu opens and closes.
+- **Rumble, as far as a hidden run goes**: the game calls `XInputSetState` (the replacement is
+  reached and returns what the game expects): once, with both motors at 0, when a level starts.
+  Nothing in the first level's opening made it ask for more: 90 s of running, jumping, climbing and
+  striking the air through the tutorial ledges. No fight was reached (see "Waiting").
+- **Recording a walk and playing it back** in the level: see "How deterministic is it?".
+
+Two faults these runs found, both fixed: the menu id stays 9 after the pause menu closes, so mouse
+look stayed off for the rest of the level after the first pause; and a script press whose whole
+time fell into a hitch of the game was never given.
 
 The game opens port 1 twice at start (`XInputOpen port 1 -> open` is logged twice); both get the
 same handle and it does no harm.
@@ -348,31 +404,63 @@ same handle and it does no harm.
 - script parsing and timing: seconds and frames, `+`, `for`, `every`, `after` marks, player 2, keys;
 - recording → playback gives identical pads read for read even when the clock stumbles; recording
   size (changes only);
-- capturing a controller binding, the resting pad during capture, save / reload / reset.
+- capturing a controller binding, the resting pad during capture, save / reload / reset;
+- scripted mouse movement as the right stick, and not while the game says the mouse is not the
+  camera; a mark reached during playback; playback by time from the first read across a longer
+  load and a stall;
+- **rumble routing**: a rumble for the player whose controller it is goes to that controller with
+  the values the game gave; one for a player without a controller goes nowhere; it stops when the
+  window loses focus and comes back with it. (In the game each send is logged:
+  `[INPUT] rumble -> Xbox controller 1 (XInput, player 1): left N right N`.)
 
 Also run by hand on the dev PC: `btvs_input_test live 3` loads `xinput1_4.dll`, finds and starts
 `SDL3.dll` (every function the backend uses resolves). No controller was plugged in.
 
-**Not verified in the game, waiting on a level** (levels do not load yet, see `docs/graphics.md`):
+**Waiting** (not verified, and why):
 
-- Rumble: the game made no `XInputSetState` call at the title or in the menus, so the replacement
-  has never been called. When it is, the log shows `[INPUT] rumble p1 left N right N`.
-- The `level` mark and the player-object address; mouse look being allowed only in play.
-- A pad script from boot into a level; whether a recording replays to the same spot in a level.
+- **Rumble in a fight.** No fight has been reached by script: the first level opens with a
+  tutorial of ledges, and scripted runs got through it but not to an enemy. When the game asks
+  for rumble the log shows `[INPUT] rumble p1 left N right N` (the game's call) and, with a
+  controller and a focused window, `rumble -> ...` (what was sent to it).
+- **Y, and the triggers' effect in play**: they reach the game with the right values; nothing was
+  there for them to act on.
+- The resurrect screen (dying) and whether the pause screen's flag covers it; the inventory screens
+  do not set that flag, so the mouse stays captured in them.
+- Cutscenes: the mouse stays captured during them.
 
-**Needs the owner's hands** (a real window with focus and real devices; test runs never have either):
+## The owner's checklist
 
-- An Xbox pad through XInput: buttons, triggers, sticks, Guide; rumble strength and both motors.
-- A DualSense (or other non-Xbox pad) through SDL: mapping, rumble, the pad's name on the Controls page.
-- Hot-plug: unplugging and plugging pads while playing, a second pad becoming player 2.
-- Keyboard and mouse in the focused window: keys read, mouse look speed and feel (the factor is a
-  guess), the cursor hidden and held while looking and released in menus, the wheel as a binding.
-- Rebinding on the Controls page: capturing a key and a pad button, Escape and the 8 s timeout,
-  the new binding still there after a restart.
-- Input stopping when the window loses focus (Alt+Tab) and coming back cleanly.
+Everything above ran without a window, a controller or a keyboard. These need the game on screen
+(start it with the launcher's **Play**) and take about ten minutes. For anything that goes wrong:
+pause, **Report a Problem**, one line saying which step.
+
+1. **Xbox pad** (plug it in before starting). In the first level: the left stick walks, the right
+   stick turns the camera both ways and up and down, B jumps, A and X strike, both triggers do
+   something, Start pauses, the bumpers (LB / RB) open the inventory screens, the d-pad moves
+   through menus.
+2. **Rumble on the Xbox pad.** Get hit by the first enemy, or hit one: the pad should shake, and
+   stop shaking when the hit is over. Then Options -> PC Controls -> Rumble off: no shaking.
+   Alt+Tab away in mid-shake: it stops.
+3. **DualSense through SDL.** Unplug the Xbox pad, plug in the DualSense (USB first, then
+   Bluetooth if you use it), start the game. Same checks as 1 and 2 (Cross is A, Circle is B,
+   L1 / R1 are the bumpers, Options is Start). Key Bindings should name the pad's buttons.
+4. **Hot-plug.** In a level, unplug the pad: the game should not crash, and the keyboard should
+   still work. Plug it back in: it works again within about two seconds, without a restart.
+   Then plug in a second pad: the first keeps player 1.
+5. **Keyboard and mouse.** W A S D walk, the mouse turns the camera (too fast or too slow? note
+   which; Options -> PC Controls -> Sensitivity changes it), Space is A, E or left click is X,
+   Q or right click is Y, Backspace is B (jump), Enter is Start, Z and C are the bumpers. The
+   cursor is hidden while playing, and free in the pause menu and after Alt+Tab.
+6. **Rebinding a key.** Options -> PC Controls -> Key Bindings: choose "B", press A, press the key
+   you want for jump. Back in the level that key jumps. Quit the game, start it again: it still
+   does. Then Reset Bindings: Backspace jumps again.
+
+Not expected to be right yet: the default keys are the Chaos Bleeds port's and were chosen before
+this game could be played (jump on Backspace is the obvious one to change).
 
 ## Not done
 
-- A pad script that goes from boot through the main menu into a level (needs a level to load;
-  `menu_path.txt` covers the menus).
-- Cutscenes: the mouse is still captured during them (only menus and "no level" release it).
+- Keyboard defaults that suit this game (see the end of the checklist).
+- The mouse is still captured during cutscenes and in the inventory screens.
+- `[INPUT]` lines go to stderr (which a player's run redirects into the log); calling Logs'
+  `btvs_log` directly would be tidier.

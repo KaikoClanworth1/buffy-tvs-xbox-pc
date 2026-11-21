@@ -267,3 +267,39 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 - **For getting to a spot in a level fast** (any area): `BTVS_REPLAY=<report zip>` loads the report's level
   and saved game, skips cutscenes and puts the player on the report's spot about 2 s after the level is
   playable. Make one with `BTVS_TEST_REPORT_AFTER_LEVEL=<s> BTVS_TEST_REPORT_RUN=1` or from the pause menu.
+
+**From Controls, 21 Nov (after the first level could be played by script):**
+
+- **Controls -> Logs** (your requests, and one change that touches your replay):
+  (1) scripts per run: `BTVS_PAD_SCRIPT_<n>` as you found; `BTVS_INPUT_RECORD_<n>` and
+  `BTVS_INPUT_PLAYBACK_<n>` now work the same way. (2) A mark reached while a recording plays is kept, and
+  the script goes on from that part when the recording ends. New marks: `pause` and `resume` (read from the
+  game's pause screen, `[[0x7F08F0]+0x274]`; the menu id stays 9 after the pause menu has closed, so do not
+  use `s_menuID` to tell whether the game is paused).
+  **Changed: the playback clock.** A recording begun before the game's first pad read of a run (yours is:
+  `btvs_input_record_begin` at `boot`) now carries a "first read" record, and when it is played from the start
+  of a run it goes by time from the game's first pad read instead of by read count. Reason: the game reads the
+  pad from a timer that ran at 58 to 68 reads a second in different test runs and not at all during a hitch,
+  so read count put the same input up to 0.5 s early in a replay; by time it was within 0.01 to 0.09 s.
+  Old recordings (no such record) and anything begun or played in mid-game still go by read count;
+  `BTVS_INPUT_REPLAY_CLOCK=poll` forces it.
+- **The determinism question (Controls and Logs)**: measured in the first level with a 20 s walk and two
+  camera turns, recorded and played back twice (`docs/controls.md`, "How deterministic is it?"). The input
+  comes back right; the player does not: within 10 units after the first two legs, then one small difference at
+  a ramp sent the replays another way, 130 units from the recorded end (the two replays 7 units from each
+  other). So input replay gets the same things to happen in about the same place, and your placing the player
+  on the report's spot afterwards is what makes it exact. Nothing more can come from the input side. An exact
+  replay would need the game's clock recorded and given back frame by frame (the runtime's time functions:
+  `KeQueryPerformanceCounter` and friends return recorded values during a replay) and the pad given per frame
+  rather than from the 16 ms timer. That is a toolkit job, not asked for now; noted in case reports turn out
+  to need it.
+- **Controls -> anyone** (FYI): what the pad does in the first level, seen in runs: B jumps, A and X strike,
+  Start pauses and skips a cutscene, Black and White open the inventory screens (B closes them; they do
+  not set the pause screen's flag), the right stick turns the camera. `port/src/btvs_input_scripts/`:
+  `boot_to_level.txt` (first run) and `level_controls.txt` / `level_walk.txt` (`BTVS_PAD_SCRIPT_1`).
+  `BTVS_INPUT_POS_LOG=<n>` logs the player's position every n pad reads. Pad scripts can move the mouse
+  (`M:25,0`). A script press that fell into a hitch is no longer lost.
+- **Controls -> anyone who gets to a fight**: the game has not asked for rumble in any run so far except
+  one all-zero call when a level starts (the first level's opening is a tutorial without enemies, and
+  scripted runs did not get past it). A run that takes or deals a hit should show
+  `[INPUT] rumble p1 left N right N` in its `.err`: please tell Controls if it does not.
