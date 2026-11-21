@@ -1050,14 +1050,15 @@ static int reword_at(uint32_t va)
     return 0;
 }
 
+static int s_messages_done;      /* the game's own messages reworded (once per run of the game) */
+
 static void pc_wording(void)
 {
-    static int messages_done;
     uint32_t mgr = MEM32(G_MANAGER), arr, n, i, off;
     int strings = 0, controls = 0, messages = 0;
 
-    if (!messages_done) {
-        messages_done = 1;
+    if (!s_messages_done) {
+        s_messages_done = 1;
         for (i = 0; i < sizeof k_message / sizeof k_message[0]; i++) {
             char *s;
             if (!gok(k_message[i].va, 160)) continue;
@@ -1227,6 +1228,40 @@ static void hook_drawstring(void)
     GUI_TBuffyManager_DrawString_00218410();
     MEM8(mgr + MGR_SHADOW) = shadow;
     MEM8(mgr + MGR_BUFFY) = buffy;
+}
+
+/* ── the game restarts inside the process ────────────────────────────── */
+
+/* Called by the restart (btvs_boot_restart.c) on the game thread when the game has asked to be
+ * started again: its memory is still there and is wiped right after. Everything this file knows
+ * about the game by address, or has done "once", is forgotten, as a new process used to do.
+ * Settings are not touched: they live outside the game and hold across runs. */
+void btvs_menu_reboot(void)
+{
+    int i;
+    if (s_bind_capture >= 0) btvs_input_capture_cancel();
+    /* a report being made reads the game's memory through Logs: let it finish while that is valid */
+    for (i = 0; i < 300 && s_rep_busy; i++) Sleep(10);
+    if (s_rep_busy) btvs_log("menu", "restart: a report was still being made after 3 s");
+    btvs_settings_save();
+
+    s_scratch = 0;              /* a block of the old run's heap */
+    s_messages_done = 0;        /* the exe's messages are loaded fresh: reword them again */
+    s_options = 0;
+    s_page = PG_NONE;
+    s_pending_page = PG_NONE;
+    memset(s_row, 0, sizeof s_row);
+    s_nrows = 0;
+    memset(s_shown, 0, sizeof s_shown);
+    memset(s_saved_id, 0, sizeof s_saved_id);
+    memset(s_saved_state, 0, sizeof s_saved_state);
+    s_nsaved = 0;
+    s_next_refresh = 0;
+    s_font_menu = s_font_menu_on = s_font_text = s_font_text_on = 0;
+    s_bind_top = 0; s_bind_slot = 0; s_bind_capture = -1;
+    s_rep_edit = 0;
+    s_rep_was_busy = 0;
+    btvs_log("menu", "restart: menu state cleared");
 }
 
 /* ── the hook table (recomp_lookup_manual asks this first) ───────────── */

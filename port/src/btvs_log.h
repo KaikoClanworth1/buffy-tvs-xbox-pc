@@ -54,6 +54,14 @@ int  btvs_exact_replay_result(unsigned *frames, unsigned *checks, float *max_dev
 int  btvs_exact_recording(void);
 unsigned btvs_exact_replay_seed_fixes(void);
 void btvs_objlog_hook_object_tick(void);                /* btvs_objlog.c: BTVS_OBJLOG, BTVS_FORCE_DT */
+/* The game restarting itself inside the process (btvs_boot_restart.c calls btvs_logs_reboot, btvs_trail.c):
+ * from that call until the next run's first frame the game's memory is not to be read. */
+int  btvs_logs_game_up(void);                           /* 0 between a restart and the next run's first frame */
+void btvs_exact_reboot(void);
+void btvs_report_reboot(void);
+void btvs_crash_reboot(void);
+void btvs_replay_reboot(void);
+void btvs_objlog_reboot(void);
 int  btvs_game_paused(void);                           /* the pause screen is open */
 void btvs_input_record_flush(void);       /* Controls, when it has one: make the recording file complete up to now */
 

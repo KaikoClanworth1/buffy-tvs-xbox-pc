@@ -181,7 +181,10 @@ static uint64_t game_tsc(void)
 
 static int paused_now(void)
 {
-    uint32_t p = M32(G_PAUSE);
+    uint32_t p;
+    if (!btvs_logs_game_up())           /* the game is restarting itself: not its memory now */
+        return 0;
+    p = M32(G_PAUSE);
     return p > 0x10000u && *M8(p + PAUSE_OPEN) != 0;
 }
 
@@ -724,5 +727,45 @@ int btvs_exact_replay_result(unsigned *frames, unsigned *checks, float *max_dev,
 }
 
 int btvs_exact_recording(void) { return X.mode == X_RECORD; }
+
+/* The game restarts itself inside the process: this run's recording ends, the
+ * next run's begins when its level is up (start(), which also gives the game
+ * thread its clock again: the runtime takes it away at a restart, so that
+ * loading runs on the real clock). A frame replay does not go on into the
+ * next run. */
+void btvs_exact_reboot(void)
+{
+    env_once();
+    EnterCriticalSection(&X.cs);
+    if (X.f)
+        fclose(X.f);
+    X.f = NULL;
+    LeaveCriticalSection(&X.cs);
+    if (X.mode != X_OFF) {
+        if (X.mode == X_RECORD || X.mode == X_REPLAY || X.mode == X_LIVE)
+            btvs_log("exact", "the run ends: its frame recording ends after %ld frames; the next begins when a level is up",
+                     X.frames);
+        InterlockedExchange(&X.mode, X_WAIT);
+        DeleteFileA(X.path);
+    }
+    free(X.data);
+    X.data = NULL;
+    X.size = X.pos = 0;
+    X.limit = X.file_seed = 0;
+    X.want_replay = X.replay_done = X.diverged = 0;
+    X.first_bad = X.seed_fixes = X.checks = 0;
+    X.max_dev = X.last_dev = 0.0f;
+    X.warned_slot = 0;
+    X.frames = X.frames_unpaused = 0;
+    X.clock = X.reads = X.offset = 0;
+    X.seed_va = X.if_va = 0;
+    X.game_tid = 0;
+    X.in_frame = X.have_input = X.was_paused = 0;
+    X.have_end_pos = 0;
+    X.most_reads = 0;
+    memset(&X.cur, 0, sizeof X.cur);
+    memset(&P, 0, sizeof P);
+    memset(s_prev, 0, sizeof s_prev);
+}
 int btvs_game_paused(void) { return g_xbox_mem_offset && paused_now(); }
 unsigned btvs_exact_replay_seed_fixes(void) { return X.seed_fixes; }

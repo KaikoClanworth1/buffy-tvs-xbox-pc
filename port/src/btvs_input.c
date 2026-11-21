@@ -1094,6 +1094,8 @@ int btvs_input_script_load_file(const char *path)
 
 /* BTVS_PAD_SCRIPT: a file, or the script itself with ';' between lines.
  * Called with the lock held. */
+static const char *run_env(const char *name);
+
 static void script_env_load_locked(void)
 {
     const char *e;
@@ -1101,7 +1103,7 @@ static void script_env_load_locked(void)
     if (s_script_env_done)
         return;
     s_script_env_done = 1;
-    e = getenv("BTVS_PAD_SCRIPT");
+    e = run_env("BTVS_PAD_SCRIPT");             /* run n of the game: BTVS_PAD_SCRIPT_<n> */
     if (!e || !*e)
         return;
     f = fopen(e, "rb");
@@ -1857,13 +1859,14 @@ static const char *run_env(const char *name)
     return getenv(full);
 }
 
+static int s_env_done;
+
 static void env_start(void)
 {
-    static int done;
     const char *e;
-    if (done)
+    if (s_env_done)
         return;
-    done = 1;
+    s_env_done = 1;
     /* Like pad scripts, these are for one run of the game: the game restarts
      * itself for a level, and that run (BTVS_RESTARTS = n) reads
      * BTVS_INPUT_PLAYBACK_<n> / BTVS_INPUT_RECORD_<n>. */
@@ -2006,6 +2009,49 @@ static void at_exit(void)
     record_end_locked();
     LeaveCriticalSection(&s_cs);
     in_sdl_stop();
+}
+
+/* ── the game restarts itself inside the process ─────────────────────────── */
+
+/* A level load is the game starting again from its entry point. A new process
+ * used to forget everything below; now it is forgotten here. What belongs to
+ * the PC stays: the devices, the bindings, the device in use.
+ *
+ * Test input is for one run of the game, as it was with a process per run:
+ * run n plays BTVS_PAD_SCRIPT_<n>, BTVS_INPUT_PLAYBACK_<n> and records to
+ * BTVS_INPUT_RECORD_<n>, or nothing; a script does not carry on. */
+void btvs_input__core_reboot(void)
+{
+    int had_script, had_rec, had_play;
+    LOCK();
+    had_script = s_nev; had_rec = R.f != NULL; had_play = P.active;
+    memset(s_rumble, 0, sizeof s_rumble);       /* the motors stop now, not when the next run first sets them */
+    rumble_apply(0);
+    in_mouse_capture(0);                        /* the mouse is free while the next run loads */
+    s_allow_mouse_look = 1;
+    s_menu_mode = 0;
+    memset(s_mk_blocked, 0, sizeof s_mk_blocked);
+    if (s_capture_active)                       /* a binding being chosen: given up */
+        K.result = -1;
+    s_capture_active = s_capture_release = 0;
+    s_wheel_pending = 0;
+    record_end_locked();
+    playback_stop_locked("the game restarts");
+    s_env_done = 0;
+    s_nev = s_nseg = 0;
+    s_script_ports = 0;
+    s_script_env_done = 0;
+    memset(s_seg, 0, sizeof s_seg);
+    s_script_nkey = 0;
+    s_script_mouse = s_script_mdx = s_script_mdy = 0;
+    memset(s_last, 0, sizeof s_last);
+    memset(s_last_conn, 0, sizeof s_last_conn);
+    s_frame = 0;
+    s_read1 = 0;
+    s_read1_ms = 0.0;
+    UNLOCK();
+    IN_LOG("the game restarts: rumble off, mouse free, input state of the last run dropped%s%s%s", had_script ? "; its pad script ended" : "",
+           had_rec ? "; its recording closed" : "", had_play ? "; its playback stopped" : "");
 }
 
 /* ── tests ───────────────────────────────────────────────────────────────── */

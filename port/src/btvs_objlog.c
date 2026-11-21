@@ -258,6 +258,17 @@ static void toss(uint32_t mgr)
     btvs_log("objlog", "BTVS_OBJLOG_TOSS: %u pickups launched at %.0f %.0f %.0f (frame %lu)", done, v[0], v[1], v[2], L.frame);
 }
 
+/* The game restarts itself inside the process: the objects are other ones. */
+void btvs_objlog_reboot(void)
+{
+    if (L.slots)
+        memset(L.slots, 0, SLOTS * sizeof(slot_t));
+    s_nwatch = 0;
+    L.tossed = 0;
+    if (L.f)
+        fprintf(L.f, "R,%lu\n", L.frame);
+}
+
 /* Guest hook: TManager_Object::Frame_Tick(float dt), thiscall, callee pops. */
 void btvs_objlog_hook_object_tick(void)
 {

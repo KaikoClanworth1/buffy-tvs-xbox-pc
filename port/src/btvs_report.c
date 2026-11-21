@@ -466,6 +466,13 @@ int btvs_report_make(const char *player_text, const char *trigger)
     double t0 = btvs_uptime();
 
     InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
+    if (!btvs_logs_game_up()) {
+        /* Between two runs of the game (it is restarting itself for a level)
+         * there is no game to describe and its memory is being put back. */
+        btvs_log("report", "no report now (%s): the game is restarting itself for a level; ask again when it is up",
+                 trigger ? trigger : "?");
+        return 0;
+    }
     if (!player_text)
         player_text = "";
     EnterCriticalSection(&s_cs);
@@ -752,6 +759,8 @@ void btvs_report_prepare(void)
 {
     char path[MAX_PATH];
     InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
+    if (!btvs_logs_game_up())
+        return;
     if (s_game_shot && GetTickCount() - s_game_shot_tick < 600000 && btvs_game_paused())
         return;                         /* the game's picture from before the pause menu is waiting */
     if (btvs_game_paused())
@@ -819,28 +828,34 @@ static DWORD WINAPI hotkey_thread(LPVOID arg)
 static DWORD WINAPI test_thread(LPVOID arg)
 {
     const char *text = getenv("BTVS_TEST_REPORT_TEXT"), *lv = getenv("BTVS_TEST_REPORT_AFTER_LEVEL");
+    int run = btvs_restarts();          /* (the test report belongs to the run it was asked in) */
     if (lv && atof(lv) > 0.0) {
         /* that long after the level became playable, however long it took to load */
-        while (btvs_trail_level_loaded_at() <= 0.0 || btvs_uptime() - btvs_trail_level_loaded_at() < atof(lv))
+        while (btvs_trail_level_loaded_at() <= 0.0 || btvs_uptime() - btvs_trail_level_loaded_at() < atof(lv)) {
             Sleep(100);
+            if (btvs_restarts() != run)
+                return 0;
+        }
     } else {
-        Sleep((DWORD)(uintptr_t)arg * 1000);
+        DWORD left = (DWORD)(uintptr_t)arg * 10;
+        while (left--) {
+            Sleep(100);
+            if (btvs_restarts() != run)
+                return 0;
+        }
     }
+    if (btvs_restarts() != run)
+        return 0;
     btvs_report_prepare();
     btvs_report_make(text ? text : "Test report (BTVS_TEST_REPORT_AT).\nSecond line.", "test");
     return 0;
 }
 
-void btvs_report_init(void)
+/* BTVS_TEST_REPORT_AT / _AFTER_LEVEL: looked at when a run of the game begins. */
+static void test_report_for_this_run(void)
 {
     const char *e = getenv("BTVS_TEST_REPORT_AT");
     HANDLE h;
-    InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
-    if (!btvs_is_test_run()) {              /* a test run never reads the real keyboard or pads */
-        h = CreateThread(NULL, 0, hotkey_thread, NULL, 0, NULL);
-        if (h)
-            CloseHandle(h);
-    }
     /* (in a session where the game restarts itself: in run BTVS_TEST_REPORT_RUN, 0 = the first) */
     if (!e && getenv("BTVS_TEST_REPORT_AFTER_LEVEL"))
         e = "1";
@@ -849,4 +864,26 @@ void btvs_report_init(void)
         if (h)
             CloseHandle(h);
     }
+}
+
+void btvs_report_init(void)
+{
+    HANDLE h;
+    InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
+    if (!btvs_is_test_run()) {              /* a test run never reads the real keyboard or pads */
+        h = CreateThread(NULL, 0, hotkey_thread, NULL, 0, NULL);
+        if (h)
+            CloseHandle(h);
+    }
+    test_report_for_this_run();
+}
+
+/* The game restarts itself inside the process: the picture kept from before a
+ * pause is of the run that ended; a test report asked for the new run is set up. */
+void btvs_report_reboot(void)
+{
+    InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
+    s_game_shot = 0;
+    s_pending[0] = 0;
+    test_report_for_this_run();
 }

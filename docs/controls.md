@@ -291,6 +291,26 @@ bash port/tools/run.sh level 150 BTVS_SKIP_MOVIES=2 "BTVS_SETTINGS_INI=<a scratc
      BTVS_INPUT_LOG=1 BTVS_INPUT_VERIFY=1 BTVS_INPUT_POS_LOG=6
 ```
 
+**The same with one process for the session.** When the game restarts itself inside the process
+(`docs/graphics.md`, "One process for the session"), `btvs_input_reboot()` (`btvs_input_xapi.c`) does
+what a new process used to do for input:
+
+- rumble is switched off on the controllers and the mouse is let go, so neither is left on while the
+  next run loads; a binding being chosen is given up;
+- what was about that run of the game is forgotten: what the game was told is plugged in, the packet
+  numbers, where the game was (so `menu`, `level`, `pause` are named again for the next script), the
+  menu keys' state, the first-read time, the frame count;
+- the tips' sentences are dropped (they were addresses in the last run's memory) and found and
+  reworded again in the next level;
+- the run's script, recording and playback end, and the next run reads `BTVS_PAD_SCRIPT_<n>`,
+  `BTVS_INPUT_RECORD_<n>`, `BTVS_INPUT_PLAYBACK_<n>` -- **a script does not carry on across runs**, so
+  a test command means the same with one process or with one per run;
+- the helper thread of `BTVS_INPUT_VERIFY` is waited for and has nothing to look at until the next
+  run reads a pad.
+
+What belongs to the PC stays: the controllers, the bindings, the device in use and the pictures drawn
+for it. Seen in a hidden run: see "Verified".
+
 In the level's run nothing reads the pad until the level has loaded (20 to 45 s in a test run), so
 times in a level script count from `after level`. The first level opens with a cutscene; Start
 skips it (`8.0 START` after the mark is late enough).
@@ -586,6 +606,18 @@ pieces (`H_Inv_Button ...` in the game's HUD), if they are ever shown; no run me
 **In the running game** (hidden, muted test runs through `port/tools/run.sh`; no window, no focus,
 no hardware; menus 20 Nov 2026, the first level 21 Nov):
 
+- **One process for the session** (`BTVS_REBOOT=inplace`, 22 Nov; Audio, Menu and Logs had no restart
+  function yet). Run `rb2`: menu -> level 1 -> the high school -> level 1 again -> pause -> Quit ->
+  title, four restarts in one process; run `rb3`: menu -> level 1 -> the high school -> pause -> Quit ->
+  main menu. In every run the run's own script was read (`BTVS_PAD_SCRIPT_1` ... `_4`), `level`, `pause`
+  and `menu` were named again, and the game acted on the presses (cutscene skipped, pause opened, Quit
+  chosen, the main menu's list moved). The device in use kept changing with the script's keys and
+  buttons in every run, the pictures with it. In the third level of the session the tips were found
+  again (`11 of the game's 56 tips`) and shown with the controller's wording and picture, then the
+  keyboard's 3 s later. Frames and log lines: main checkout, `port/runs/shots/input_reboot_*`.
+  Not checked: the high school asked for no tip in the 20 s it ran, so no tip was seen there; a real
+  controller's rumble being stopped at a restart (no hardware in a hidden run); `BTVS_INPUT_VERIFY`
+  across a restart.
 - The XAPI replacements: the game calls `XInitDevices`, `XGetDevices`, `XInputOpen`,
   `XGetDeviceChanges` and `XInputGetState`, gets a pad on port 1 and runs on; the stack handling is
   right (thousands of reads per run, no crash).

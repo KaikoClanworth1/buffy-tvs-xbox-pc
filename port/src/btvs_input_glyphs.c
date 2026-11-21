@@ -1444,10 +1444,12 @@ static char *s_fit_pad[32], *s_fit_keys[32];
 static int s_nfit;
 static int s_tips_found, s_tips_keys;       /* the table was read; the keyboard wording is in */
 static volatile LONG s_redraw;              /* the pictures: 0 as drawn, 1 being drawn again, 2 drawn, to be swapped in */
+static int s_tip_delay = -1, s_tips_listed;
+static int s_show_idx;
 
 static void tips_find(void)
 {
-    static int delay = -1;
+#define delay s_tip_delay
     uint32_t tw, table, b, node, seen = 0;
     int guard;
     if (s_tips_found)
@@ -1491,13 +1493,14 @@ static void tips_find(void)
             s_nfit++;
         }
     IN_LOG("button pictures: %d of the game's %u tips have a wording for keyboard and mouse", s_nfit, seen);
+#undef delay
 }
 
 /* The wording that goes with the pictures on screen. A sentence is changed
  * only where it still reads as the other wording did. */
 static void tips_fit(void)
 {
-    static int listed;
+#define listed s_tips_listed
     int want, i, n = 0;
     tips_find();
     want = s_set == SET_KEYS;
@@ -1516,6 +1519,7 @@ static void tips_fit(void)
     for (i = 0; want && !listed && i < s_nfit; i++)
         IN_LOG("button pictures: tip %s: %s", s_fit_name[i], (const char *)XBOX_PTR(s_fit_text[i]));
     listed |= want;
+#undef listed
 }
 
 /* ── the device changes while the game runs ──────────────────────────────── */
@@ -1602,7 +1606,8 @@ static void follow_device(void)
  * seconds, so that frames can be taken of each. */
 static void tips_show(void)
 {
-    static int state, type, idx;
+#define idx s_show_idx
+    static int state, type;
     static double next, every;
     union { float f; uint32_t u; } secs;
     uint32_t tw, saved;
@@ -1615,7 +1620,7 @@ static void tips_show(void)
     }
     if (state != 1 || idx >= s_nfit || btvs_frame_seconds() < next)
         return;
-    next += every;
+    next = btvs_frame_seconds() + every;        /* (a later level of the session: from when its tips are found) */
     if (!readable(G_TIP_WINDOW, 4) || (tw = MEM32(G_TIP_WINDOW)) == 0 || (fn = recomp_lookup(0x00236EF0u)) == NULL)
         return;
     IN_LOG("glyphs: tip %d (%s) shown at %.2f s as type %d (the window's was %d)", idx, s_fit_name[idx], btvs_frame_seconds(),
@@ -1631,6 +1636,32 @@ static void tips_show(void)
     fn();
     g_esp = saved;
     idx++;
+#undef idx
+}
+
+/* The game restarts itself inside the process: the tips' sentences were
+ * addresses in the last run's memory. The next level has its own table, found
+ * and reworded again when it first asks for a tip. A redraw of the pictures
+ * under way is let finish, so that btvs_input__glyphs_boot (which the new run
+ * calls from XInitDevices) does not write the same files at the same time. */
+void btvs_input__glyphs_reboot(void)
+{
+    int i, waited = 0;
+    while (s_redraw == 1 && waited++ < 600)
+        Sleep(5);
+    for (i = 0; i < s_nfit; i++) {
+        free(s_fit_pad[i]);
+        free(s_fit_keys[i]);
+    }
+    memset(s_fit_pad, 0, sizeof s_fit_pad);
+    memset(s_fit_keys, 0, sizeof s_fit_keys);
+    memset(s_fit_text, 0, sizeof s_fit_text);
+    memset(s_fit_name, 0, sizeof s_fit_name);
+    s_nfit = 0;
+    s_tips_found = s_tips_keys = 0;
+    s_tip_delay = -1;
+    s_tips_listed = 0;
+    s_show_idx = 0;
 }
 
 /* Once per read of player 1's pad, game thread. */

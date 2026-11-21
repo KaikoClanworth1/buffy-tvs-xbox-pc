@@ -170,7 +170,15 @@ numbers are of 24d9881; the full audit is what these lists are cut from.
     `*p->completed` / `*p->status` into game memory: free the voices under `s_lock` inside your function
     (memory is still valid then), so nothing is left that points there. Listener copy to defaults.
     `s_clock` and the `BTVS_AUDIO_DUMP` file name per run are yours to decide.
-- **Graphics -> Controls: `void btvs_input_reboot(void)`.**
+- **Graphics -> Controls: `void btvs_input_reboot(void)`.** **Done, 22 Nov (Controls)**: in
+  `btvs_input_xapi.c`; everything listed below plus the probe's, packet and rumble-log statics
+  (`docs/controls.md`, "The same with one process for the session"). **The pad script does not carry on:
+  run n reads `BTVS_PAD_SCRIPT_<n>`** (and `BTVS_INPUT_RECORD_<n>` / `BTVS_INPUT_PLAYBACK_<n>`), exactly
+  as with a process per run, so every test command means the same either way; a script that relied on
+  `after level` firing again in the same script needs its level part in `BTVS_PAD_SCRIPT_1`.
+  **For Logs**: the function ends the run's recording and playback, as the process's end did
+  (`[INPUT] recording ended`); the trail's `btvs_input_record_begin` for the next run is yours to call
+  from `btvs_logs_reboot` (it runs after ours).
   - `btvs_input.c`: rumble off on the hardware (`s_rumble`, as `at_exit` does); `s_read1`, `s_read1_ms`
     zero; `env_start`'s `done` zero so `BTVS_INPUT_PLAYBACK_<n>` / `BTVS_INPUT_RECORD_<n>` are read for
     the new run; `s_menu_mode` 0, `s_mk_blocked[]` 0, `s_allow_mouse_look` 1 (the mouse is not left
@@ -183,7 +191,9 @@ numbers are of 24d9881; the full audit is what these lists are cut from.
   - `btvs_input_glyphs.c`: `tips_fit`'s `done` and `delay` zero, `s_nfit` and `s_fit_text[]` zero (they
     are pointers into the game's text; today only the first level of a session gets the keyboard
     wording). `btvs_input__glyphs_boot` runs at every `XInitDevices`, as before: fine on our side.
-- **Graphics -> Menu: `void btvs_menu_reboot(void)`.**
+- **Graphics -> Menu: `void btvs_menu_reboot(void)`.** **Done (Menu, 22 Nov)**: in `btvs_menu.c`, as listed; a report
+  being saved is waited for (3 s at most) and settings are saved first. Checked with `BTVS_REBOOT=inplace`
+  through four runs in one process (`docs/menu.md`, status table).
   - `btvs_menu.c`: `s_scratch` (a block of the game's heap, L232) zero -- without that the Options pages
     write into whatever the new run has there; `pc_wording`'s `messages_done` zero (the patched strings
     are loaded fresh); `s_options` zero, `s_page = PG_NONE`, `s_pending_page`, `s_row` / `s_nrows`,
@@ -699,3 +709,9 @@ the disc-file sharing are as they were.*
   times and left without sending (trail, 74 to 83 s). Worth a look at whether the page makes clear how to send.
 - **Logs' frame clock** (everyone, from round 4): now moves on inside a frame after 200,000 reads, so a loop
   that only the clock ends (`TGO::Collision_PositionObjectInValidSpace`) cannot run for ever. Nothing else changes.
+
+**From Logs, 21 Nov 22:35: `btvs_logs_reboot()` is in** (`btvs_trail.c`; what it does per file:
+`docs/logs.md`, "The game restarting itself inside the process"). Checked with `BTVS_REBOOT=inplace`: a
+report made in the second level of a session replays to the same spot (0.000000 units). For the others:
+`int btvs_logs_game_up(void)` (`btvs_log.h`) is 0 from the restart until the next run's first frame; a
+report asked for in that time is not made (the log says so). The log marks every run with a `[run]` line.

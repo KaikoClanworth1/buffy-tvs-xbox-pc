@@ -166,6 +166,7 @@ static void verify_game(int port)
 }
 
 static HANDLE s_ver_event;
+static SRWLOCK s_ver_lock = SRWLOCK_INIT;   /* held while the helper thread reads the game's memory */
 
 static DWORD WINAPI verify_thread(LPVOID arg)
 {
@@ -180,9 +181,11 @@ static DWORD WINAPI verify_thread(LPVOID arg)
             YieldProcessor();
             QueryPerformanceCounter(&t);
         } while ((t.QuadPart - t0.QuadPart) * 10000 < f.QuadPart * 3);
+        AcquireSRWLockExclusive(&s_ver_lock);
         for (p = 0; p < BTVS_PORTS; p++)
             if (s_ver[p].self)
                 verify_game(p);
+        ReleaseSRWLockExclusive(&s_ver_lock);
     }
 }
 
@@ -253,12 +256,15 @@ void XInputClose_006105E3(void)
 #define G_PAUSE     0x007F08F0u     /* IPauseScreen::Get() */
 #define PAUSE_OPEN  0x274u          /* byte: the screen is open (IPauseScreen::SetOpen's first argument) */
 
+static struct { DWORD last; uint32_t was_menu, was_player; int was_paused; } s_probe = { 0, 0xFFFFFFFFu, 0, 0 };
+
 static void game_probe(void)
 {
     static int off = -1;
-    static DWORD last;
-    static uint32_t was_menu = 0xFFFFFFFFu, was_player;
-    static int was_paused;
+#define last       s_probe.last
+#define was_menu   s_probe.was_menu
+#define was_player s_probe.was_player
+#define was_paused s_probe.was_paused
     uint32_t menu = 0, game = 0, player = 0, pause = 0;
     int paused = 0;
     DWORD now = GetTickCount();
@@ -302,15 +308,21 @@ static void game_probe(void)
     }
     btvs_input_allow_mouse_look(player != 0 && !paused);
     btvs_input_menu_mode(player != 0 && !paused ? 0 : !player && menu == 10 ? 2 : 1);
+#undef last
+#undef was_menu
+#undef was_player
+#undef was_paused
 }
 
 /* BTVS_INPUT_POS_LOG=<n>: every n reads of player 1's pad, where the player
  * is and its health, with the read count. Two runs given the same input
  * (a recording and its playback) can then be compared read for read. */
+static uint32_t s_pos_reads;
+
 static void pos_log(void)
 {
     static int every = -1;
-    static uint32_t reads;
+#define reads s_pos_reads
     uint32_t game, player;
     if (every < 0) {
         const char *e = getenv("BTVS_INPUT_POS_LOG");
@@ -324,13 +336,17 @@ static void pos_log(void)
         return;
     IN_LOG("pos r%u x %.2f y %.2f z %.2f health %.0f", reads, guest_float(player + 0x240u), guest_float(player + 0x244u),
            guest_float(player + 0x248u), guest_float(player + 0x90u));
+#undef reads
 }
 
 /* DWORD XInputGetState(HANDLE, PXINPUT_STATE): DWORD packet number, then the 18-byte pad. */
+static uint32_t s_packet[BTVS_PORTS];
+static btvs_pad s_given[BTVS_PORTS];
+
 void XInputGetState_006105EF(void)
 {
-    static uint32_t packet[BTVS_PORTS];
-    static btvs_pad last[BTVS_PORTS];
+#define packet s_packet
+#define last   s_given
     int port = handle_port(MEM32(g_esp + 4));
     uint32_t out = MEM32(g_esp + 8);
     btvs_pad g;
@@ -363,6 +379,8 @@ void XInputGetState_006105EF(void)
         SetEvent(s_ver_event);
     }
     ret_stdcall(have ? ERROR_SUCCESS : ERROR_DEVICE_NOT_CONNECTED, 8);
+#undef packet
+#undef last
 }
 
 /* DWORD XInputSetState(HANDLE, PXINPUT_FEEDBACK).
@@ -372,9 +390,11 @@ void XInputGetState_006105EF(void)
  * (TIF_Input_Implement::SetMotorSpeed) counts exactly that as success and will
  * not send again while the header still says pending. Here it is done at once:
  * the header reads success, the result says pending. */
+static uint32_t s_rumble_was[BTVS_PORTS] = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };
+
 void XInputSetState_0061065E(void)
 {
-    static uint32_t was[BTVS_PORTS] = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };
+#define was s_rumble_was
     int port = handle_port(MEM32(g_esp + 4));
     uint32_t fb = MEM32(g_esp + 8);
     if (fb) {
@@ -389,6 +409,32 @@ void XInputSetState_0061065E(void)
         MEM32(fb) = ERROR_SUCCESS;
     }
     ret_stdcall(port >= 0 && fb ? ERROR_IO_PENDING : ERROR_DEVICE_NOT_CONNECTED, 8);
+#undef was
+}
+
+/* The game restarts itself inside the process (btvs_boot_restart.c, a level
+ * load): called on the game thread when nothing of the game runs any more and
+ * its memory is about to be wiped and put back. Everything here that was
+ * about that run of the game is forgotten, as a new process forgot it: what
+ * the game was told is plugged in, the packet numbers, where the game was
+ * (so "menu", "level" ... are named again for the next run's pad script), the
+ * tips' sentences, the run's script, recording and playback. The helper
+ * thread of BTVS_INPUT_VERIFY is waited for and has nothing to look at until
+ * the next run reads a pad. */
+void btvs_input_reboot(void)
+{
+    AcquireSRWLockExclusive(&s_ver_lock);
+    memset(s_ver, 0, sizeof s_ver);
+    ReleaseSRWLockExclusive(&s_ver_lock);
+    s_reported = 0;
+    memset(s_packet, 0, sizeof s_packet);
+    memset(s_given, 0, sizeof s_given);
+    memset(s_rumble_was, 0xFF, sizeof s_rumble_was);
+    memset(&s_probe, 0, sizeof s_probe);
+    s_probe.was_menu = 0xFFFFFFFFu;
+    s_pos_reads = 0;
+    btvs_input__core_reboot();
+    btvs_input__glyphs_reboot();
 }
 
 /* DWORD XMountMUA(DWORD port, DWORD slot, PCHAR drive): there are no memory
