@@ -91,6 +91,7 @@ static void stats(void)
 /* DWORD D3DDevice_Swap(DWORD Flags) */
 void D3DDevice_Swap_00595DB0(void)
 {
+    { extern volatile DWORD g_btvs_game_tid; g_btvs_game_tid = GetCurrentThreadId(); }
     btvs_native_overlay();          /* Menu's and Logs' text and rectangles: part of the frame */
     btvs_shot_frame();
     btvs_native_present();

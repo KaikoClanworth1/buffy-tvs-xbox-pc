@@ -80,6 +80,14 @@ int btvs_supervise(int *exit_code)
             SetEnvironmentVariableA("BTVS_EXIT_AFTER", left);
         }
         SetEnvironmentVariableA("RECOMP_LAUNCH_DATA_FILE", have_launch ? launch : NULL);
+        if (runs) {
+            /* scripted input: a script is for one run of the game. The n-th
+             * restart plays BTVS_PAD_SCRIPT_<n> (1 = the first restart), or
+             * nothing. */
+            char name[40];
+            sprintf_s(name, sizeof name, "BTVS_PAD_SCRIPT_%d", runs);
+            SetEnvironmentVariableA("BTVS_PAD_SCRIPT", getenv(name));
+        }
         SetEnvironmentVariableA("BTVS_RESTARTS", runs ? (sprintf_s(left, sizeof left, "%d", runs), left) : NULL);
         memset(&si, 0, sizeof si);
         si.cb = sizeof si;

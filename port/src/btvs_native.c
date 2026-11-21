@@ -44,6 +44,7 @@ int  nv2a_native_draw(const NativeDraw *d, GpuTexture *rt, GpuTexture *ds,
                       uint32_t pw, uint32_t ph, uint32_t sw, uint32_t sh);
 void nv2a_native_vp_load(uint32_t slot, const uint32_t *code, uint32_t dwords);
 void nv2a_native_const(uint32_t slot, const float *v, uint32_t vectors);
+void nv2a_native_const_get(uint32_t slot, float out[4]);
 void nv2a_native_stats(unsigned long long out[4]);
 uint32_t nv2a_native_resolve(uint32_t phys);
 void nv2a_native_rs_layout(int first_deferred, int first_complex);
@@ -329,15 +330,20 @@ static void log_draw(int path, const NativeDraw *d, uint32_t dev, uint32_t up_st
 /* ── fixed-function transform ────────────────────────────────────────
  * The level's own geometry (position + two texture coordinates: texture and
  * light map) is drawn with no vertex program: Direct3D's fixed pipeline with
- * the view and projection the game gave SetTransform. The backend draws
- * programs and screen-space vertices, so these are made screen-space here:
- * each position through world * view * projection and the viewport, written
- * as (x, y, z, 1/w) to a scratch array that takes the place of the position
- * stream. The backend's screen-space path multiplies by w again, so the GPU
- * still clips and interpolates in perspective. Lighting is not done (the
- * levels are lit by their light maps); texture transforms are not applied. */
+ * the view and projection the game gave SetTransform. The backend has a
+ * vertex shader for that (NativeDraw.passthrough == 2) which takes its matrix
+ * from constant slots 188..191; here the matrix is made -- world * view *
+ * projection, then the viewport as a part of the target -- and put there for
+ * the one draw (the game's own programs use those slots too: what was in
+ * them is put back). Lighting is not done (the levels are lit by their light
+ * maps); texture transforms are not applied.
+ *
+ * (A first version transformed the vertices here and handed the backend
+ * screen-space positions: 300,000 vertices a frame, each array hashed and
+ * uploaded again for every draw -- 25 frames a second in the first level.) */
 static float s_tm[8][16];
 static int s_tm_set[8];
+static float s_ff_saved[4][4];
 
 static void mat_mul(float *o, const float *a, const float *b)
 {
@@ -349,57 +355,49 @@ static void mat_mul(float *o, const float *a, const float *b)
     memcpy(o, t, sizeof t);
 }
 
-static int ff_transform(NativeDraw *d, uint32_t dev, uint32_t count, uint32_t index_va)
+static int ff_begin(NativeDraw *d, uint32_t dev, uint32_t sw, uint32_t sh)
 {
-    static uint32_t buf, cap;
     static const float ident[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
-    float m[16];
-    uint32_t n = count, i, src = d->attr[0].va, stride = d->attr[0].stride;
+    float m[16], v[16], col[4][4];
     float vx = (float)MEM32(dev + DEV_VIEWPORT), vy = (float)MEM32(dev + DEV_VIEWPORT + 4);
     float vw = (float)MEM32(dev + DEV_VIEWPORT + 8), vh = (float)MEM32(dev + DEV_VIEWPORT + 12);
     float z0 = MEMF(dev + DEV_VIEWPORT + 16), z1 = MEMF(dev + DEV_VIEWPORT + 20);
-    float *out;
-    if ((d->attr[0].fmt & 0xFF) != 0x32 || !src || !stride || !s_tm_set[0] || !s_tm_set[1])
+    int k;
+    if ((d->attr[0].fmt & 0xFF) != 0x32 || !d->attr[0].va || !s_tm_set[0] || !s_tm_set[1] || !sw || !sh)
         return 0;
-    if (index_va) {
-        uint32_t mx = 0;
-        for (i = 0; i < count; i++) {
-            uint32_t ix = MEM16(index_va + i * 2);
-            if (ix > mx) mx = ix;
-        }
-        n = mx + 1;
-    }
-    if (n > cap) {
-        uint32_t want = (n + 4095) & ~4095u;
-        if (want < 16384) want = 16384;
-        if (!(buf = xbox_HeapAlloc(want * 16, 16)))    /* (the old one stays with the runtime's heap: a few steps at most) */
-            return 0;
-        cap = want;
-    }
     mat_mul(m, s_tm_set[6] ? s_tm[6] : ident, s_tm[0]);
     mat_mul(m, m, s_tm[1]);
-    out = (float *)XBOX_PTR(buf);
-    for (i = 0; i < n; i++) {
-        const float *p = (const float *)XBOX_PTR(src + i * stride);
-        float x = p[0] * m[0] + p[1] * m[4] + p[2] * m[8] + m[12];
-        float y = p[0] * m[1] + p[1] * m[5] + p[2] * m[9] + m[13];
-        float z = p[0] * m[2] + p[1] * m[6] + p[2] * m[10] + m[14];
-        float w = p[0] * m[3] + p[1] * m[7] + p[2] * m[11] + m[15];
-        float rhw;
-        if (w > -1e-6f && w < 1e-6f)
-            w = w < 0.0f ? -1e-6f : 1e-6f;
-        rhw = 1.0f / w;
-        out[i * 4 + 0] = vx + (x * rhw + 1.0f) * 0.5f * vw;
-        out[i * 4 + 1] = vy + (1.0f - y * rhw) * 0.5f * vh;
-        out[i * 4 + 2] = z0 + z * rhw * (z1 - z0);
-        out[i * 4 + 3] = rhw;
+    /* the viewport inside the target, as one more matrix (row vectors):
+     * x' = x * vw/sw + w * ((2 vx + vw) / sw - 1),  y likewise (y up),
+     * z' = z * (z1 - z0) + w * z0 */
+    memcpy(v, ident, sizeof v);
+    v[0] = vw / (float)sw;  v[12] = (2.0f * vx + vw) / (float)sw - 1.0f;
+    v[5] = vh / (float)sh;  v[13] = 1.0f - (2.0f * vy + vh) / (float)sh;
+    v[10] = z1 - z0;        v[14] = z0;
+    {   /* (w' = w: the last column of v stays 0 0 0 1, the w terms above ride on row 3 of a matrix applied to (x y z w)) */
+        float t[16];
+        int r;
+        for (r = 0; r < 4; r++) {
+            float x = m[r * 4], y = m[r * 4 + 1], z = m[r * 4 + 2], w = m[r * 4 + 3];
+            t[r * 4 + 0] = x * v[0] + w * v[12];
+            t[r * 4 + 1] = y * v[5] + w * v[13];
+            t[r * 4 + 2] = z * v[10] + w * v[14];
+            t[r * 4 + 3] = w;
+        }
+        memcpy(m, t, sizeof m);
     }
-    d->attr[0].va = buf;
-    d->attr[0].stride = 16;
-    d->attr[0].fmt = 0x42;
-    d->passthrough = 1;
-    d->scratch = 1;
+    for (k = 0; k < 4; k++) {                    /* column k: what the shader dots the position with */
+        col[k][0] = m[k]; col[k][1] = m[4 + k]; col[k][2] = m[8 + k]; col[k][3] = m[12 + k];
+        nv2a_native_const_get(188 + (uint32_t)k, s_ff_saved[k]);
+    }
+    nv2a_native_const(188, &col[0][0], 4);
+    d->passthrough = 2;
     return 1;
+}
+
+static void ff_end(void)
+{
+    nv2a_native_const(188, &s_ff_saved[0][0], 4);
 }
 
 static int ff_off(void);
@@ -409,7 +407,7 @@ static void native_draw(int path, uint32_t prim, uint32_t count, uint32_t index_
     NativeDraw d;
     NativeTarget tg;
     uint32_t dev = MEM32(D3D_PDEVICE), vs, flags;
-    int st;
+    int st, ff = 0;
     s_count[path]++;
     s_verts += count;
     if (!s_up || !dev)
@@ -443,13 +441,16 @@ static void native_draw(int path, uint32_t prim, uint32_t count, uint32_t index_
         log_draw(path, &d, dev, up_stride);
     if (vs && !(flags & 0x12)) {
         /* fixed-function transform: no program, not screen space */
-        if (ff_off() || !ff_transform(&d, dev, count, index_va)) {
+        if (ff_off() || !ff_begin(&d, dev, tg.sw, tg.sh)) {
             s_ff_skipped++;
             return;
         }
+        ff = 1;
     }
     native_viewport_consts();
     nv2a_native_draw(&d, tg.rt, tg.ds, tg.pw, tg.ph, tg.sw, tg.sh);
+    if (ff)
+        ff_end();
 }
 
 static int ff_off(void)

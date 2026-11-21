@@ -88,15 +88,17 @@ typedef struct {
     uint32_t count;                    /* vertices, or indices when index_va */
     uint32_t index_va;                 /* 16-bit indices, or 0 */
     NativeAttr attr[16];
-    int passthrough;                   /* screen-space positions (XYZRHW), no program */
+    int passthrough;                   /* 1: screen-space positions (XYZRHW), no program. 2: positions through
+                                        * the matrix in constant slots 188..191 (nvs_fixed) */
     uint32_t vp_start;                 /* program start slot otherwise */
     NativeTex tex[4];
     int pixel_shader;                  /* the combiner registers in rs[0..56] are live */
     const uint32_t *rs;                /* D3D__RenderState */
     const uint32_t *tss;               /* D3D__TextureState, [4][32] */
     float clip_min, clip_max;          /* the depth range D3D clips to (W- or Z-buffer units); 0, 0: unknown */
-    int scratch;                       /* the vertices are in memory the title reuses within a frame (a
-                                        * Draw...UP call): looked at again for every draw */
+    int scratch;                       /* 1: the vertices are in memory the title reuses within a frame (a
+                                        * Draw...UP call): looked at again for every draw. 2: only the
+                                        * stream attribute 0 is in */
 } NativeDraw;
 
 static uint32_t s_nvp_code[VP_SLOTS][4];     /* the program memory, as loaded */
@@ -335,6 +337,29 @@ static GpuShader *nvs_passthrough(void)
         s_npass_vs = nvs_compile(src);
     }
     return s_npass_vs;
+}
+
+/* Fixed-function transform (NativeDraw.passthrough == 2): the position
+ * through the matrix the title's port put in constant slots 188..191 (its
+ * four columns: world * view * projection, the viewport folded in), colours
+ * and texture coordinates as they are. No lighting, no texture transforms. */
+static GpuShader *s_nfix_vs;
+
+static GpuShader *nvs_fixed(void)
+{
+    if (!s_nfix_vs) {
+        static char src[4096];
+        sprintf_s(src, sizeof src, "%s"
+            "P vs(VI I) {\n"
+            "  P p; float4 v = float4(I.v[0].xyz, 1.0);\n"
+            "  p.p = float4(dot(v, c[188]), dot(v, c[189]), dot(v, c[190]), dot(v, c[191]));\n"
+            "  p.c0 = saturate(I.v[3]); p.c1 = saturate(I.v[4]);\n"
+            "  p.t0 = I.v[9]; p.t1 = I.v[10]; p.t2 = I.v[11]; p.t3 = I.v[12];\n"
+            "  p.fog = float4(1, 0, 0, 1);\n"
+            "  return p; }\n", s_vsh_head);
+        s_nfix_vs = nvs_compile(src);
+    }
+    return s_nfix_vs;
 }
 
 /* ── pixel shaders: fixed function (texture stages) ── */
@@ -972,7 +997,7 @@ static int nvb_bind(const NativeDraw *d, uint32_t vmax, uint32_t mask)
         }
     key[16] = mask;
     for (i = 0; i < nstream; i++) {
-        bufs[i] = nvb_stream(base[i], sstride[i], (vmax + 1) * sstride[i], d->scratch);
+        bufs[i] = nvb_stream(base[i], sstride[i], (vmax + 1) * sstride[i], d->scratch == 1 || (d->scratch == 2 && base[i] == d->attr[0].va));
         if (!bufs[i])
             return 0;
         strides[i] = sstride[i];
@@ -1671,7 +1696,7 @@ static int nv2a_native_draw_one(const NativeDraw *d, GpuTexture *rt, GpuTexture 
         try_gpu = idx && !nenv("BUFFY_NATIVE_CPUVB") && nvb_supported(d, &mask) && !(d->passthrough && mask);
         gpu_mask = try_gpu ? mask : 0;
     }
-    vs = d->passthrough ? nvs_passthrough() : nvs_program(d->vp_start, &uses_viewport, gpu_mask);
+    vs = d->passthrough == 2 ? nvs_fixed() : d->passthrough ? nvs_passthrough() : nvs_program(d->vp_start, &uses_viewport, gpu_mask);
     if (!vs || !s_nlayout) { s_nstat[1]++; return 0; }
 
     /* the inputs: the game's own buffers on the GPU (indexed draws), else

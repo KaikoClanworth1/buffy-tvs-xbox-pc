@@ -316,8 +316,11 @@ static DWORD WINAPI watch_thread(LPVOID arg)
 /* BTVS_STACK_AT=<seconds>[,<seconds>...]: at those times after start, where
  * every thread of the game is (host call stacks; translated functions carry
  * the game's names). To see what a start-up that shows nothing is waiting for. */
+volatile DWORD g_btvs_game_tid;         /* the thread that shows the frames (btvs_frame.c) */
+
 static DWORD WINAPI stack_at_thread(LPVOID arg)
 {
+    int only_game = getenv("BTVS_STACK_GAME") != NULL;
     const char *e = getenv("BTVS_STACK_AT");
     DWORD t0 = GetTickCount(), me = GetCurrentThreadId();
     (void)arg;
@@ -335,35 +338,55 @@ static DWORD WINAPI stack_at_thread(LPVOID arg)
             do {
                 HANDLE th;
                 CONTEXT c;
-                STACKFRAME64 sf;
-                int depth = 0;
                 if (te.th32OwnerProcessID != GetCurrentProcessId() || te.th32ThreadID == me)
                     continue;
+                if (only_game && te.th32ThreadID != g_btvs_game_tid)
+                    continue;                              /* BTVS_STACK_GAME=1: only the thread that shows the frames */
                 th = OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME | THREAD_QUERY_INFORMATION, FALSE, te.th32ThreadID);
                 if (!th)
                     continue;
-                if (SuspendThread(th) != (DWORD)-1) {
-                    memset(&c, 0, sizeof c);
-                    c.ContextFlags = CONTEXT_FULL;
-                    if (GetThreadContext(th, &c)) {
-                        memset(&sf, 0, sizeof sf);
-                        sf.AddrPC.Offset = c.Rip; sf.AddrPC.Mode = AddrModeFlat;
-                        sf.AddrFrame.Offset = c.Rbp; sf.AddrFrame.Mode = AddrModeFlat;
-                        sf.AddrStack.Offset = c.Rsp; sf.AddrStack.Mode = AddrModeFlat;
-                        fprintf(stderr, "[STACK] at %.0f s, thread %lu:\n", at, te.th32ThreadID);
-                        while (depth++ < 28 && StackWalk64(IMAGE_FILE_MACHINE_AMD64, GetCurrentProcess(), th, &sf, &c, NULL,
-                                                           SymFunctionTableAccess64, SymGetModuleBase64, NULL)) {
+                {
+                    /* The frames are collected while the thread is stopped,
+                     * with nothing that takes a lock (a stopped thread may
+                     * hold the heap's or the symbol library's); the names
+                     * are looked up after it runs again. */
+                    DWORD64 pcs[40];
+                    int npc = 0, q;
+                    if (SuspendThread(th) != (DWORD)-1) {
+                        memset(&c, 0, sizeof c);
+                        c.ContextFlags = CONTEXT_FULL;
+                        if (GetThreadContext(th, &c)) {
+                            while (npc < 40 && c.Rip) {
+                                DWORD64 base = 0, est = 0;
+                                PVOID hd = NULL;
+                                PRUNTIME_FUNCTION fn;
+                                pcs[npc++] = c.Rip;
+                                fn = RtlLookupFunctionEntry(c.Rip, &base, NULL);
+                                if (fn)
+                                    RtlVirtualUnwind(0, base, c.Rip, fn, &c, &hd, &est, NULL);
+                                else {
+                                    if (IsBadReadPtr((const void *)c.Rsp, 8))
+                                        break;
+                                    c.Rip = *(const DWORD64 *)c.Rsp;       /* a leaf: the return address is on top */
+                                    c.Rsp += 8;
+                                }
+                            }
+                        }
+                        ResumeThread(th);
+                    }
+                    if (npc) {
+                        fprintf(stderr, "[STACK] at %.2f s, thread %lu:\n", at, te.th32ThreadID);
+                        for (q = 0; q < npc; q++) {
                             char buf[sizeof(SYMBOL_INFO) + 256];
                             SYMBOL_INFO *si = (SYMBOL_INFO *)buf;
                             DWORD64 d = 0;
                             memset(buf, 0, sizeof buf);
                             si->SizeOfStruct = sizeof(SYMBOL_INFO);
                             si->MaxNameLen = 255;
-                            if (SymFromAddr(GetCurrentProcess(), sf.AddrPC.Offset, &d, si))
+                            if (SymFromAddr(GetCurrentProcess(), pcs[q], &d, si))
                                 fprintf(stderr, "[STACK]   %s+0x%llX\n", si->Name, (unsigned long long)d);
                         }
                     }
-                    ResumeThread(th);
                 }
                 CloseHandle(th);
             } while (Thread32Next(snap, &te));
@@ -389,6 +412,9 @@ void btvs_boot_watch_start(void)
         AddVectoredExceptionHandler(1, watch_veh);
         CloseHandle(CreateThread(NULL, 0, watch_thread, NULL, 0, NULL));
     }
-    if (getenv("BTVS_STACK_AT"))
+    /* (BTVS_STACK_RUN=<n>: only in the game's n-th restart, counted from 1;
+     * the times count from each start of the game) */
+    if (getenv("BTVS_STACK_AT") && (!getenv("BTVS_STACK_RUN")
+            || (getenv("BTVS_RESTARTS") && !strcmp(getenv("BTVS_RESTARTS"), getenv("BTVS_STACK_RUN")))))
         CloseHandle(CreateThread(NULL, 0, stack_at_thread, NULL, 0, NULL));
 }
