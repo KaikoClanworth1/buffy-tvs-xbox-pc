@@ -95,9 +95,10 @@ controller when one is connected, unless the keyboard was used last (`last_devic
 Every change is a line in the log: `[INPUT] device in use: Xbox controller, Xbox controller 1 (a
 button); it was keyboard and mouse`.
 
-The pictures on screen follow at once **when the renderer can swap its replacement textures while
-the game runs** (`nv2a_gpu_texture_pack_reload`, asked of Graphics; see "Button pictures").
-With a renderer that cannot, the log says so and they follow at the next level load or start.
+The pictures on screen, the Controls page and the tips' wording follow within about a quarter
+second, in the middle of a level or a menu, with no load (see "Button pictures": the files are
+drawn again and Graphics' `nv2a_gpu_texture_pack_reload` swaps them in). A tip already on screen
+keeps its sentence and gets the new pictures; the next tip has the new wording.
 
 In menus the mouse is not the camera and its movement is not looked at (keys and clicks are).
 
@@ -111,9 +112,16 @@ controller connected and, with no setting made, began on the Xbox set (`player 1
 the test run (it must never ask for the owner's controllers; fixed the same evening, the start now
 skips them under `BTVS_NO_WINDOW`), but it is the one time a real controller was seen found by
 itself. Lines and two frames: `port/runs/shots/btn_auto_*`.
+With Graphics' reload in (main at 33548e5) a hidden run in the first level, its script going
+between keys and pad buttons every 5 s, changed set eight times with no load: each time
+`device in use: ...`, `button pictures: now the Xbox set, swapped while the game runs (16 pictures,
+0.22 s)`, `11 tips reworded for a controller, as the game has them`, and the renderer's
+`[TEXPACK] reload: 16 replacements in use from frame 729`. Frames 2.5 s apart show a tip with the
+RS and LT pictures and "thumbstick" / "trigger", the next with mouse and key pictures and the
+keyboard wording, then the controller's again (`btn_auto_live_switch_six_tips_one_level.png`).
 **Not checked:** a real controller's buttons and sticks while playing, plugging one in and pulling
-it out in a real session, a PlayStation controller's name, and the pictures changing on screen
-(no renderer has the reload yet).
+it out in a real session, a PlayStation controller's name, the Controls page and the menus'
+SELECT / BACK changing while open (the tips were what was on screen), and a rebind redrawing live.
 
 ## Defaults
 
@@ -705,9 +713,6 @@ what the buttons do in the first level, not from play).
 - The inventory screens are not treated as menus (see Defaults): the port has no sign that they
   are open. `IInventory::SetOpen` (0x22E4E0) is where to look.
 - The mouse is still captured during cutscenes and in the inventory screens.
-- Button pictures, and with them the Controls page and the tips' wording, change at once only
-  with a renderer that has `nv2a_gpu_texture_pack_reload` (asked of Graphics in `docs/AREAS.md`).
-  Controls' half is in and waits for it; until then they change at the next level load or start.
 - The mouse moved in a menu does not count as using the keyboard and mouse (it is not read there).
 - With keyboard and mouse the weapon-selection tips still say "D-pad", and the journal's text is
   not reworded.
