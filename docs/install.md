@@ -178,6 +178,34 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
+## What was checked on 21 Nov 2026, 22:47 build (main at 9d86f9d)
+
+`GAME/buffy_tvs.exe` reports commit `9d86f9dd6e`, built Nov 21 2026 22:47:58 (all four areas'
+`btvs_<area>_reboot()` are in). No regen was needed; no game was running from `GAME`. The owner's
+`btvs_settings.ini` and save files have the same checksums before and after.
+
+**A level load now stays in one process and one window, by default.** No `BTVS_REBOOT` set; the log
+says `restarts: inside this process, same window`. Hidden, muted, movies skipped, input by script;
+the change to a second level asked for with `BTVS_TEST_RELAUNCH=50:m03_cemetery_1` (no script plays a
+level to its end). Path: main menu -> Start Game -> level 1 -> the cemetery -> pause -> Quit -> title
+screen: three restarts. Watched from outside with `port/tools/winwatch.py`:
+
+- through the launcher's Play path: two `buffy_tvs.exe` processes from start to end (the supervisor and
+  one game, 32632), one game window (`BuffyRecompGpu` 01650C30) and the session window, each made once
+  at 2.0 s and gone at the end; exit code 0;
+- without the launcher: the same (game 39044, window 011C01B4); exit code 0.
+
+Private memory of the game process, every 5 s (the watcher reports private bytes, not the working set):
+menu 371-378 MB, level 1 404-459, cemetery 438-448, title screen after Quit 441-449. Threads 69-73,
+handles 710-720, no trend. The title screen after Quit holds about 70 MB more than the first menu did;
+with one round only that is not told apart from caches that are kept (a leak would need several rounds).
+
+**Loading a level takes much longer this way** (same build, same hidden conditions, restart to the
+level's first frame): 22.7 and 23.0 s for level 1, 27.5 s twice for the cemetery, against 5.0 s for
+level 1 with `BTVS_REBOOT=process` (a new process). The log has nothing between `CreateDevice` and the
+level's first cutscene in those 21 s. Not looked into here; Graphics' note in `docs/AREAS.md` describes
+the same size of slowdown from the game thread's clock source being left installed across a restart.
+
 ## What was checked on 21 Nov 2026, 22:09 build (main at aded248)
 
 `GAME/buffy_tvs.exe` reports commit `aded248eb7`, built Nov 21 2026 22:09:14. No regen was needed; no
