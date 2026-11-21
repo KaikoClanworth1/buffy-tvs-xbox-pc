@@ -178,6 +178,21 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
+## What was checked on 21 Nov 2026, 13:00 build (main at 2134d5e)
+
+`GAME/buffy_tvs.exe`: **commit `2134d5e31c`, built Nov 21 2026 13:00:34**. No regen needed (same 90
+hooks; recompiler unchanged). No game was running at deploy time. The owner has played from `GAME/`
+since the last deploy, so this time the hidden checks kept their saves, logs and settings in a scratch
+folder (`BTVS_SAVE_DIR`, `BTVS_LOG_DIR`, `BTVS_SETTINGS_INI` = a copy of the owner's file): the owner's
+`btvs_settings.ini` and the six files under `XboxData/HardDisk` have the same checksums before and after.
+The launcher's Play path still wrote `btvs_console.txt` in `GAME/`, and the game its `Bug_*.Log` and
+`xbox_kernel.log` (they do not follow `BTVS_LOG_DIR`); the owner's earlier logs were copied aside first.
+Hidden, muted, CPUs 8-15, self-exit after 150 s, scripted Start button:
+
+- **Through the launcher's Play path:** **main menu 2.5 s**, restart, **`m00_spanishmission_1` loaded at
+  9.1 s** of the second process, exit code 0.
+- **Started with no console:** **main menu 1.6 s**, **level loaded at 9.1 s**, exit code 0.
+
 ## What was checked on 21 Nov 2026, 11:00 build (main at 2e73139)
 
 `GAME/buffy_tvs.exe`: **commit `2e73139d93`, built Nov 21 2026 11:00:10** (`btvs_log.txt` line 1). No regen
