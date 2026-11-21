@@ -150,6 +150,9 @@ def main():
             '--gen-dir', gen, '-o', os.path.join(work, 'recomp_out'), '--disasm-dir', dis, '--func-id-dir', fid, '--abi-dir', abi,
             '--manual-functions', manual)
         shutil.copyfile(manual, os.path.join(gen, 'manual_functions.applied.json'))
+        for need in ('recomp_types.h', 'recomp_funcs.h', 'recomp_dispatch.c'):
+            if not os.path.isfile(os.path.join(gen, need)):
+                raise RuntimeError('%s was not written' % need)
         step('fitting the code to the game DLL' if tls else 'done translating')
         if tls:
             patch_for_dll(gen, tls)
