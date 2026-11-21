@@ -62,6 +62,7 @@ uint32_t xbox_HeapAlloc(uint32_t size, uint32_t alignment);
 static int s_up;                             /* the device is up */
 static int s_log = -1;
 static long s_detail_frame = -1;
+static double s_detail_time;
 static unsigned long s_frame;
 
 enum { PATH_INDEXED, PATH_UP, PATH_INDEXED_UP, PATH_CLEAR, PATH_RT, PATH_COUNT };
@@ -75,6 +76,8 @@ static int log_on(void)
         s_log = e ? 1 : 0;
         if (e && *e == 'f')
             s_detail_frame = atol(e + 1);
+        if (e && *e == 't')                      /* t<seconds>: the first frame that long after this process started */
+            s_detail_time = atof(e + 1);
     }
     return s_log;
 }
@@ -323,6 +326,84 @@ static void log_draw(int path, const NativeDraw *d, uint32_t dev, uint32_t up_st
     }
 }
 
+/* ── fixed-function transform ────────────────────────────────────────
+ * The level's own geometry (position + two texture coordinates: texture and
+ * light map) is drawn with no vertex program: Direct3D's fixed pipeline with
+ * the view and projection the game gave SetTransform. The backend draws
+ * programs and screen-space vertices, so these are made screen-space here:
+ * each position through world * view * projection and the viewport, written
+ * as (x, y, z, 1/w) to a scratch array that takes the place of the position
+ * stream. The backend's screen-space path multiplies by w again, so the GPU
+ * still clips and interpolates in perspective. Lighting is not done (the
+ * levels are lit by their light maps); texture transforms are not applied. */
+static float s_tm[8][16];
+static int s_tm_set[8];
+
+static void mat_mul(float *o, const float *a, const float *b)
+{
+    int r, c;
+    float t[16];
+    for (r = 0; r < 4; r++)
+        for (c = 0; c < 4; c++)
+            t[r * 4 + c] = a[r * 4] * b[c] + a[r * 4 + 1] * b[4 + c] + a[r * 4 + 2] * b[8 + c] + a[r * 4 + 3] * b[12 + c];
+    memcpy(o, t, sizeof t);
+}
+
+static int ff_transform(NativeDraw *d, uint32_t dev, uint32_t count, uint32_t index_va)
+{
+    static uint32_t buf, cap;
+    static const float ident[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+    float m[16];
+    uint32_t n = count, i, src = d->attr[0].va, stride = d->attr[0].stride;
+    float vx = (float)MEM32(dev + DEV_VIEWPORT), vy = (float)MEM32(dev + DEV_VIEWPORT + 4);
+    float vw = (float)MEM32(dev + DEV_VIEWPORT + 8), vh = (float)MEM32(dev + DEV_VIEWPORT + 12);
+    float z0 = MEMF(dev + DEV_VIEWPORT + 16), z1 = MEMF(dev + DEV_VIEWPORT + 20);
+    float *out;
+    if ((d->attr[0].fmt & 0xFF) != 0x32 || !src || !stride || !s_tm_set[0] || !s_tm_set[1])
+        return 0;
+    if (index_va) {
+        uint32_t mx = 0;
+        for (i = 0; i < count; i++) {
+            uint32_t ix = MEM16(index_va + i * 2);
+            if (ix > mx) mx = ix;
+        }
+        n = mx + 1;
+    }
+    if (n > cap) {
+        uint32_t want = (n + 4095) & ~4095u;
+        if (want < 16384) want = 16384;
+        if (!(buf = xbox_HeapAlloc(want * 16, 16)))    /* (the old one stays with the runtime's heap: a few steps at most) */
+            return 0;
+        cap = want;
+    }
+    mat_mul(m, s_tm_set[6] ? s_tm[6] : ident, s_tm[0]);
+    mat_mul(m, m, s_tm[1]);
+    out = (float *)XBOX_PTR(buf);
+    for (i = 0; i < n; i++) {
+        const float *p = (const float *)XBOX_PTR(src + i * stride);
+        float x = p[0] * m[0] + p[1] * m[4] + p[2] * m[8] + m[12];
+        float y = p[0] * m[1] + p[1] * m[5] + p[2] * m[9] + m[13];
+        float z = p[0] * m[2] + p[1] * m[6] + p[2] * m[10] + m[14];
+        float w = p[0] * m[3] + p[1] * m[7] + p[2] * m[11] + m[15];
+        float rhw;
+        if (w > -1e-6f && w < 1e-6f)
+            w = w < 0.0f ? -1e-6f : 1e-6f;
+        rhw = 1.0f / w;
+        out[i * 4 + 0] = vx + (x * rhw + 1.0f) * 0.5f * vw;
+        out[i * 4 + 1] = vy + (1.0f - y * rhw) * 0.5f * vh;
+        out[i * 4 + 2] = z0 + z * rhw * (z1 - z0);
+        out[i * 4 + 3] = rhw;
+    }
+    d->attr[0].va = buf;
+    d->attr[0].stride = 16;
+    d->attr[0].fmt = 0x42;
+    d->passthrough = 1;
+    d->scratch = 1;
+    return 1;
+}
+
+static int ff_off(void);
+
 static void native_draw(int path, uint32_t prim, uint32_t count, uint32_t index_va, uint32_t up_data, uint32_t up_stride)
 {
     NativeDraw d;
@@ -361,12 +442,22 @@ static void native_draw(int path, uint32_t prim, uint32_t count, uint32_t index_
     if (log_on() && (long)s_frame == s_detail_frame)
         log_draw(path, &d, dev, up_stride);
     if (vs && !(flags & 0x12)) {
-        /* fixed-function transform and lighting: no program, not screen space */
-        s_ff_skipped++;
-        return;
+        /* fixed-function transform: no program, not screen space */
+        if (ff_off() || !ff_transform(&d, dev, count, index_va)) {
+            s_ff_skipped++;
+            return;
+        }
     }
     native_viewport_consts();
     nv2a_native_draw(&d, tg.rt, tg.ds, tg.pw, tg.ph, tg.sw, tg.sh);
+}
+
+static int ff_off(void)
+{
+    static int off = -1;
+    if (off < 0)
+        off = getenv("BTVS_NO_FIXED_FUNCTION") != NULL;
+    return off;
 }
 
 static int d3d_draws(void)
@@ -528,8 +619,16 @@ void D3D_CommonSetViewport_00591FE0(void)
     D3D_CommonSetViewport_00591FE0_orig();
 }
 
+/* void SetTransform(D3DTRANSFORMSTATETYPE, CONST D3DMATRIX *): kept for the
+ * fixed-function draws (ff_transform). Xbox numbering: 0 view, 1 projection,
+ * 2..5 texture 0..3, 6 world. */
 void D3DDevice_SetTransform_005927E0(void)
 {
+    uint32_t state = MEM32(g_esp + 4), pm = MEM32(g_esp + 8);
+    if (state < 8 && pm) {
+        memcpy(s_tm[state], (const void *)XBOX_PTR(pm), 64);
+        s_tm_set[state] = 1;
+    }
     D3DDevice_SetTransform_005927E0_orig();
 }
 
@@ -628,4 +727,8 @@ void btvs_native_present(void)
     memset(s_count, 0, sizeof s_count);
     s_verts = s_ff_skipped = s_no_target = 0;
     s_frame++;
+    if (s_detail_time > 0.0 && btvs_frame_seconds() >= s_detail_time) {
+        s_detail_frame = (long)s_frame;
+        s_detail_time = 0.0;
+    }
 }

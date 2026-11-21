@@ -30,6 +30,7 @@
 #include "gpu.h"
 #include "btvs.h"
 #include "btvs_native.h"
+#include "btvs_log.h"
 
 extern const char *g_nv2a_window_title;
 void nv2a_gpu_set_display(int width, int height, int vsync, int fullscreen);
@@ -135,6 +136,17 @@ void btvs_window_boot(void)
     env_default("RECOMP_VBLANK", "0");
     env_default("RECOMP_NV2A_ACK", "0");
     env_default("BUFFY_GPU_BACKEND", "d3d11");
+    {   /* The console's hard disk (the game's TDATA settings and UDATA saved
+         * games) is a folder in the save folder. It used to fall into the game
+         * folder: test runs filled game_files\UDATA with saved games until the
+         * game refused to start a new one (it allows ten). */
+        extern void xbox_path_set_hdd_dir(const char *dir);
+        extern void xbox_path_keep_disk_images(int on);
+        char hdd[MAX_PATH];
+        if (btvs_save_dir()[0] && sprintf_s(hdd, sizeof hdd, "%s\\HardDisk", btvs_save_dir()) > 0)
+            xbox_path_set_hdd_dir(hdd);
+        xbox_path_keep_disk_images(1);           /* (XAPI reads the disk's configuration sectors at start) */
+    }
     {   /* BTVS_NO_DISC_INSTALL=1: no install, Z: read from the game folder (btvs_native_game.c: TLogo::ExecuteMovies) */
         extern void xbox_path_set_cache_from_disc(int on);
         const char *e = getenv("BTVS_NO_DISC_INSTALL");

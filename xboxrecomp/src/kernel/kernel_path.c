@@ -243,6 +243,15 @@ static void xbox_write_partition_table(const WCHAR *path)
  * a title that wants a filesystem there formats one.
  */
 static WCHAR s_hdd_dir[MAX_PATH];     /* xbox_path_set_hdd_dir (below) */
+static int   s_hdd_images;            /* ... and the partition devices are still disk images */
+
+/* With a hard-disk folder, keep the disk images for the bare partition
+ * devices: a title whose XAPI reads the disk's configuration sectors at
+ * start (Buffy 2002, XDK 4432) leaves for the dashboard without them. */
+void xbox_path_keep_disk_images(int on)
+{
+    s_hdd_images = on;
+}
 
 static BOOL xbox_partition_device_path(const char *xbox_path, WCHAR *out, DWORD n)
 {
@@ -267,7 +276,7 @@ static BOOL xbox_partition_device_path(const char *xbox_path, WCHAR *out, DWORD 
     /* With a hard-disk folder (xbox_path_set_hdd_dir) there are no disk
      * images: the device is that folder (partition 1) or the save folder (the
      * rest), which answers the volume queries a device open is made for. */
-    if (s_hdd_dir[0]) {
+    if (s_hdd_dir[0] && !s_hdd_images) {
         wcscpy_s(out, n, digit == '1' ? s_hdd_dir : s_save_dir);
         return TRUE;
     }
@@ -336,7 +345,7 @@ void xbox_path_init(const char* game_dir, const char* save_dir)
             SHCreateDirectoryExW(NULL, dir, NULL);
         }
         swprintf_s(image, MAX_PATH, L"%s\\%s", s_save_dir, XBOX_DISK_IMAGE_NAME);
-        if (!s_hdd_dir[0])                   /* (no images with a hard-disk folder) */
+        if (!s_hdd_dir[0] || s_hdd_images)   /* (no images with a hard-disk folder, unless asked for) */
         xbox_write_partition_table(image);
         /* The other partition devices, sized to the same geometry the table
          * above describes, so a title that asks the device how big it is gets
@@ -352,7 +361,7 @@ void xbox_path_init(const char* game_dir, const char* save_dir)
                 0x00177000ull, /* 4: Y: cache                     */
                 0x00177000ull, /* 5: Z: cache                     */
             };
-            for (int p = 1; p <= 5 && !s_hdd_dir[0]; p++) {
+            for (int p = 1; p <= 5 && (!s_hdd_dir[0] || s_hdd_images); p++) {
                 HANDLE h;
                 DWORD ret;
                 LARGE_INTEGER end;
