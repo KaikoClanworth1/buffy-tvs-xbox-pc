@@ -670,8 +670,17 @@ void D3DDevice_SetRenderTarget_00592AF0(void)
 void D3DDevice_LoadVertexShader_005948F0(void)
 {
     uint32_t vs = MEM32(g_esp + 4) - 1, addr = MEM32(g_esp + 8);
-    if (s_up && vs)
+    if (s_up && vs) {
+        int nv2a_native_vp_prepare(uint32_t start);
+        extern unsigned g_gpu_stat_shader_n;
+        unsigned n0 = g_gpu_stat_shader_n;
         nv2a_native_vp_load(addr, (const uint32_t *)XBOX_PTR(vs + 0x114), MEM32(vs + 0xC));
+        /* its shader now (the game loads a program when it sets a material up), not at the first draw */
+        nv2a_native_vp_prepare(addr);
+        if (g_gpu_stat_shader_n != n0)
+            btvs_log("gfx", "vertex program %08X (%u words) loaded at %u: its shader made now (frame %lu)",
+                     vs, MEM32(vs + 0xC), addr, s_frame);
+    }
     D3DDevice_LoadVertexShader_005948F0_orig();
 }
 
@@ -792,6 +801,70 @@ void Direct3D_CreateDevice_005966E0(void)
 
 /* ── start and present ─────────────────────────────────────────────── */
 
+/* ── shaders before the first frame ──────────────────────────────────
+ * A shader is made from what a draw asks for -- a vertex program, a
+ * texture-stage set-up -- and compiling one takes 10 to 70 ms: in the middle
+ * of play that is a slow frame. So they are made before the game starts:
+ *
+ * 1. the renderer's own (screen space, fixed-function transform);
+ * 2. the port's list of texture-stage set-ups (btvs_native_shader_keys.h,
+ *    gathered from games played: port/tools/shader_keys.py);
+ * 3. this PC's own list (ShaderCache\shader_keys.bin): every shader a game
+ *    on this PC ever had to make, the game's vertex programs among them.
+ *
+ * Each compiled shader is kept in ShaderCache\<hash>.cso, so only the first
+ * time costs a compile; after that this takes some milliseconds.
+ *
+ * The game's vertex programs cannot be listed ahead: the game builds them
+ * while it runs (TIF_Render_Implement::SetRender_VertexShader and friends),
+ * and they are its code, so the port does not carry them. A program's shader
+ * is made when the game loads the program (D3DDevice_LoadVertexShader) --
+ * seen: all in the first frame of a level, behind the loading screen -- and
+ * from then on it is in this PC's list.
+ *
+ * `buffy_tvs.exe --prepare-shaders` (or BTVS_PREPARE_SHADERS=1) does only
+ * this and ends: for an installer. No window, no sound, the game is not
+ * started. On stdout one line per shader, "shaders <done>/<total> <which>",
+ * then "shaders ready: ..." ; exit code 0 all made, 2 some could not be, 1 no
+ * graphics device. */
+#include "btvs_native_shader_keys.h"
+
+unsigned nv2a_native_prewarm_keys(const uint8_t *data, size_t size, unsigned made[3], void (*step)(unsigned done, unsigned total));
+unsigned nv2a_native_prewarm_file(unsigned made[3], void (*step)(unsigned done, unsigned total));
+void nv2a_native_prewarm_fixed(void);
+int btvs_prepare_shaders_asked(void);
+
+static const char *s_prep_which;
+
+static void prepare_step(unsigned done, unsigned total)
+{
+    printf("shaders %u/%u %s\n", done, total, s_prep_which);
+    fflush(stdout);
+}
+
+static void shaders_prepare(void)
+{
+    extern double g_gpu_stat_shader_ms;
+    extern unsigned g_gpu_stat_shader_n;
+    int asked = btvs_prepare_shaders_asked();
+    unsigned made[3] = { 0, 0, 0 }, failed = 0, n0 = g_gpu_stat_shader_n;
+    double ms0 = g_gpu_stat_shader_ms;
+    nv2a_native_prewarm_fixed();
+    s_prep_which = "of the port's list";
+    failed += nv2a_native_prewarm_keys(k_btvs_shader_keys, sizeof k_btvs_shader_keys, made, asked ? prepare_step : NULL);
+    s_prep_which = "of this PC's list";
+    failed += nv2a_native_prewarm_file(made, asked ? prepare_step : NULL);
+    btvs_log("gfx", "shaders before the first frame: %u vertex programs, %u texture-stage, %u combiner; %u made or loaded in %.0f ms%s",
+             made[0], made[1], made[2], g_gpu_stat_shader_n - n0, g_gpu_stat_shader_ms - ms0,
+             failed ? "; some could not be made" : "");
+    if (asked) {
+        printf("shaders ready: %u vertex programs, %u texture-stage, %u combiner, %u failed, %.0f ms\n",
+               made[0], made[1], made[2], failed, g_gpu_stat_shader_ms - ms0);
+        fflush(stdout);
+        ExitProcess(failed ? 2 : 0);
+    }
+}
+
 void btvs_native_start(void)
 {
     if (s_up)
@@ -807,7 +880,7 @@ void btvs_native_start(void)
         ExitProcess(1);
     }
     btvs_log("gfx", "native renderer on %s", gpu_adapter_name());
-    nv2a_native_prewarm();
+    shaders_prepare();
 }
 
 /* ── widescreen ──────────────────────────────────────────────────────

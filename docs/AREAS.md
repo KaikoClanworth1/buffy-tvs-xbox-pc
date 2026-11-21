@@ -26,6 +26,37 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 ## Ready to use
 
+- **Shaders at install time** (Graphics, for Extras' launcher): run the installed game once as
+
+  ```
+  buffy_tvs.exe --prepare-shaders        (or with BTVS_PREPARE_SHADERS=1 in its environment)
+  ```
+
+  in the install folder, after the game's files are in place (it loads `Default.xbe` like a normal start;
+  `BTVS_GAME_DIR` / `BTVS_SAVE_DIR` as usual). It opens no window, makes no sound, starts no game and no
+  second process, makes every shader the port knows of into `ShaderCache\` beside the exe and ends.
+  - **stdout**: one line per shader, `shaders <done>/<total> of the port's list` and then
+    `... of this PC's list`, and a last line `shaders ready: <n> vertex programs, <n> texture-stage,
+    <n> combiner, <n> failed, <ms> ms`.
+  - **Exit code**: 0 all made; 2 some could not be made (the game still runs: those are made at first use);
+    1 no Direct3D 11 device.
+  - **Time**: half a second on a new folder (181 ms of compiling for the 16 shaders of today's list), a few
+    milliseconds when the cache is there. Safe to run again at any time, e.g. after an update: a shader
+    whose source changed with the port's version is compiled again, the rest are read back.
+  - **What it covers**: the renderer's own shaders and the port's list of texture-stage set-ups
+    (`port/src/btvs_native_shader_keys.h`, built into the exe: nothing to deploy). **What it cannot**: the
+    game's vertex programs. The game builds them while it runs and they are its code, so the port does not
+    carry them; each is compiled when the game first loads it -- seen: all in the first frame of a level,
+    behind the loading screen -- and from then on it is in that PC's `ShaderCache\shader_keys.bin` and
+    made at every start. To cover them at install as well, put a `ShaderCache\shader_keys.bin` from a PC
+    that has played (the owner's `GAME\ShaderCache\shader_keys.bin`, or a test build's) into the install's
+    `ShaderCache\` before `--prepare-shaders`: it makes everything in that file too. That file holds
+    game code: do not commit it.
+  - The same preparation runs at every normal start of the game (`[gfx] shaders before the first frame`
+    in `btvs_log.txt`), so a launcher that skips this step only moves the half second to the first start.
+  - Growing the port's list: `python port/tools/shader_keys.py` gathers the texture-stage keys of every
+    `shader_keys.bin` on the PC into the header; commit the header.
+
 - **Settings store** (Menu): `#include "btvs.h"`, then `btvs_setting_int/float/str(section, key, default)`,
   `btvs_setting_set_*`, `btvs_setting_on_change(section, key, fn, user)`, `btvs_settings_save()`.
   File: `btvs_settings.ini` beside the exe. Test runs: `BTVS_<SECTION>_<KEY>=value` overrides one

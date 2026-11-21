@@ -332,6 +332,16 @@ static GpuShader *nvs_program(uint32_t start, int *uses_viewport, uint32_t mask)
     return e->vs;
 }
 
+/* The shader for the program loaded at `start`, made now rather than at the
+ * first draw that uses it: a title loads its programs when it sets a scene
+ * up, which is a better moment for a compile than the middle of play.
+ * 1: there is one (made now or before). */
+int nv2a_native_vp_prepare(uint32_t start)
+{
+    int uv;
+    return start < VP_SLOTS && nvs_program(start, &uv, 0) != NULL;
+}
+
 /* Screen-space vertices (XYZRHW): pixels of the 640x480 surface to clip space. */
 static GpuShader *nvs_passthrough(void)
 {
@@ -587,50 +597,110 @@ static void nsk_record(char type, const void *data, uint32_t len)
     fflush(s_nsk);
 }
 
-void nv2a_native_prewarm(void)
+/* Makes the shaders of a list of keys (the records nsk_record writes: type,
+ * length, bytes), as at start-up from this PC's own list -- or from a list a
+ * title's port brings with it, so that a new installation has them before
+ * the first frame. `made`: counts by kind (vertex, texture stages,
+ * combiners), added to. `step`, if given, is called after each key with how
+ * many of the list's keys are done and how many there are (an installer's
+ * progress). Returns the number of keys that could not be made. */
+unsigned nv2a_native_prewarm_keys(const uint8_t *data, size_t size, unsigned made[3],
+                                  void (*step)(unsigned done, unsigned total))
 {
-    char path[MAX_PATH];
-    uint8_t hdr[5], *buf;
-    uint32_t len, n[3] = { 0, 0, 0 };
-    LARGE_INTEGER f, t0, t1;
-    FILE *fp;
     static uint32_t saved[VP_SLOTS][4];
-    if (getenv("BUFFY_NO_SHADER_PREWARM") || !nsk_path(path, sizeof path) || !(fp = fopen(path, "rb")))
-        return;
-    if (!(buf = (uint8_t *)malloc(4 + VP_SLOTS * 16 + 4096))) {
-        fclose(fp);
-        return;
+    size_t pos;
+    unsigned total = 0, done = 0, failed = 0;
+    uint32_t len;
+    if (!data || getenv("BUFFY_NO_SHADER_PREWARM"))
+        return 0;
+    for (pos = 0; pos + 5 <= size; pos += 5 + len, total++) {
+        memcpy(&len, data + pos + 1, 4);
+        if (len > size - pos - 5)
+            break;
     }
-    QueryPerformanceFrequency(&f);
-    QueryPerformanceCounter(&t0);
     s_nsk_replaying = 1;
     memcpy(saved, s_nvp_code, sizeof saved);
-    while (fread(hdr, 1, 5, fp) == 5) {
-        memcpy(&len, hdr + 1, 4);
-        if (len > 4 + VP_SLOTS * 16 + 4096 || fread(buf, 1, len, fp) != len)
-            break;
-        if (hdr[0] == 'V' && len > 4 && (len - 4) % 16 == 0 && (len - 4) / 16 <= VP_SLOTS) {
+    for (pos = 0; pos + 5 <= size && done < total; pos += 5 + len) {
+        const uint8_t *buf = data + pos + 5;
+        uint8_t type = data[pos];
+        int ok = 1;
+        memcpy(&len, data + pos + 1, 4);
+        if (type == 'V' && len > 4 && (len - 4) % 16 == 0 && (len - 4) / 16 <= VP_SLOTS) {
             uint32_t mask;
             int uv;
             memcpy(&mask, buf, 4);
             memset(s_nvp_code, 0, sizeof s_nvp_code);
             memcpy(s_nvp_code, buf + 4, len - 4);
             s_nvp_gen++;
-            if (nvs_program(0, &uv, mask))
-                n[0]++;
-        } else if (hdr[0] == 'F' && len == sizeof(NFfKey)) {
-            if (nff_get((const NFfKey *)buf))
-                n[1]++;
-        } else if (hdr[0] == 'P' && len == sizeof(PsKey)) {
-            if (nps_get((const PsKey *)buf))
-                n[2]++;
+            if ((ok = nvs_program(0, &uv, mask) != NULL) != 0)
+                made[0]++;
+        } else if (type == 'F' && len == sizeof(NFfKey)) {
+            NFfKey k;
+            memcpy(&k, buf, sizeof k);
+            if ((ok = nff_get(&k) != NULL) != 0)
+                made[1]++;
+        } else if (type == 'P' && len == sizeof(PsKey)) {
+            PsKey k;
+            memcpy(&k, buf, sizeof k);
+            if ((ok = nps_get(&k) != NULL) != 0)
+                made[2]++;
         }                                        /* (another version's key: not made) */
+        if (!ok)
+            failed++;
+        done++;
+        if (step)
+            step(done, total);
     }
     memcpy(s_nvp_code, saved, sizeof saved);
     s_nvp_gen++;
     s_nsk_replaying = 0;
+    return failed;
+}
+
+/* The vertex shaders that are the renderer's own, not a title's program:
+ * screen-space vertices, and the fixed-function transform with each stage
+ * taking its own texture coordinate set or stage 0 taking the second (a
+ * light-map pass). Made at the first draw that needs them otherwise. */
+void nv2a_native_prewarm_fixed(void)
+{
+    static const uint32_t own[32 * 4] = { [28] = 0, [32 + 28] = 1, [64 + 28] = 2, [96 + 28] = 3 };
+    static const uint32_t second[32 * 4] = { [28] = 1, [32 + 28] = 1, [64 + 28] = 2, [96 + 28] = 3 };
+    nvs_passthrough();
+    nvs_fixed(own);
+    nvs_fixed(second);
+}
+
+/* This PC's own list (ShaderCache\shader_keys.bin), all of it. */
+unsigned nv2a_native_prewarm_file(unsigned made[3], void (*step)(unsigned done, unsigned total))
+{
+    char path[MAX_PATH];
+    uint8_t *buf;
+    long size;
+    unsigned failed;
+    FILE *fp;
+    if (getenv("BUFFY_NO_SHADER_PREWARM") || !nsk_path(path, sizeof path) || !(fp = fopen(path, "rb")))
+        return 0;
+    fseek(fp, 0, SEEK_END);
+    size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (size <= 0 || !(buf = (uint8_t *)malloc((size_t)size)) ) {
+        fclose(fp);
+        return 0;
+    }
+    size = (long)fread(buf, 1, (size_t)size, fp);
     fclose(fp);
+    failed = nv2a_native_prewarm_keys(buf, (size_t)size, made, step);
     free(buf);
+    return failed;
+}
+
+void nv2a_native_prewarm(void)
+{
+    unsigned n[3] = { 0, 0, 0 };
+    LARGE_INTEGER f, t0, t1;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&t0);
+    nv2a_native_prewarm_file(n, NULL);
     QueryPerformanceCounter(&t1);
     fprintf(stderr, "[SHADERS] made at start-up: %u vertex, %u texture-stage, %u combiner shaders in %.0f ms\n",
             n[0], n[1], n[2], (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart);

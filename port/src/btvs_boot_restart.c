@@ -31,6 +31,18 @@
 
 #define XBOX_EXIT_RELAUNCH 0x42544C52u
 
+/* `buffy_tvs.exe --prepare-shaders` or BTVS_PREPARE_SHADERS=1: make the
+ * shaders and end (btvs_native.c, shaders_prepare), for an installer. */
+int btvs_prepare_shaders_asked(void)
+{
+    static int asked = -1;
+    if (asked < 0) {
+        const char *e = getenv("BTVS_PREPARE_SHADERS");
+        asked = (e && *e && *e != '0') || strstr(GetCommandLineA(), "--prepare-shaders") != NULL;
+    }
+    return asked;
+}
+
 /* 1: this process was the supervisor and the session is over (*exit_code is
  * the game's). 0: this process is the game; carry on. */
 int btvs_supervise(int *exit_code)
@@ -42,6 +54,12 @@ int btvs_supervise(int *exit_code)
     HANDLE job;
     int runs = 0, have_launch = 0;
 
+    if (btvs_prepare_shaders_asked()) {
+        /* no game is started: this process does the work itself, out of sight and silent */
+        _putenv_s("BTVS_NO_WINDOW", "1");
+        _putenv_s("BTVS_MUTE", "1");
+        return 0;
+    }
     if (getenv("BTVS_CHILD") || getenv("BTVS_NO_SUPERVISOR"))
         return 0;
     if (!GetModuleFileNameA(NULL, exe, sizeof exe))

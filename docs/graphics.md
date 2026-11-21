@@ -202,6 +202,31 @@ loading, 7.8 s in all, the worst 189 ms. By cause:
 What this does not show: how the game runs on an idle PC at normal priority. That needs a run the owner
 makes (see the checklist).
 
+## Shaders before the first frame
+
+A shader is made from what a draw asks for (a vertex program, a texture-stage set-up); compiling one takes
+10 to 70 ms. They are made before the game starts (`shaders_prepare` in `btvs_native.c`), each compiled
+one kept as `ShaderCache\<hash>.cso`:
+
+1. the renderer's own (screen space, the fixed-function transform);
+2. the port's list of texture-stage set-ups, `btvs_native_shader_keys.h` (13 on 21 Nov, from every
+   `shader_keys.bin` on this PC including the owner's play; `port/tools/shader_keys.py` rebuilds it);
+3. this PC's own list, `ShaderCache\shader_keys.bin`: every shader a game here ever had to make.
+
+`buffy_tvs.exe --prepare-shaders` does only that and ends (for the launcher: `docs/AREAS.md`, "Ready to
+use").
+
+The game's vertex programs cannot be listed ahead: the game builds them while it runs and they are its
+code. A program's shader is now made when the game loads the program (`D3DDevice_LoadVertexShader`), not
+at the first draw; in the cemetery all five are loaded in the first frame, behind the loading screen.
+
+Checked with an emptied `ShaderCache`: `--prepare-shaders` took 0.5 s, exit code 0, 18 files; a cemetery
+run after it (fight, HUD weapon, inventory, pause; 3,061 frames) compiled in frame 1 only (the five vertex
+programs, 322 ms inside the 10 s loading frame). Without the preparation the same run also compiled in
+frame 2 (12 ms) and frame 382 (10 ms). Not covered: a texture-stage set-up or vertex program no game on
+this PC has drawn yet is still compiled at its first use, once (it shows as `shaders` in the frame
+statistics), and the gamma shader is made when the brightness first changes.
+
 ## Frame limit and VSync
 
 `[display] fps_limit` (0: none) and `vsync`. The game steps its world by measured time
