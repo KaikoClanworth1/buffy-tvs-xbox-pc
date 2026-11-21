@@ -486,7 +486,26 @@ long dx_compile(const char *src, const char *entry, const char *profile, void **
     return (long)compile_cached(src, entry, profile, (ID3DBlob **)blob);
 }
 
+/* What making shaders has cost since the start (a title's frame statistics:
+ * a shader made in the middle of play is a slow frame). */
+double   g_gpu_stat_shader_ms;
+unsigned g_gpu_stat_shader_n;
+static GpuShader *dx_shader_create_timed(GpuStage stage, const char *hlsl, const char *entry);
+
 GpuShader *dx_shader_create(GpuStage stage, const char *hlsl, const char *entry)
+{
+    LARGE_INTEGER f, t0, t1;
+    GpuShader *s;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&t0);
+    s = dx_shader_create_timed(stage, hlsl, entry);
+    QueryPerformanceCounter(&t1);
+    g_gpu_stat_shader_ms += (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart;
+    g_gpu_stat_shader_n++;
+    return s;
+}
+
+static GpuShader *dx_shader_create_timed(GpuStage stage, const char *hlsl, const char *entry)
 {
     GpuShader *s = (GpuShader *)calloc(1, sizeof *s);
     ID3DBlob *b = NULL;

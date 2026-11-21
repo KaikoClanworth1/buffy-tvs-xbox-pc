@@ -11,6 +11,7 @@
  *   - Thread priorities use NT KPRIORITY increments
  */
 
+#include <stdlib.h>
 #include "kernel.h"
 #include "xbox_memory_layout.h"   /* XBOX_WORKER_STACK_* + worker-stack decls */
 
@@ -168,8 +169,40 @@ NTSTATUS __stdcall xbox_KeDelayExecutionThread(
         return STATUS_INVALID_PARAMETER;
 
     if (Interval->QuadPart == 0) {
-        /* Zero interval = yield the thread's time slice */
-        SwitchToThread();
+        /* Zero interval = yield the thread's time slice.
+         *
+         * A title polls with Sleep(0): a worker with nothing to do, or a
+         * thread waiting for a worker's result, loops on it. On the console's
+         * one CPU that gave the time to whoever had work; here every such
+         * loop is a CPU at 100 % for as long as it waits (a disk thread with
+         * no request: for the whole game). So a thread that has done nothing
+         * but yield for 2 ms sleeps a millisecond at a time until it does
+         * something else; a short wait (the next block of a file being read)
+         * is still only yields. RECOMP_SPIN_OLD=1: always yield (testing). */
+        static __declspec(thread) LONGLONG streak_start, last;
+        static LONGLONG freq;
+        static int old = -1;
+        LARGE_INTEGER q;
+        if (old < 0)
+            old = getenv("RECOMP_SPIN_OLD") != NULL;
+        if (old) {
+            SwitchToThread();
+            return STATUS_SUCCESS;
+        }
+        if (!freq) {
+            QueryPerformanceFrequency(&q);
+            freq = q.QuadPart;
+        }
+        QueryPerformanceCounter(&q);
+        if (!last || (q.QuadPart - last) * 2000 > freq)          /* 0.5 ms since the last yield: it did something */
+            streak_start = q.QuadPart;
+        if ((q.QuadPart - streak_start) * 500 > freq) {          /* 2 ms of nothing but yields */
+            Sleep(1);
+            QueryPerformanceCounter(&q);
+        } else {
+            SwitchToThread();
+        }
+        last = q.QuadPart;
         return STATUS_SUCCESS;
     }
 

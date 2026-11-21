@@ -10,6 +10,9 @@ cd "$PORT"
 mkdir -p runs
 export BTVS_GAME_DIR="$(cd "$BTVS_MAIN/game_files" && pwd -W | tr '/' '\134')"
 export RECOMP_WATCHDOG_SECS="${RECOMP_WATCHDOG_SECS:-600}"
+# Test runs keep the runtime's line for every file opened and read and its kernel-call summary
+# (off in a player's game: each line is a write the game waits for). RECOMP_FILE_LOG=0 for timing runs.
+export RECOMP_FILE_LOG="${RECOMP_FILE_LOG:-1}"
 for kv in "$@"; do export "$kv"; done
 # Every run gets its own empty save folder (runs/<name>.save), so runs never share
 # or pile up saved games (the game allows ten). BTVS_SAVE_DIR=<folder> keeps one instead.

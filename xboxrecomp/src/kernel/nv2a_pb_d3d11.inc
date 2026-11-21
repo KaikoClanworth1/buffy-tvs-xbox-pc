@@ -69,6 +69,7 @@ typedef struct {
     DWORD    last_use;
     int      replaced;                     /* a texture pack's image (nv2a_texpack.inc) */
     int      genmips;                      /* mip chain built here (gpu_texture) */
+    int      churn;                        /* times its contents changed under it (an animated texture) */
 } TexEntry;
 
 #define GPU_MAX_SURF 16
@@ -1742,6 +1743,11 @@ static void gpu_snapshot(GpuSurface *s, int window2)
  * coordinate multiplier (1 for normalised, 1/size for linear textures, which
  * NV2A addresses in texels); *mips whether it has a mip chain; *cube whether
  * it is a cube map (bind at t4+st). */
+/* What making textures out of the title's has cost since the start (decoding,
+ * smaller levels, upload): a title's frame statistics. */
+double   g_nv2a_stat_tex_ms;
+unsigned g_nv2a_stat_tex_n;
+
 static GpuTexture *gpu_texture(int st, float norm[2], int *mips, int *cube)
 {
     uint32_t ctl0 = tex_reg(st, 0x1B0C), fmtreg = tex_reg(st, 0x1B04);
@@ -1791,8 +1797,14 @@ static GpuTexture *gpu_texture(int st, float norm[2], int *mips, int *cube)
     levels = l;
     if (block && (w < 4 || h < 4))
         levels = 1;
-    if (getenv("BUFFY_TEX_LEVEL0"))                 /* (testing: only the top level of every texture) */
-        levels = 1;
+    {   /* (testing) BUFFY_TEX_LEVEL0=1: only the top level of every texture. Asked once: this runs for
+         * every texture of every draw, and asking the environment each time was most of a frame. */
+        static int level0 = -1;
+        if (level0 < 0)
+            level0 = getenv("BUFFY_TEX_LEVEL0") != NULL;
+        if (level0)
+            levels = 1;
+    }
     face_bytes = 0;
     for (l = 0; l < levels; l++) {
         uint32_t lw = w >> l ? w >> l : 1, lh = h >> l ? h >> l : 1;
@@ -1827,6 +1839,8 @@ static GpuTexture *gpu_texture(int st, float norm[2], int *mips, int *cube)
                     }
                     if (t->hash != hash) {
                         i = idx;                  /* same texture, new contents: re-upload */
+                        if (t->churn < 1000)
+                            t->churn++;
                         goto reupload;
                     }
                     t->checked_frame = s_frame_no;
@@ -1851,6 +1865,7 @@ static GpuTexture *gpu_texture(int st, float norm[2], int *mips, int *cube)
         }
         i = lru;
         s_texidx[slot] = i + 1;
+        s_texc[i].churn = 0;
     }
 reupload:
     if (fmt == 0x0B && !pal)
@@ -1889,7 +1904,10 @@ reupload:
      * texel and shimmers as the camera moves (the more, the higher the
      * resolution). Built from level 0 by 2x2 averaging; a compressed one is
      * decoded first. BUFFY_NO_GEN_MIPS=1 turns it off (testing). */
-    gen = levels == 1 && !is_cube && (w > 1 || h > 1) && !getenv("BUFFY_NO_GEN_MIPS");
+    /* (Not for a texture the title keeps rewriting -- an animated one: its
+     * smaller levels would be built again for every frame it changes in,
+     * 2 to 3 ms for a 256x256 one.) */
+    gen = levels == 1 && !is_cube && (w > 1 || h > 1) && t->churn < 3 && !getenv("BUFFY_NO_GEN_MIPS");
     if (block && w >= 4 && h >= 4 && !gen)
         td.format = block == 8 ? GPU_FMT_BC1 : (fmt == 0x0E ? GPU_FMT_BC2 : GPU_FMT_BC3);
 
@@ -1968,6 +1986,8 @@ reupload:
         LARGE_INTEGER b;
         if (!f.QuadPart) QueryPerformanceFrequency(&f);
         QueryPerformanceCounter(&b);
+        g_nv2a_stat_tex_ms += (double)(b.QuadPart - tx_t0.QuadPart) * 1000.0 / (double)f.QuadPart;
+        g_nv2a_stat_tex_n++;
         if (getenv("RECOMP_PB_PROFILE") && (b.QuadPart - tx_t0.QuadPart) * 1000 / f.QuadPart >= 2)
             fprintf(stderr, "  [HITCH] texture %ux%u fmt %02X x%u levels built in %.1f ms\n", w, h, fmt, levels,
                     (b.QuadPart - tx_t0.QuadPart) * 1000.0 / f.QuadPart);

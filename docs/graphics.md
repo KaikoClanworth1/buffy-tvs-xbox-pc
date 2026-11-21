@@ -56,6 +56,19 @@ With 1 and a frame wider than 4:3:
 - **2D that covers the whole width of the game's screen** (cutscene bars, fades, flashes, the dim behind the
   pause menu) covers the whole frame (`wide_full_width`).
 - **In the menus** (no level loaded) everything stays 4:3 with black sides.
+- **Objects that are part of the HUD** -- the weapon beside the ammunition count, the items of the two
+  inventory screens -- are 3D, drawn by `TGORender_CustomViewport::Render` in a small viewport with a lens
+  of their own (20 degrees). `View_SetFOV` knows that caller by its return address: for it the angle is not
+  widened and the 3D goes where the 2D HUD goes (`btvs_native_ui_view`). Until 21 Nov they were widened and
+  cut like the level's view: squeezed, off their places and, away from the middle, off the screen ("in
+  widescreen the items don't appear in the UI"). Two more things were wrong with it: `View_SetViewport`
+  calls `View_SetFOV` again with the angle already stored, which was widened a second time; and a program
+  drawn in a small viewport had its 4:3 squeeze applied about the viewport's own middle while the viewport
+  stayed at its place in the wide frame (now the viewport itself is moved and narrowed,
+  `nv2a_native.inc`). Checked at 1920x1080 against the 4:3 picture: the HUD weapon and the inventory are
+  the same, pixel for place.
+- Not right yet: the inventory's and pause menu's purple backdrop is drawn as part of the level's 3D, wide,
+  and its mesh ends before the frame's corners (dark corners at the far left and right).
 
 Checked by frame dumps at 1920x1080 (menu, cutscene, gameplay) and 3840x2160 (menu). Not handled: the
 game's own culling still thinks 4:3 x a wider angle, which is a superset, so nothing should pop at the
@@ -98,6 +111,78 @@ hidden test run, and a player's slider position is not known. With the game's sl
 corridor looks like those pictures.
 
 ## Slow frames
+
+### Frame statistics (always on)
+
+`btvs_frame.c` measures every frame. Once a minute, and when the game ends through its Exit, `btvs_log.txt`
+gets three kinds of line (`[gfx] frames, ...`):
+
+- how many frames, their average and longest, and how they were spread against the frame limit's step
+  (on time, to 1.25x, 1.5x, 2x, 3x, 6x, longer);
+- **the game thread's own work** per frame: its CPU time, not the clock. It does not grow while the thread
+  waits or another program has the CPU, so it says what a frame costs whatever else the PC is doing. Also
+  how many CPUs the whole program used;
+- the slow frames (over 1.25 steps) by their largest part, and the five longest with all parts: `game`
+  (the game's code and its drawing), `showing` (Present: with vsync the wait for the monitor),
+  `textures` and `shaders` made in that frame, `limiter overslept`, `port` (the port's own work at the
+  Swap: its text, frame dumps, window messages, input).
+
+`BTVS_FRAME_LOG=<file>` writes every frame as a CSV line; `BTVS_FRAME_REPORT=<seconds>` changes the
+minute; `BTVS_HITCH_LOG=<ms>` adds what the game thread was doing at that moment of every longer frame.
+
+### "Game stutters a bit" (the 11:00 build of 21 Nov)
+
+Measured in `m03_cemetery_1`, a fight with scripted input, 1920x1080 widescreen, about 80 s of play, hidden
+test run on a busy PC (`port/runs/shots/1500_frame_times_before_after.png`):
+
+| | Before (11:00 build) | After |
+|---|---|---|
+| Frames a second | 21.1 | 55.5 (58.8 with the frame recording off) |
+| Frame time: median / 95 % / 99 % | 45.6 / 66.8 / 90.4 ms | 16.7 / 19.9 / 22.1 ms |
+| The game thread's own work a frame: median / 99 % | 44.7 / 75.0 ms | 13.1 / 19.2 ms |
+| Frames within 20 ms | 2 % | 95 % |
+| Frames over 100 ms | 10 | 6 (3 with the frame recording off): all of them a log write, below |
+| CPUs the program used | 1.9 | 0.9 to 1.1 |
+
+What was wrong, in the order of what it cost:
+
+1. **A test switch asked the environment for every texture of every draw** (`BUFFY_TEX_LEVEL0`, added to
+   the texture code with the brightness work of that morning: mine). `getenv` scans the whole environment;
+   several thousand times a frame it was 62 % of the game thread (profile: `strchr <- gpu_texture`). Now
+   asked once. The other switches in the draw path were already asked once; `BTVS_FOV_LOG` was not and is.
+2. **A thread spinning in the kernel's wait call**: XAPI's multimedia timer thread waits on an event that is
+   an object in the game's memory; `KeWaitForMultipleObjects` passed its address to Windows as a handle, the
+   wait failed at once and the thread looped two million times a second (Audio found this; their fix is
+   in). A whole CPU.
+3. **Two threads polling with `Sleep(0)`**: the game's disk thread when it has nothing to read (all through
+   play) and whoever waits for a block from it. A thread that has only yielded for 2 ms now sleeps a
+   millisecond at a time until it does something else (`xbox_KeDelayExecutionThread`).
+4. **The limiter.** It slept *after* the frame was shown, so a frame reached the screen as soon as it was
+   made and its place in time moved with the work in it; after a late frame the next ones were cut short to
+   make the time up (the game moves by each frame's own time: a judder); and `Sleep` runs up to 15 ms over
+   when Windows does not grant the 1 ms timer (a hidden or covered window). Now: wait first, then show; a
+   late frame is followed by full steps; the wait is a high-resolution waitable timer.
+5. **Log lines the game waits for.** stderr is not buffered: every line is a write, flushed, on the thread
+   that printed it. With the disk busy a single write took 0.4 to 1.1 s, with the game thread inside
+   `WriteFile`. The runtime's lines for every path opened, every open's result, every read and its
+   two-second call summary are now only printed with `RECOMP_FILE_LOG=1` (`run.sh` sets it for test runs,
+   which therefore still have these stalls; `RECOMP_FILE_LOG=0` for timing). A repeated warning from
+   `NtFreeVirtualMemory` is given eight times at most.
+6. An animated texture (the blue fire) had its smaller levels built again every frame it changed in, 2 to
+   3 ms each: a texture that keeps changing gets none.
+
+Left, each seen as a frame of 0.1 to 1.1 s with the game thread in `WriteFile` (requests in `AREAS.md`):
+the frame recording's flush every frame (`write_frame`, Logs), the input recording's flush
+(`record_poll`, Controls), the trail's position line to stderr every few seconds (Logs), and the runtime's
+`CreateDirectoryW` on a path being opened (`xbox_translate_path`: mine, not done).
+
+`RECOMP_SPIN_OLD=1` brings points 2, 3 and 5 back for comparison.
+
+What none of this shows: a run at normal priority with a visible window and vsync on the owner's 240 Hz
+display. The statistics in `btvs_log.txt` after the owner's next play will.
+
+### Earlier (20 Nov)
+
 
 `BTVS_HITCH_LOG=<ms>` logs every frame longer than that and what the game thread was doing at that moment
 (a watcher takes its call stack).
@@ -243,6 +328,10 @@ A change to that file needs a regen and a rebuild of the translated code, in the
 | `BTVS_DISPLAY_WIDTH/HEIGHT/MODE/VSYNC/FPS_LIMIT/WIDESCREEN` | the `[display]` settings for one run |
 | `BTVS_UNCAPPED=1` | no frame limiter |
 | `BTVS_FPS_LOG=1` | frames per second, average and worst frame time, every second |
+| `BTVS_FRAME_LOG=<file>`, `BTVS_FRAME_REPORT=<seconds>` | every frame's time and parts as CSV; how often the log gets the frame statistics (60) |
+| `RECOMP_FILE_LOG=1` / `0` | the runtime's line for every file opened and read, and its kernel-call summary (`run.sh`: 1) |
+| `RECOMP_SPIN_OLD=1`, `RECOMP_DELAY_LOG=1` | the spinning waits as they were (comparison); who sleeps for no time |
+| `BTVS_FOV_LOG=1` | every `View_SetFOV` with its caller |
 | `BTVS_NATIVE_LOG=1` / `=f<frame>` | draw counts every 2 s / that frame draw by draw |
 | `BTVS_GAME_LOG=1` | first calls of the hooked game-layer functions |
 | `BTVS_D3D_DRAWS=1` | also run the library's own draw code (fills the pushbuffer only) |

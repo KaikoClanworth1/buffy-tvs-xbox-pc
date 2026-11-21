@@ -12,6 +12,7 @@
  * emits UTF-8 paths with '/' separators (for open()).
  */
 
+#include <stdlib.h>
 #include "kernel.h"
 #include <stdio.h>
 #include <string.h>
@@ -22,6 +23,25 @@
  * Returns the number of chars consumed from the prefix, or 0 if no match.
  * Platform-independent.
  */
+/* RECOMP_FILE_LOG=1: a line for every path a title opens, every open's
+ * result, every read, and the kernel-call summary every two seconds (0 or
+ * unset: none of them; a failed open is still noted, the first 200 times).
+ *
+ * Off unless asked for: stderr is not buffered, so each line is a write to
+ * the log file made by whichever of the title's threads opened or read --
+ * and when that write has to wait for the disk, so does the title. Seen as
+ * single frames of 0.4 to 1 s with the title's main thread inside WriteFile,
+ * at a file opened in play. Test runs ask for it (run.sh). */
+int xbox_io_log(void)
+{
+    static int on = -1;
+    if (on < 0) {
+        const char *e = getenv("RECOMP_FILE_LOG");
+        on = (e && *e && *e != '0') || getenv("RECOMP_SPIN_OLD") != NULL;
+    }
+    return on;
+}
+
 static int match_prefix(const char* path, const char* prefix)
 {
     int i = 0;
@@ -466,7 +486,8 @@ BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, D
         if (!u)
             u = match_prefix(xbox_path, "\\??\\U:\\");
         if (u && s_user_mapper(xbox_path + u, host_path_buf, buf_size)) {
-            fprintf(stderr, "  [PATH] %s -> %S\n", xbox_path, host_path_buf);
+            if (xbox_io_log())
+                fprintf(stderr, "  [PATH] %s -> %S\n", xbox_path, host_path_buf);
             xbox_remember_host_path(host_path_buf);
             return TRUE;
         }
@@ -479,8 +500,10 @@ BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, D
     }
 
     if (xbox_partition_device_path(xbox_path, host_path_buf, buf_size)) {
-        fprintf(stderr, "  [PATH] %s -> device %S\n", xbox_path, host_path_buf);
-        fflush(stderr);
+        if (xbox_io_log()) {
+            fprintf(stderr, "  [PATH] %s -> device %S\n", xbox_path, host_path_buf);
+            fflush(stderr);
+        }
         return TRUE;
     }
 
@@ -502,8 +525,10 @@ BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, D
     return TRUE;
 
 translate:
-    fprintf(stderr, "  [PATH] %s\n", xbox_path);
-    fflush(stderr);
+    if (xbox_io_log()) {
+        fprintf(stderr, "  [PATH] %s\n", xbox_path);
+        fflush(stderr);
+    }
     {
         WCHAR remainder_wide[MAX_PATH];
         MultiByteToWideChar(CP_ACP, 0, remainder, -1, remainder_wide, MAX_PATH);

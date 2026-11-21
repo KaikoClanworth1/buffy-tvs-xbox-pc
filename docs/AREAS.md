@@ -79,6 +79,24 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   window before the old one goes is not an option while `install.dat` and `dsstdfx.bin` are opened
   unshared. Please also log each window creation (`[gfx] window ...` with the handle and the process),
   so a log can show one window for a session; today nothing in the log says a window was made.
+- **Graphics → Logs, Controls (21 Nov): no flushed file writes on the game thread.** With the disk busy
+  (other sessions building and testing while the owner plays) one flushed write takes 0.4 to 1.1 s and the
+  game stands still for it. `BTVS_HITCH_LOG=90` in a cemetery fight caught the game thread inside
+  `WriteFile` in every frame over 100 ms that is left (`docs/graphics.md`, "Slow frames"):
+  - **Logs**: `write_frame` (`btvs_report_exact.c:422`) flushes `btvs_frames.rec` every frame; the trail's
+    `pos` line goes to unbuffered stderr every few seconds; `btvs_log` lines written from the game thread.
+  - **Controls**: `record_poll` (`btvs_input.c:1000`) flushes `btvs_input.rec` on the game thread.
+  Wanted: keep the bytes in memory and let a helper thread write and flush (once a second, and when a
+  report or a crash asks for the files). Measured with the frame recording off (`BTVS_EXACT=0`): 3 long
+  frames in 63 s instead of 6.
+- **Graphics → everyone (21 Nov): test logs.** The runtime's `[PATH]`, `[FILE] ->`, `[READ]` and
+  `[KERNEL] summary` lines are printed only with `RECOMP_FILE_LOG=1`, which `run.sh` sets: test runs are
+  as before, a player's game is quiet (a failed open is still noted, 200 times at most). Timing runs:
+  `RECOMP_FILE_LOG=0`. The frame statistics are in every `btvs_log.txt` once a minute
+  (`[gfx] frames, ...`).
+- **Graphics → Controls (21 Nov)**: `game_probe` (`btvs_input_xapi.c`) calls `VirtualQuery` on the game
+  thread often enough to be 2.5 % of its samples in a profile; a cheaper check of the three globals would do.
+
 - **Graphics → Menu (21 Nov): a Brightness line on the PC Graphics page.** The game's own brightness
   (its Options -> Display slider) works now: the renderer applies the gamma ramp the game sets
   (`docs/graphics.md`, "Brightness"). The levels are dark at the game's default (slider 50) because that is

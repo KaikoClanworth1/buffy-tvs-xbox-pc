@@ -1685,6 +1685,31 @@ static void bridge_KeDelayExecutionThread(void)
     uint32_t alertable    = STACK_ARG(1);
     uint32_t interval_ptr = STACK_ARG(2);
 
+    {   /* RECOMP_DELAY_LOG=1: who sleeps for no time at all (a polling loop), by thread: the code addresses on its stack */
+        static int on = -1, shown;
+        static DWORD seen[8];
+        if (on < 0)
+            on = getenv("RECOMP_DELAY_LOG") != NULL;
+        if (on && shown < 8 && interval_ptr && BRIDGE_MEM32(interval_ptr) == 0 && BRIDGE_MEM32(interval_ptr + 4) == 0) {
+            DWORD tid = GetCurrentThreadId();
+            int k, n = 0;
+            for (k = 0; k < shown && seen[k] != tid; k++) ;
+            if (k == shown) {
+                uint32_t sp;
+                seen[shown++] = tid;
+                fprintf(stderr, "  [DELAY0] thread %lu:", (unsigned long)tid);
+                for (sp = g_esp - 4; n < 14 && sp < g_esp + 0x400; sp += 4) {
+                    uint32_t v = BRIDGE_MEM32(sp);
+                    if (v >= 0x11000u && v < 0x617000u) {
+                        fprintf(stderr, " %08X", v);
+                        n++;
+                    }
+                }
+                fprintf(stderr, "\n");
+                fflush(stderr);
+            }
+        }
+    }
 
     g_eax = (uint32_t)xbox_KeDelayExecutionThread(
         (KPROCESSOR_MODE)wait_mode, (BOOLEAN)alertable,
@@ -3109,17 +3134,23 @@ static void bridge_NtCreateFile(void)
      * -- so the status is what separates a probe from a real miss. */
     {
         extern uint32_t xbox_LastFileError(void);
+        extern int xbox_io_log(void);
+        static LONG failed;
         uint32_t _e = g_eax ? xbox_LastFileError() : 0u;
-        if (g_eax)
+        int said = 1;
+        if (g_eax && (xbox_io_log() || InterlockedIncrement(&failed) <= 200))
             fprintf(stderr, "  [FILE] -> 0x%08X FAILED (win32 err=%u%s)\n",
                     g_eax, _e,
                     _e == 32u ? " ERROR_SHARING_VIOLATION"
                   : _e ==  2u ? " ERROR_FILE_NOT_FOUND"
                   : _e ==  3u ? " ERROR_PATH_NOT_FOUND" : "");
-        else
+        else if (!g_eax && xbox_io_log())
             fprintf(stderr, "  [FILE] -> 0x%08X\n", g_eax);
+        else
+            said = 0;
+        if (said)
+            fflush(stderr);
     }
-    fflush(stderr);
 }
 
 /* ── NtOpenFile (ordinal 202, 6 args = 24 bytes) ──────── */
@@ -3342,6 +3373,20 @@ static void bridge_RtlUnwind(void)
 }
 
 /* ── NtReadFile (ordinal 219, 8 args = 32 bytes) ──────── */
+/* RECOMP_READ_LOG=1: a line for every read. Off otherwise: it was written
+ * and flushed for each one -- thousands while a level streams -- on the
+ * title's own reading thread, which the title's main thread waits for. */
+static int bridge_read_log(void)
+{
+    static int on = -1;
+    if (on < 0)
+        {
+            extern int xbox_io_log(void);
+            on = getenv("RECOMP_READ_LOG") != NULL || xbox_io_log();
+        }
+    return on;
+}
+
 static void bridge_NtReadFile(void)
 {
     HANDLE   handle    = bridge_resolve_handle(STACK_ARG(0));
@@ -3365,7 +3410,7 @@ static void bridge_NtReadFile(void)
     /* What a read actually delivered. A decoder that rejects its input cannot
      * say whether the bytes were wrong or the read was, and the two look
      * identical from inside the title -- the first bytes settle it. */
-    {
+    if (bridge_read_log()) {
         const uint8_t *p = (const uint8_t *)XBOX_TO_NATIVE(buffer_va);
         uint32_t got = (uint32_t)ios.Information;
         /* The offset matters as much as the length. A title streaming a pack
@@ -4397,9 +4442,17 @@ static void bridge_KeWaitForMultipleObjects(void)
     }
     if (count > BRIDGE_MAXIMUM_WAIT_OBJECTS)
         count = BRIDGE_MAXIMUM_WAIT_OBJECTS;
-    for (i = 0; i < count; i++)
-        handles[i] = bridge_resolve_handle(
-            objects_va ? BRIDGE_MEM32(objects_va + i * 4) : 0);
+    for (i = 0; i < count; i++) {
+        /* A guest KEVENT (an object in the title's memory, not a handle) is
+         * waited on through its shadow, as KeWaitForSingleObject does. Passed
+         * to Windows as a handle the wait failed at once, and a thread that
+         * waits in a loop -- XAPI's multimedia timer thread -- span: two
+         * million calls a second, a whole CPU. */
+        uint32_t obj = objects_va ? BRIDGE_MEM32(objects_va + i * 4) : 0;
+        handles[i] = getenv("RECOMP_SPIN_OLD") ? NULL : ke_event_shadow(obj);   /* (testing: as it was) */
+        if (!handles[i])
+            handles[i] = bridge_resolve_handle(obj);
+    }
 
     g_eax = (uint32_t)xbox_KeWaitForMultipleObjects(
         count, (PVOID *)handles, wait_type,
@@ -9160,6 +9213,13 @@ static void kernel_watch_arm_once(void)
 /* Current dispatching slot */
 static RECOMP_TLS int g_kernel_dispatch_slot = -1;
 
+/* The two-second summary of kernel calls: with RECOMP_FILE_LOG (xbox_io_log). */
+static int kernel_summary_on(void)
+{
+    extern int xbox_io_log(void);
+    return xbox_io_log();
+}
+
 static void kernel_thunk_dispatch(void)
 {
     int slot = g_kernel_dispatch_slot;
@@ -9196,7 +9256,7 @@ static void kernel_thunk_dispatch(void)
         static DWORD last_summary_tick = 0;
         DWORD now = GetTickCount();
         if (last_summary_tick == 0) last_summary_tick = now;
-        if (now - last_summary_tick >= 2000 && g_kernel_call_count > 200) {
+        if (now - last_summary_tick >= 2000 && g_kernel_call_count > 200 && kernel_summary_on()) {
             fprintf(stderr, "  [KERNEL] summary: %d total calls, latest ordinal %u (slot %d) esp=0x%08X\n",
                     g_kernel_call_count, ordinal, slot, g_esp);
             /* And which ones, ranked. "Latest" names whatever the sample

@@ -302,6 +302,11 @@ NTSTATUS __stdcall xbox_NtFreeVirtualMemory(
     SIZE_T size = (FreeType & MEM_RELEASE) ? 0 : (RegionSize ? *RegionSize : 0);
 
     if (!VirtualFree(*BaseAddress, size, FreeType)) {
+        /* (the first few only: a title that frees what this runtime gave it from
+         * elsewhere does so all through play, and each line is a flushed write
+         * its thread waits for) */
+        static LONG warned;
+        if (InterlockedIncrement(&warned) <= 8)
         xbox_log(XBOX_LOG_WARN, XBOX_LOG_MEM,
             "NtFreeVirtualMemory failed: base=%p type=0x%X err=%u",
             *BaseAddress, FreeType, GetLastError());

@@ -183,7 +183,10 @@ void TIF_Render_Implement_View_SetFOV_002A5110(void)
 {
     uint32_t ret = MEM32(g_esp), from = ret == 0x0001A396u ? MEM32(g_esp + 12) : 0;
     float f;
-    if (getenv("BTVS_FOV_LOG"))
+    static int fov_log = -1;
+    if (fov_log < 0)
+        fov_log = getenv("BTVS_FOV_LOG") != NULL;
+    if (fov_log)
         fprintf(stderr, "[FOV] %.4f rad, from %08X <- %08X\n", MEMF(g_esp + 4), ret, MEM32(g_esp + 12));
     if (ret == 0x002A50F9u) {
         TIF_Render_Implement_View_SetFOV_002A5110_orig();
