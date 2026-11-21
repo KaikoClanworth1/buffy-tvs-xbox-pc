@@ -621,6 +621,20 @@ static int install_run(const WCHAR *image, const WCHAR *target_in)
         wcscpy_s(s_install_msg, 1024, L"That install folder's path is not usable (too long, or not a folder path).");
         return INSTALL_FAILED;
     }
+    {
+        /* The game opens its files and starts itself by names in this PC's
+         * own code page (seen: installed in a folder with Japanese letters on
+         * a Western Windows, it could not start: error 123). Until it does
+         * better, say so before two gigabytes are copied. */
+        char ansi[MAX_PATH * 2];
+        BOOL lost = FALSE;
+        if (!WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, target, -1, ansi, sizeof ansi, NULL, &lost) || lost) {
+            wcscpy_s(s_install_msg, 1024, L"The game cannot run from that folder: its path has letters that this PC's Windows "
+                                          L"language setting cannot write. Choose a folder with plain letters and digits in its "
+                                          L"whole path, for example C:\\Games\\Buffy.");
+            return INSTALL_FAILED;
+        }
+    }
     post_progress(0, L"Reading the disc image...");
     if (!disc_open(&d, image, err, 512) || !disc_check(&d, &info, err, 512)) {
         wcscpy_s(s_install_msg, 1024, err);
