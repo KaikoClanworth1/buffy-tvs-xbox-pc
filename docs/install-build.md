@@ -4,11 +4,11 @@ The owner's requirement: a release ships no translated game code. After the play
 image the launcher unpacks it, translates `Default.xbe` to C, compiles it, prepares the shaders, and
 then Play works.
 
-**Where it stands:** the launcher does all of that, and it was run hidden on this PC from the disc image
-to a game that reaches the first level (below). **One piece is missing for a real release:** the
-translate program as an exe (it is Python; freezing it needs PyInstaller, a download the owner has to
-allow), and LLVM's licence text has to be put in the kit. `package.sh` refuses to make a release without
-either. The prebuilt `GAME\` from `deploy.sh` is unchanged and stays the owner's test path.
+**Where it stands:** done and run from end to end on this PC, hidden: `package.sh` made a release zip
+with no translated code (101 MB), the launcher in it installed from the disc image into an empty
+folder with the release's own frozen translate program (7 min 38 s, 4 processors), and that game
+reached the first level. Not checked: any second PC, and the launcher's window during a build. The
+prebuilt `GAME\` from `deploy.sh` is unchanged and stays the owner's test path.
 
 ## How a release is laid out and what the launcher does
 
@@ -16,7 +16,7 @@ either. The prebuilt `GAME\` from `deploy.sh` is unchanged and stays the owner's
 Buffy Launcher.exe
 buffy_tvs.exe  (+ .pdb)       the port's own code, NO game code (3 MB); loads btvs_game.dll
 SDL3.dll, vcruntime140*.dll, msvcp140.dll, Read Me.txt
-build\                        the kit, used once at install (193 MB unpacked)
+build\                        the kit, used once at install (214 MB unpacked)
     kit.ini                   names this exact kit (exe hash + compiler version)
     btvs_translate.exe        Default.xbe + final.map -> C      (tools/gamedll/translate.py, frozen)
     llvm\bin\clang.exe, lld-link.exe;  llvm\lib\clang\23\include;  llvm\LICENSE.TXT
@@ -55,24 +55,66 @@ and its `Default.xbe` checked against the release's SHA-256):
 
 ### Checked on this PC (hidden, compilers on CPUs 12-15 at idle priority, 4 at a time, build lock held)
 
-- `"Buffy Launcher.exe" --install <the disc image> D:\_btvs_install_test`, stopped on purpose after 6
-  compiled files: exit 1, "Cancelled while building. Install again to carry on: what is built is kept."
-  Translate took 5 min 5 s of that run.
-- The same command again: translate skipped ("already done"), the 40 files left compiled in 2 min 16 s,
-  link, shaders (13 of 13, exit 0), "installed", exit 0, 140 s in all. Work folder gone;
-  `btvs_game.dll` 48 MB.
-- The installed game through its launcher's Play path, hidden and muted: main menu at 2.7 s,
-  `m00_spanishmission_1` loaded 9.4 s into the second process, exit code 0.
-- **Not checked**: the launcher's window during a build (only the console form ran); a PC without Visual
-  Studio or LLVM installed; a failing compile; all processors at once (4 were used here; a guess for an
-  8-core PC is 3 to 4 minutes of compiling plus the 5 of translating).
+**From the packaged release into an empty folder, with the frozen translate program** (no
+`BTVS_TRANSLATE_CMD`): `"Buffy Launcher.exe" --install <the disc image> <empty folder>`, exit 0,
+7 min 38 s:
+
+| Step | Time |
+|---|---|
+| Disc image read and copied (1.87 GB, this PC's SSD, the image in Windows' cache) | about 1 s |
+| Translate (`btvs_translate.exe`, one processor) | 4 min 56 s |
+| Compile, 46 files, 4 at a time | 2 min 40 s |
+| Link `btvs_game.dll` (48 MB) | under 1 s |
+| Shaders (13 of 13, exit 0) | 1 s |
+
+Then the installed game through its own launcher's Play path, hidden and muted: main menu at 2.2 s,
+`m00_spanishmission_1` loaded 5.7 s into the second process, exit code 0.
+
+**Resume** (earlier run, the Python translate program standing in): stopped on purpose after 6 compiled
+files: exit 1, "Cancelled while building. Install again to carry on: what is built is kept." The same
+command again: translate skipped ("already done"), the 40 files left compiled in 2 min 16 s, link,
+shaders, "installed", exit 0, 140 s in all; the work folder gone.
+
+**What a player sees when a step fails** (the launcher's status line, in red; all end the install with
+the disc's files and finished work kept):
+
+- translate: "Translating the game's code failed (code N). The details are in install_log.txt and
+  build_work\translate.log in the game folder."
+- compile: "Building the game failed at recomp_0012.c. The compiler's message is in install_log.txt in
+  the game folder. Install again to retry: what is built is kept."
+- link: "Putting the game together failed (code N). The details are in install_log.txt in the game
+  folder."
+- kit files missing: "The release is incomplete: ... is missing beside the launcher. Unpack the whole
+  release again."
+- too little space: "Not enough free space to build the game: about 0.9 GB is needed in the game folder
+  while it builds (the drive has N GB free). It is given back afterwards."
+- Cancel: "Cancelled while building. Install again to carry on: what is built is kept."
+- shaders failing is not shown: the game makes them at its start; the log has the step's output.
+- Play before the build is done: "The game has not been built for this PC yet (or the port was
+  updated). Choose Install again: the disc's files are kept and the build carries on where it stopped."
+
+Only the Cancel message was seen in a run (through `BTVS_BUILD_STOP_AFTER`); the others have not been
+provoked.
+
+**Not checked**: the launcher's window during a build (only the console form ran); a PC without Visual
+Studio, LLVM or Python installed; all processors at once (4 were used here; a guess for an 8-core PC is
+1.5 to 2 minutes of compiling plus the 5 of translating, which is one processor's work whatever the PC).
 
 ## The translate step
 
 `port/tools/gamedll/translate.py` runs `regen.sh`'s steps in one process with every in-between file
-under its work folder. Its output was compared with `port/src/recomp/gen` (made by `regen.sh`): **all 48
-files identical**, and identical again with another `PYTHONHASHSEED`. It is single-threaded: 5 min 14 s
-on one of CPUs 12-15.
+under its work folder. `port/tools/gamedll/freeze_translate.sh` freezes it with the recompiler's tools
+into `btvs_translate.exe` (24 MB; PyInstaller 6.22.3, wheel
+`pyinstaller-6.22.3-py3-none-win_amd64.whl`, SHA-256
+`500bd58c7bf7e584a8435adccbd763a0b918d5c12b08d74ff50fd79b2915458b`, in a venv in the ignored
+`port/build/gamedll/venv`; capstone 5.0.7 from this PC's Python).
+
+Output compared with `port/src/recomp/gen` (made by `regen.sh`), all 48 files, byte for byte:
+
+- the Python program: identical; again with another `PYTHONHASHSEED`: identical;
+- the frozen exe, run with no Python on its path: identical.
+
+It is single-threaded: about 5 minutes on one of CPUs 12-15.
 
 ## Toolchain delivery: in the zip
 
@@ -80,7 +122,7 @@ Recommended and built that way. `clang.exe` (110 MB) and `lld-link.exe` (75 MB) 
 Windows' own DLLs, and LLVM's licence (Apache-2.0 with the LLVM exception) allows shipping them with
 its text. Fetching instead would mean LLVM's whole Windows installer (several hundred MB, to be taken
 apart on the player's PC) since the two programs are not offered alone, plus a consent step and a
-failure mode with no network. In the zip the cost is the download: the whole release zip is 78 MB (219 MB unpacked), and
+failure mode with no network. In the zip the cost is the download: the whole release zip is 101 MB (242 MB unpacked), and
 nothing can go wrong at install for lack of a network.
 
 ## `package.sh`
@@ -158,12 +200,15 @@ with exit code 0, and all held the 60 frames a second limit (median frame 16.7 m
 
 ## Not done, not known
 
-- **`btvs_translate.exe`**: freezing `translate.py` (PyInstaller) and proving the frozen program's output
-  identical too. Waits for the owner's yes to the download.
-- **LLVM's licence text** in the kit: LLVM's Windows installer does not leave a copy on disk; it has to
-  be fetched once from llvm.org (`port/build/gamedll/LLVM-LICENSE.TXT`).
+- **A second PC.** Everything above ran on the developer's PC, which has Visual Studio, LLVM and Python.
+  The compile was given no Microsoft header (`-nostdlibinc`) and the frozen exe no Python, but nothing
+  has been tried on a PC that has none of them.
+- The launcher's window was not looked at during a build.
 - **Crash reports** name game functions from `buffy_tvs.pdb`; with the code in the DLL they are in
   `btvs_game.pdb` (asked of Logs in `docs/AREAS.md`).
 - **Thread-local index 0** holds for the process exe in practice; the DLL refuses to load otherwise, but
   only this PC was tried.
-- The launcher's window was not looked at during a build, and no second PC has run any of this.
+- LLVM's licence text (`port/build/gamedll/LLVM-LICENSE.TXT`, from the llvmorg-23.1.2 tag, SHA-256
+  `8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee`) and the frozen exe live in the
+  ignored build folder: a fresh checkout has to make them again before `package.sh` (it says so).
+- `Read Me.txt` does not yet tell the player about the build step and its few minutes.
