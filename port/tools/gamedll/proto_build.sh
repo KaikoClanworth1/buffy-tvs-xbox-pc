@@ -81,6 +81,41 @@ IFS='|' read -ra LA <<< "$LIBS"
 echo "4/6 the header: registers read from the exe's thread-local block, the exe's globals imported"
 python "$HERE/patch_header.py" "$OUT/run/buffy_tvs.map" "$OUT/gen" "$MEMOFF"
 
+printf 'LIBRARY ucrtbase.dll\nEXPORTS\n' > "$OUT/ucrt.def"
+for n in atan2 calloc ceil cos exp2 floor fmod ldexp log2 memcpy memset memmove nearbyint sin sqrt sqrtf tan trunc truncf; do echo "    $n" >> "$OUT/ucrt.def"; done
+printf 'LIBRARY KERNEL32.dll\nEXPORTS\n    GetModuleHandleW\n    ExitProcess\n' > "$OUT/k32.def"
+"$LLVM/llvm-dlltool.exe" -m i386:x86-64 -d "$OUT/ucrt.def" -l "$OUT/ucrt_min.lib"
+"$LLVM/llvm-dlltool.exe" -m i386:x86-64 -d "$OUT/k32.def" -l "$OUT/k32_min.lib"
+# the port layer calls recomp_dispatch_init: with the DLL's own memory offset that name is game_dll.c's wrapper
+if [ "$MEMOFF" = own ]; then sed 's/^    recomp_dispatch_init$/    recomp_dispatch_init=btvs_game_dispatch_init/' "$OUT/game.def" > "$OUT/game_link.def"
+else cp "$OUT/game.def" "$OUT/game_link.def"; fi
+
+# BTVS_GAMEDLL_KIT=<folder>: stop here and put there what a release needs to
+# build the DLL on the player's PC (launcher/btvs_build.inc): the exe without
+# game code, and the folder "build". No translated code goes into it.
+if [ -n "${BTVS_GAMEDLL_KIT:-}" ]; then
+    [ "$MEMOFF" = own ] || { echo "a kit is made with the DLL's own memory offset"; exit 1; }
+    KIT="$(mkdir -p "$BTVS_GAMEDLL_KIT" && cd "$BTVS_GAMEDLL_KIT" && pwd -W)"
+    B="$KIT/build"
+    rm -rf "$B"; mkdir -p "$B/include" "$B/llvm/bin" "$B/llvm/lib"
+    cp "$OUT/run/buffy_tvs.exe" "$OUT/run/buffy_tvs.pdb" "$KIT/"
+    cp "$OUT/gen/btvs_game_tls.h" "$OUT/game_link.def" "$OUT/buffy_tvs_exe.lib" "$OUT/ucrt_min.lib" "$OUT/k32_min.lib" "$B/"
+    cp "$HERE/game_dll.c" src/manual_functions.json "$B/"
+    cp "$HERE"/include/*.h "$B/include/"
+    cp "$LLVM/clang.exe" "$LLVM/lld-link.exe" "$B/llvm/bin/"
+    cp -r "$LLVM/../lib/clang" "$B/llvm/lib/"
+    rm -rf "$B"/llvm/lib/clang/*/lib "$B"/llvm/lib/clang/*/share "$B"/llvm/lib/clang/*/finclude      # the compiler's headers only
+    find "$B"/llvm/lib/clang/*/include -mindepth 1 -type d -prune -exec rm -rf {} +     # wrappers for other languages and processors
+    cp "$LLVM/../LICENSE.TXT" "$B/llvm/LICENSE.TXT" 2>/dev/null || cp "$LLVM/../share/doc/LLVM/LICENSE.TXT" "$B/llvm/LICENSE.TXT" 2>/dev/null \
+        || echo "WARNING: LLVM's LICENSE.TXT not found: it must go into build/llvm before a release"
+    [ -f "${BTVS_TRANSLATE_EXE:-}" ] && cp "$BTVS_TRANSLATE_EXE" "$B/btvs_translate.exe" \
+        || echo "note: no btvs_translate.exe in the kit (BTVS_TRANSLATE_EXE=<file>): the launcher needs BTVS_TRANSLATE_CMD"
+    ID="$(sha256sum "$KIT/buffy_tvs.exe" | cut -c1-16)-$("$LLVM/clang.exe" --version | sed -n '1s/.*version \([0-9.]*\).*/\1/p')"
+    printf '[Kit]\r\nId=%s\r\n' "$ID" > "$B/kit.ini"
+    echo "kit $ID in $KIT"; du -sh "$B" | cut -f1
+    exit 0
+fi
+
 echo "5/6 compile the translated code ($OPT, 4 at a time, memory offset: $MEMOFF)"
 t0=$(date +%s)
 ls "$OUT/gen"/*.c | bash tools/limit.sh xargs -P 4 -I{} sh -c \
@@ -90,14 +125,6 @@ OWN=""; [ "$MEMOFF" = own ] && OWN="-DBTVS_GAME_OWN_MEM_OFFSET"
 echo "    $(( $(date +%s) - t0 )) s"
 
 echo "6/6 link btvs_game.dll (lld-link, import libraries made here, no Microsoft library)"
-printf 'LIBRARY ucrtbase.dll\nEXPORTS\n' > "$OUT/ucrt.def"
-for n in atan2 calloc ceil cos exp2 floor fmod ldexp log2 memcpy memset memmove nearbyint sin sqrt sqrtf tan trunc truncf; do echo "    $n" >> "$OUT/ucrt.def"; done
-printf 'LIBRARY KERNEL32.dll\nEXPORTS\n    GetModuleHandleW\n    ExitProcess\n' > "$OUT/k32.def"
-"$LLVM/llvm-dlltool.exe" -m i386:x86-64 -d "$OUT/ucrt.def" -l "$OUT/ucrt_min.lib"
-"$LLVM/llvm-dlltool.exe" -m i386:x86-64 -d "$OUT/k32.def" -l "$OUT/k32_min.lib"
-# the port layer calls recomp_dispatch_init: with the DLL's own memory offset that name is game_dll.c's wrapper
-if [ "$MEMOFF" = own ]; then sed 's/^    recomp_dispatch_init$/    recomp_dispatch_init=btvs_game_dispatch_init/' "$OUT/game.def" > "$OUT/game_link.def"
-else cp "$OUT/game.def" "$OUT/game_link.def"; fi
 bash tools/limit.sh "$LLVM/lld-link.exe" -dll -nodefaultlib -entry:DllMain -nologo -out:"$OUT/run/btvs_game.dll" \
     -def:"$OUT/game_link.def" -implib:"$OUT/btvs_game_real.lib" -debug -pdb:"$OUT/run/btvs_game.pdb" \
     "$OUT"/obj/*.obj "$OUT/buffy_tvs_exe.lib" "$OUT/ucrt_min.lib" "$OUT/k32_min.lib"

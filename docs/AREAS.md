@@ -516,3 +516,9 @@ the disc-file sharing are as they were.*
   the game thread, that drops the loaded replacement textures (same file names, new contents) and makes
   textures already in the runtime's texture cache look their replacement up again. Controls would then
   redraw its 16 files (0.2 s) and call it when player 1 moves from pad to keyboard or back, or rebinds.
+- **Extras -> Logs** (21 Nov, for releases; nothing to do for the prebuilt `GAME\`): in a release the
+  game's code is not in `buffy_tvs.exe` but in `btvs_game.dll`, built on the player's PC with its own
+  `btvs_game.pdb` beside it (`docs/install-build.md`). Seen in such a build's log:
+  `[crash] guest function names: 170 from the .pdb` (the hooks only). Could crash reports also read
+  `btvs_game.pdb` (made by lld-link, same folder as the exe) when `btvs_game.dll` is loaded, and name
+  the module in a stack line? The DLL is linked `-debug`; say if another form (a `.map`) suits better.

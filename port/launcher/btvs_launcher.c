@@ -523,7 +523,7 @@ static int copy_out(Disc *d, DiscFile *df, const WCHAR *target, uint8_t *buf, ui
         off += n;
         left -= n;
         *done += n;
-        post_progress((int)(*done * 980 / (total ? total : 1)), NULL);
+        post_progress((int)(*done * copy_top() / (total ? total : 1)), NULL);
     }
     CloseHandle(out);
     return 1;
@@ -580,6 +580,16 @@ static void default_settings(const WCHAR *target)
 
 /* Space the copy needs: a file already there at the right size is rewritten
  * in place and needs none. */
+#include "btvs_build.inc"     /* the game's code built on this PC, when the release has a build kit */
+
+/* How far the bar gets with the disc copied: nearly the end, or as far as
+ * the build of the game's code begins. */
+static int copy_top(void)
+{
+    WCHAR id[128];
+    return kit_id(id, 128) ? B_P_COPY : 980;
+}
+
 static uint64_t space_needed(Disc *d, const WCHAR *target)
 {
     uint64_t need = 0;
@@ -636,7 +646,7 @@ static int install_run(const WCHAR *image, const WCHAR *target_in)
         return INSTALL_FAILED;
     }
     for (i = 0; i < d.count && ok; i++) {
-        post_progress((int)(done * 980 / (d.total ? d.total : 1)),
+        post_progress((int)(done * copy_top() / (d.total ? d.total : 1)),
                       L"Copying the game from your disc image: %.2f of %.2f GB",
                       done / 1073741824.0, d.total / 1073741824.0);
         ok = copy_out(&d, &d.files[i], target, buf, &done, d.total);
@@ -645,10 +655,12 @@ static int install_run(const WCHAR *image, const WCHAR *target_in)
     disc_close(&d);
     if (!ok)
         return INSTALL_FAILED;
-    post_progress(985, L"Setting up the PC version...");
+    post_progress(copy_top(), L"Setting up the PC version...");
     copy_program(target);
     /* SAVE_DIR is the game's to make; an existing one holds the player's saves */
     default_settings(target);
+    if (has_program(target) && !build_game(target))
+        return INSTALL_FAILED;          /* s_install_msg says where it stopped; installing again carries on */
     post_progress(1000, L"Installed.");
     if (!has_program(target)) {
         wcscpy_s(s_install_msg, 1024, L"The game's files are installed, but there is no " GAME_EXE L" beside the "
@@ -1111,6 +1123,9 @@ static void refresh_play(void)
     if (!has_program(s_game_dir))
         set_status(1, L"The game's files are here, but " GAME_EXE L" is not. Copy it into the game folder, "
                       L"or unpack the whole release and choose Install again.");
+    else if (game_code_missing(s_game_dir))
+        set_status(1, L"The game has not been built for this PC yet (or the port was updated). Choose Install again: "
+                      L"the disc's files are kept and the build carries on where it stopped.");
     else if (game_running())
         set_status(0, L"The game is running.");
     else if (!s_status[0] || s_status_err)
@@ -1206,6 +1221,11 @@ static void play(void)
     HANDLE dup;
     if (game_running())
         return;
+    if (game_code_missing(s_game_dir)) {
+        refresh_play();
+        layout();
+        return;
+    }
     if (!start_game(s_game_dir, &pi)) {
         set_status(1, L"Windows could not start the game (error %lu).", GetLastError());
         return;
@@ -1556,6 +1576,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
                 load_launcher_ini();
             if (!is_game_folder(s_game_dir) || !has_program(s_game_dir)) {
                 fwprintf(stderr, L"no installed game%s%s\r\n", s_game_dir[0] ? L" in " : L"", s_game_dir);
+                return 1;
+            }
+            if (game_code_missing(s_game_dir)) {
+                fwprintf(stderr, L"the game in %s has not been built for this PC yet: install again\r\n", s_game_dir);
                 return 1;
             }
             if (!start_game(s_game_dir, &pi)) {
