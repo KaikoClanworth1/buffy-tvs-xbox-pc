@@ -178,6 +178,25 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
+## What was checked on 21 Nov 2026, 13:25 build (main at 628385a)
+
+`GAME/buffy_tvs.exe`: **commit `628385aa02`, built Nov 21 2026 13:25:19**. No regen needed; no game was
+running at deploy time; the owner's `btvs_settings.ini` and saves have the same checksums before and
+after (the checks' saves, logs and settings went to a scratch folder, as for the 13:00 build). Hidden,
+muted, CPUs 8-15, self-exit after 150 s, scripted Start button, started by the supervisor:
+
+- **Through the launcher's Play path:** main menu 2.1 s, `m00_spanishmission_1` loaded at 8.8 s of the
+  second process, exit code 0.
+- **Started with no console:** main menu 1.8 s, level loaded at 9.0 s, exit code 0.
+- **One session window across the restart** (the supervisor's lines, the same in both runs):
+  `session window 0000000000820538 made by the supervisor, process 17320 (hidden: test run)`;
+  `the game window 00000000002900AE is up, owned by the session window 0000000000820538`;
+  `the game restarts itself (run 2)`;
+  `the game window 0000000003D90678 is up, owned by the session window 0000000000820538`;
+  `session window 0000000000820538 closed after 2 run(s) of the game`.
+  So: one session window for the whole session, and each run of the game still has a game window of
+  its own, owned by it. What that looks like on a screen was not checked (the runs are hidden).
+
 ## What was checked on 21 Nov 2026, 13:00 build (main at 2134d5e)
 
 `GAME/buffy_tvs.exe`: **commit `2134d5e31c`, built Nov 21 2026 13:00:34**. No regen needed (same 90
