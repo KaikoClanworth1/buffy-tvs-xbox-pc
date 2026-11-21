@@ -435,3 +435,11 @@ that level, in a fresh process, whatever came before it in the session.
 - Not checked: a report from the pause menu after a restart; the hotkey during a restart (the gate is there,
   a test run has no keyboard); a replay whose player goes on into another level; more than one restart with
   reports in each run; quitting to the menu and starting again.
+
+### Level loads inside the process: 23 to 27 s (21 Nov 23:15) -- not Logs'
+
+Measured with the frame recording on (23.6 and 26.0 s), with `BTVS_EXACT=0` (24.3 and 25.0 s) and with
+`BTVS_LOGS_REBOOT=0` as well (22.4 s; a test switch: `btvs_logs_reboot` does nothing). The game thread gets
+Logs' clock only after `level_loaded`. The loader spends the time asleep waiting for the game's disk thread
+(`TDiskManager::Transfer_GetBlock`); details and the table are in `docs/AREAS.md`, "From Logs, 21 Nov 23:15".
+`BTVS_BOOT_HANG_SECS=<n>` gives a stack of the game thread n seconds into a load after a restart too.

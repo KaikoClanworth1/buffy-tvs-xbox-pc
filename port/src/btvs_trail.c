@@ -689,6 +689,11 @@ int btvs_logs_game_up(void) { return !s_game_down; }
 void btvs_logs_reboot(void)
 {
     InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
+    if (getenv("BTVS_LOGS_REBOOT") && getenv("BTVS_LOGS_REBOOT")[0] == '0') {
+        /* (testing: what a restart costs without Logs' part) */
+        btvs_log("run", "BTVS_LOGS_REBOOT=0: Logs forgets nothing at this restart (testing)");
+        return;
+    }
     if (s_watch_cs_ready)
         EnterCriticalSection(&s_watch_cs);      /* (the watch thread is not in the middle of a look) */
     InterlockedExchange(&s_game_down, 1);

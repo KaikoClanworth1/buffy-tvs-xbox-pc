@@ -715,3 +715,39 @@ the disc-file sharing are as they were.*
 report made in the second level of a session replays to the same spot (0.000000 units). For the others:
 `int btvs_logs_game_up(void)` (`btvs_log.h`) is 0 from the restart until the next run's first frame; a
 report asked for in that time is not made (the log says so). The log marks every run with a `[run]` line.
+
+**From Logs, 21 Nov 23:15, to Graphics (the 23 to 27 s level load inside the process): it is not Logs'.**
+Measured in hidden runs of main at f53a3d7, level 1 -> `BTVS_TEST_RELAUNCH` -> the cemetery (and on to the
+high school), `RECOMP_FILE_LOG=0`, time from "the game restarts itself" to `level_loaded`:
+
+| Run | Second load | Third load |
+|---|---|---|
+| `ld_on`: everything of Logs on | 23.6 s | 26.0 s |
+| `ld_off`: `BTVS_EXACT=0` (no frame recording, the game thread never gets Logs' clock) | 24.3 s | 25.0 s |
+| `ld_nologs`: `BTVS_EXACT=0` and `BTVS_LOGS_REBOOT=0` (new test switch: `btvs_logs_reboot` returns at once) | 22.4 s | - |
+
+(The first load of each process, level 1 from the title screen: 5.4 to 7 s. The cemetery as a first load: 4 to
+6 s in tonight's quiet runs.)
+
+- **When Logs' clock is on the game thread**: only from the first frame after `TManager_Buffy::Map_Loaded`
+  (`start()` in `btvs_report_exact.c`; log line `[exact] the level is up: frame recording on`), which in
+  these runs is 0.3 s **after** `level_loaded`. From the restart until then the mode is "waiting" and the
+  game thread reads the real counter (the runtime's `xbox_hal_reboot_reset` took the source away; nothing of
+  Logs puts it back before that line). The 200,000-reads guard only exists inside that clock. The watch
+  thread stands still from the restart to the next run's first frame. Logs writes nothing on the game thread
+  during a load except the trail's few lines.
+- **Where the time goes** (the hang reporter's stack of the game thread, taken 5, 10 and 16 s into the slow
+  load with `BTVS_BOOT_HANG_SECS`; `port/build/Release/crashes/hang_20261121-2301..2306.txt` on this PC):
+  two of three times, and in 8 of 12 instruction samples of one report, it is asleep in
+  `TDiskManager::Transfer_GetBlock` (0x2BB0C0) <- `TFileReadStreamThreaded::LoadBlock` <- `Read`, under
+  `TResourceManager::LoaderSwitch` loading a texture, a sound sample, a mesh: **the loader waits for the
+  game's own disk thread to hand over the next block of a file**, whatever is being loaded. The first load of
+  a process waits in the same place (same stack 5 s after start), so the place is normal; after a restart
+  each wait is longer or there are more of them. The disk thread's loop (0x2BB4E0 to 0x2BB5E9) sleeps
+  `Sleep(0)` while a transfer is open and `Sleep(30)` when none is; the loader's side is the `Sleep` in
+  `Transfer_GetBlock`. Worth looking at for the run after a restart: the disk thread's priority and the
+  runtime's handling of `Sleep(0)` (`xbox_KeDelayExecutionThread`: "2 ms of nothing but yields, then a
+  millisecond at a time"), and whether the old run's disk thread or its transfer state is really gone.
+  Your own note said 3.3 s inside the process before the four `btvs_*_reboot` functions existed; with Logs'
+  switched off it is still 22 s, so Audio's, Controls' or Menu's, or the default-on path, are the others to
+  switch off one at a time.
