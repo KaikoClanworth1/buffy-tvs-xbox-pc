@@ -714,6 +714,27 @@ static DWORD WINAPI mixer_thread(LPVOID arg)
                     IXAudio2_GetPerformanceData(s_xa, &pd);
                     s_glitches = pd.GlitchesSinceEngineStarted;
                     perf_at = t;
+                    /* Anything a player could hear as a crackle goes to the
+                     * log, at most once in 30 s, and only when it happened. */
+                    {
+                        static uint64_t r_under, r_glitch, r_clip, r_stall;
+                        static double r_at;
+                        if (t - r_at >= 30.0 && (s_underruns != r_under || s_glitches != r_glitch ||
+                                                 s_clipped != r_clip || s_stalled != r_stall)) {
+                            alog("device: +%llu times the queue ran empty, +%llu XAudio2 glitches, "
+                                 "+%llu ms dropped (device not taking data), +%llu clipped samples "
+                                 "(totals %llu / %llu / %llu ms / %llu)",
+                                 (unsigned long long)(s_underruns - r_under),
+                                 (unsigned long long)(s_glitches - r_glitch),
+                                 (unsigned long long)((s_stalled - r_stall) * 1000 / BTVS_AUDIO_RATE),
+                                 (unsigned long long)(s_clipped - r_clip),
+                                 (unsigned long long)s_underruns, (unsigned long long)s_glitches,
+                                 (unsigned long long)(s_stalled * 1000 / BTVS_AUDIO_RATE),
+                                 (unsigned long long)s_clipped);
+                            r_under = s_underruns; r_glitch = s_glitches;
+                            r_clip = s_clipped; r_stall = s_stalled; r_at = t;
+                        }
+                    }
                 }
             }
             while (!failed && queued < DEV_QUEUE) {

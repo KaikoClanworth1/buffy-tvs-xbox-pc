@@ -17,6 +17,7 @@ image, no legacy DirectSound.
 | | State | How it was checked |
 |---|---|---|
 | Mixer: Xbox ADPCM buffers, looping, cursors, pitch, volume, 3D pan | **works** | `btvs_audio_test rpe / pak / scene` on real dialogue and effects (Results) |
+| Sound quality of voices | **fixed 21 Nov** after the owner heard them as scratchy: a wrong sample in every ADPCM block and a crude resampler (Scratchy voices, below). The owner has not heard the fix yet | dialogue lines decoded independently match the game's output to 32-43 dB (`port/tools/audio_cmp.py`) |
 | Streams with packet completion | **works** in the test program | `btvs_audio_test scene`: 62 of 62 packets completed, byte count exact |
 | XAudio2 device path | **works** | `btvs_audio_test device`: 15 of 15 runs keep time within 10 ms, no underruns, no XAudio2 glitches |
 | `BTVS_MUTE` (no device, same timing), `BTVS_AUDIO_DUMP` | **works** | `btvs_audio_test live`: 6 of 6 runs within 15 ms of the wall clock on a loaded PC, no device opened |
@@ -444,6 +445,64 @@ ahead in 2 ms. The timer thread still spins on this build (178 million kernel ca
 
 Use plain runs from now on; `BTVS_GAME_CPUS=400` / `800` in the commands above is only needed to
 reproduce the old one-CPU behaviour.
+
+## Scratchy voices (2026-11-21, the owner's first listen)
+
+The owner heard the sound as "glitchy almost scratchy, mainly voices" on the 11:00 build. Two
+faults in the mixer, both in every ADPCM sound and most audible on speech; both fixed.
+
+1. **The ADPCM decoder played a padding sample in every block.** A 36-byte block is its header
+   sample followed by 63 decoded ones; the 64th nibble is padding. The decoder skipped the header
+   sample and played the padding nibble instead: one wrong sample out of 64, 344 times a second.
+   Checked on the game's files: the 64th nibble is 0 in all 190,403 blocks of `res_null.pak` and
+   `res_m00_spanishmission_1.pak` and in the dialogue, and the step index in a block's header is
+   always the one reached after nibble 63, never after nibble 64.
+2. **Voices were resampled with straight lines** between source samples. For a 22050 Hz voice that
+   leaves copies of the sound above its own range only about 20 dB down, and dulls its top. The
+   mixer now interpolates band-limited (16 source samples per output sample, Kaiser-windowed sinc,
+   256 positions).
+
+Measured by decoding the same lines with an independent decoder (`port/tools/audio_cmp.py`: header
+sample + 63, exact FFT resampling to 48 kHz) and laying them over the mixer's output. "Match" is the
+line over the difference; "comb" is the part of the difference that sits on multiples of 344.5 Hz
+(one fault per block).
+
+| Offline, three lines of `G00_Dialogue.rpe` | Before | After |
+|---|---|---|
+| Match | 10.4 / 23.1 / 19.9 dB | 39.8 / 39.7 / 35.7 dB |
+| Comb (of the line's energy) | -26.6 / -44.6 / -38.0 dB | -58.3 / -65.6 / -57.1 dB |
+| Energy above 11 kHz (the source has none) | -30.4 / -36.4 / -27.8 dB | -41.3 / -48.2 / -38.9 dB |
+| Largest single-sample difference (full scale = 1) | 1.30 / 0.95 / 0.54 | 0.10 / 0.06 / 0.11 |
+
+The right decoder with the old straight-line resampler would give a match of 22-26 dB (computed),
+so both changes count.
+
+| In the game, the seven lines of the first level's opening cutscene | Before (`lvl2`, music and ambience playing too) | After (`aud_r5`, music and effects at 0) |
+|---|---|---|
+| Comb | -13.8 to -31.4 dB | -49.9 to -62.6 dB |
+| Match | 2.6 to 14.8 dB (includes the other sound) | 31.6 to 42.6 dB |
+| Largest difference | - | 0.011 to 0.139 of a 0.74 peak |
+| Clipped samples, dropouts | 0, 0 | 0, 0 |
+
+```bash
+bash port/tools/run.sh aud_r5 120 BTVS_SKIP_MOVIES=1 BTVS_MAP=m00_spanishmission_1 BTVS_AUDIO_LOG=1 \
+  BTVS_AUDIO_MUSIC=0 BTVS_AUDIO_EFFECTS=0 BTVS_AUDIO_DUMP=runs/audio/r5_lvl.wav
+python port/tools/audio_cmp.py port/runs/audio/r5_lvl.wav port/runs/aud_r5.err <main checkout>/game_files/install.dat
+```
+
+The cutscene lines are in `install.dat` (RIFF/WAVE with `wrds` / `phon` chunks), not in
+`dialogue/*.rpe`. The offline tests (`rpe` 22 of 22, `pak` 137 of 137, `scene`, `late`) pass on the
+new mixer. Band-limited interpolation overshoots a little on sources recorded at full scale (peak
+1.06 for a dialogue line at full volume); in the game speech plays at 0.70 and nothing clipped.
+
+**Ruled out**: clipping (0 samples in every level dump), wrong format or rate (lengths and the
+overlay match), gaps or loop faults in speech (seven lines whole, no dropouts in the dump).
+
+**Not known**: whether this is all the owner heard. The dump is what goes to the device, so
+anything after it (the device queue running empty, XAudio2 glitches) does not show in a muted run.
+From this build on the log gets a `[audio] device:` line, at most every 30 s and only when
+something happened, counting empty queues, XAudio2 glitches, dropped periods and clipped samples.
+If the owner still hears crackle, that line in `btvs_log.txt` says whether it is the device side.
 
 ## Still to do
 
