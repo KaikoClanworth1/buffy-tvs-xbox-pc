@@ -187,28 +187,60 @@ port 2                     # following lines are player 2
 - **keys**: `K:<key name>` (`K:Space`, `K:W`, `K:MouseLeft`; the names of the bindings) holds a
   keyboard key or mouse button. It goes through the bindings table like a real key press, for the
   keyboard's player, and needs no focus: this is how the keyboard path is tested in hidden runs.
-- **for**: how long it is held (same unit as *when*; frame lines default to 9 frames).
+- **mouse**: `M:<dx>,<dy>` moves the mouse by that many counts at every pad read while the line
+  lasts (right and down positive; `M:25,0` is the right stick fully right at the default
+  sensitivity). It is the camera under the same rules as a real mouse: only in play, not while
+  paused, and through `mouse_look`, `sensitivity` and the invert options.
+- **for**: how long it is held (same unit as *when*; frame lines default to 9 frames). A press
+  whose whole time fell into a stall of the game (it stops reading the pad during a long hitch) is
+  not lost: it starts at the first read after the stall and lasts as long as written.
 - **every**: repeat with this period until the next part starts.
 - **after `<name>`** starts a new part that begins when some code calls
   `btvs_input_script_mark("<name>")`; the earlier part stops then. Loading time therefore does not
   matter. Parts run in the order written (a mark only starts the next part), so the same name can
   be waited for again: `after menu1` … `after menu12` … `after menu1`. Marks the input layer places itself (see "Where the game is"): `title`, `menu` (main
-  menu), `pause`, `menu<id>` for any menu, `level`.
+  menu), `menu<id>` for any menu, `level` (the player exists: the level has loaded), `pause` and
+  `resume` (the pause screen or the inventory opens / closes). A mark reached while a recording
+  is playing is kept; the part it starts begins its clock when the recording ends.
 - `BTVS_INPUT_LOG=1` logs every change of the pad the game was given (`[INPUT] t … p1 pad btn …`).
 - `btvs_input_script_done()` is 1 when everything has played.
 
 Without the game: `port/build/Release/btvs_input_test.exe script <file|text> [seconds]`.
 
+**A script is for one run of the game.** The game loads a level by starting itself again
+(`docs/graphics.md`), so a test run that goes from the menus into a level is two runs:
+`BTVS_PAD_SCRIPT` plays in the first, `BTVS_PAD_SCRIPT_1` in the level after the first restart,
+`BTVS_PAD_SCRIPT_2` in the next, and so on (`btvs_boot_restart.c`). `BTVS_INPUT_RECORD_<n>` and
+`BTVS_INPUT_PLAYBACK_<n>` work the same way. From boot into the first level and around it:
+
+```bash
+D="$(pwd -W)/port/src/btvs_input_scripts"
+rm -rf port/build/Release/XboxData/HardDisk/UDATA     # the test build's own saves (ten and the game refuses a new one)
+bash port/tools/run.sh level 150 BTVS_SKIP_MOVIES=2 "BTVS_SETTINGS_INI=<a scratch file>" \
+     "BTVS_PAD_SCRIPT=$D/boot_to_level.txt" "BTVS_PAD_SCRIPT_1=$D/level_controls.txt" \
+     BTVS_INPUT_LOG=1 BTVS_INPUT_VERIFY=1 BTVS_INPUT_POS_LOG=6
+```
+
+In the level's run nothing reads the pad until the level has loaded (20 to 45 s in a test run), so
+times in a level script count from `after level`. The first level opens with a cutscene; Start
+skips it (`8.0 START` after the mark is late enough).
+
 ### Where the game is
 
-Ten times a second, from player 1's pad read, `btvs_input_xapi.c` looks at two of the game's
-globals: the current menu id (`0x7F0408`; 1 main, 9 pause, 10 title, 15 resurrect) and the player
-object (`[[0x7D0090] + 0xF0]`, non-zero while a level runs). Changes are logged
-(`[INPUT] game: menu id 1`), named for scripts (`title`, `menu`, `pause`, `menu<id>`, `level`), and
-mouse look is allowed only while a level runs and neither the pause nor the resurrect menu is up.
-The menu id is confirmed in the running game (title 10, main 1, new game 12, load 5, credits 11
-were all seen as the script walked through them). The player object has not been seen yet (no
-level loads). `BTVS_INPUT_NO_PROBE=1` turns the probe off.
+Ten times a second, from player 1's pad read, `btvs_input_xapi.c` looks at three of the game's
+globals: the menu id (`0x7F0408`; 1 main, 9 pause, 10 title, 12 start game, 13 difficulty), the
+player object (`[[0x7D0090] + 0xF0]`, non-zero while a level runs) and the pause screen's "open"
+byte (`[[0x7F08F0] + 0x274]`, `IPauseScreen::SetOpen`). Changes are logged
+(`[INPUT] game: menu id 1`, `game: level running`, `game: pause screen open`), named for scripts
+(`title`, `menu`, `menu<id>`, `level`, `pause`, `resume`), and mouse look is allowed only while a
+level runs and the pause screen is closed. All three are confirmed in the running game. The menu
+id is the last menu *asked for*, not the one on screen: it is still 10 (title) when a level
+starts and stays 9 after the pause menu has closed, which is why "paused" is read from the pause
+screen instead. `BTVS_INPUT_NO_PROBE=1` turns the probe off.
+
+`BTVS_INPUT_POS_LOG=<n>` logs the player's position and health every n reads of player 1's pad
+(`[INPUT] pos r1830 x 4268.44 y -240.00 z 329.23 health 1000`; y is up). The read count makes two
+runs comparable line for line.
 
 ### Checking a run: `BTVS_INPUT_VERIFY=1`
 
@@ -229,6 +261,9 @@ Ready-made scripts in `port/src/btvs_input_scripts/`:
 | `all_inputs.txt` | every button, trigger and stick direction once, part values, values under the game's thresholds |
 | `all_keys.txt` | every default key and mouse button once (`K:` lines) |
 | `menu_path.txt` | title → main menu → New Game → back → Load → back → Credits → back, waiting on the menu marks |
+| `boot_to_level.txt` | title → New Game → name → difficulty: the game then restarts into the first level |
+| `level_controls.txt` | in the level (`BTVS_PAD_SCRIPT_1`): skip the cutscene, each stick direction, camera, face buttons, part-way triggers, mouse, a keyboard key, inventory, pause |
+| `level_walk.txt` | in the level: a short walk with camera turns, for recording and playing back |
 
 ```bash
 bash port/tools/run.sh inputs 50 BTVS_INPUT_LOG=1 BTVS_INPUT_VERIFY=1 BTVS_SKIP_MOVIES=2 \
@@ -249,8 +284,9 @@ btvs_input_playback(path);       // the game gets the recording instead of the p
 btvs_input_playback_active();  btvs_input_playback_stop();
 ```
 
-Also `BTVS_INPUT_RECORD=<path>` / `BTVS_INPUT_PLAYBACK=<path>` (from the first read), and
-`btvs_input_test dump <path>` prints a recording as text.
+Also `BTVS_INPUT_RECORD=<path>` / `BTVS_INPUT_PLAYBACK=<path>` (from the first read of the game's
+first run; `BTVS_INPUT_RECORD_<n>` / `BTVS_INPUT_PLAYBACK_<n>` for the run after the n-th restart,
+so `_1` is the first level), and `btvs_input_test dump <path>` prints a recording as text.
 
 Format (little-endian): `"BTVSINP1"`, `u32` version 1, `u32` reserved, then records.
 
@@ -258,6 +294,7 @@ Format (little-endian): `"BTVSINP1"`, `u32` version 1, `u32` reserved, then reco
 |---|---|
 | state | tag `port \| connected<<2`; varint *reads* of this port since its previous record; varint *frames* since the previous record of any port; varint *ms* likewise; `u16` mask (bit 0 buttons, 1–8 analog A B X Y Black White LT RT, 9–12 LX LY RX RY); then only the masked fields |
 | end | tag `0xFF`; 4 varints (reads of each port since its last record); varint frames; varint ms |
+| first read | tag `0xFE`; varint ms since the recording began: when the game read a pad for the first time in this run. Written once, and only when the recording began by then (a run recorded from its start) |
 
 A record is written only when a port's pad changes, so a resting pad costs nothing and a minute of
 play is a few kilobytes. The file is flushed within a second of each record; one without an end
