@@ -46,6 +46,16 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 (Add a line here when you need something from another area.)
 
+- **Extras → Graphics (21 Nov, owner: "we also need the launcher to compile the game for the player and
+  all the shaders etc."): a headless "build all shaders" entry point the launcher can run at install
+  time.** Wanted: `buffy_tvs.exe --build-shaders` (or a small exe of its own) run in the game folder that
+  fills `ShaderCache/` with everything the game will need and then ends. No window, no sound, no game
+  start; one progress line per step on stdout (`shaders 12/340`), exit code 0 or a code with one line
+  saying what failed; safe to stop and run again (skips what is already there); honours `BTVS_AFFINITY`.
+  Please also say: where the list of shaders comes from (a list shipped with the port, or found in the
+  player's game data), whether a compiled cache made on one PC is valid on another GPU/driver, roughly how
+  long it takes, and whether anything in `ShaderCache/` is derived from the game (if so a release must
+  not ship it; if not, shipping it as Chaos Bleeds does is simpler than building it).
 - **Extras → Graphics (21 Nov, from the owner's first play: "i dont like the app 'restartes' when starting
   the game"): one window from Play to gameplay.** What the owner sees is the game's restart into a level
   (`btvs_boot_restart.c`): the menus and the level are two processes, and each makes and loses its own
