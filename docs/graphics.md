@@ -14,7 +14,7 @@ checkout's `port/runs/shots/` (21 Nov, 01:00).
 | Game's Direct3D 8 drawn natively (no NV2A emulation) | movies, title screen, menus (with the 3D Buffy model), the first level (`m00_spanishmission_1`): world with light maps, characters, cutscene captions, HUD, tips. Seen at 640x480, 1920x1080 and 2880x2160 |
 | Frame rate | 60 a second in the menus and in the first level once it has loaded, at 640x480 and at 2880x2160; about 20-30 while a level loads (the game streams from its loader thread), and a dip to 30-50 for some seconds at one point of the opening cutscene (not looked into) |
 | Resolutions to 4K, internal rendering at that size | work: `[display] width/height`; 1920x1080 and 3840x2160 (a 2880x2160 picture at 4:3) dumped and looked at |
-| Widescreen | the picture's shape only: 4:3 with bars, or stretched to 16:9. A wider *view* needs the game's projection changed: not done |
+| Widescreen | a really wider view in the levels, 4:3 in the middle for HUD, menus and movies (see "Widescreen"); seen at 1920x1080 and 3840x2160 |
 | Window: windowed / borderless / fullscreen, Alt+Enter, F11 | from the runtime, settings wired; **never run with a visible window** (test runs must stay hidden) |
 | VSync, frame limit | limiter works (steady 60.0 with 16.67 ms frames); VSync **not checked** (needs a visible window) |
 | Frame dumps (`BTVS_SHOT_AT`, `BTVS_SHOT_EVERY`) | work (PNG; a 4K dump is 18 MB and costs a visible hitch) |
@@ -33,6 +33,78 @@ Known faults and things not done:
 - Only the first level's opening minutes have been seen. Nothing beyond, no fights, no other level.
 - Loading is slow (about 25 s for the first level from the menu in a test run).
 - 2D text and HUD are drawn with nearest-pixel sampling: blocky at 4K.
+
+## Widescreen
+
+`[display] widescreen`: 0 the 4:3 picture with bars, 1 a wide view, 2 the 4:3 picture stretched.
+
+With 1 and a frame wider than 4:3:
+
+- **In a level the view is really wider.** The game's `View_SetFOV` gets a wider horizontal angle (60 -> 75.2
+  degrees at 16:9: the tangent grows by 16:9 over 4:3). The game works out its vertical angle for a 4:3
+  screen, so it grows too; the vertex shaders scale y back by the same factor. Result: the same picture
+  height as on the console, more at the sides, nothing stretched.
+- **HUD, tips, captions, movies** are drawn for a 640x480 screen and stay 4:3 in the middle.
+- **2D that covers the whole width of the game's screen** (cutscene bars, fades, flashes, the dim behind the
+  pause menu) covers the whole frame (`wide_full_width`).
+- **In the menus** (no level loaded) everything stays 4:3 with black sides.
+
+Checked by frame dumps at 1920x1080 (menu, cutscene, gameplay) and 3840x2160 (menu). Not handled: the
+game's own culling still thinks 4:3 x a wider angle, which is a superset, so nothing should pop at the
+sides, but that has only been looked at in the first level's opening.
+
+## Slow frames
+
+`BTVS_HITCH_LOG=<ms>` logs every frame longer than that and what the game thread was doing at that moment
+(a watcher takes its call stack).
+
+A 150 s run into the first level (21 Nov, hidden, below-normal priority, CPUs 8-15, **while every CPU of the
+PC was at 100 %** from other sessions' builds and test games) had 187 frames over 30 ms in the 103 s after
+loading, 7.8 s in all, the worst 189 ms. By cause:
+
+| Share | Cause | What was done |
+|---|---|---|
+| most | the game thread was not running: stopped inside the frame limiter's sleep, or in the middle of ordinary game code, for 30-190 ms | a test run is below-normal priority on CPUs other programs are using; a player's run is not. The limiter itself no longer bursts after a slow frame (it used to run frames with no pause until it had caught up 100 ms) |
+| 8 frames, 50-75 ms | a texture's first use: decoded from the game's format when first drawn | not fixed (could be decoded when the game loads it) |
+| 8 frames | the log itself (`fprintf` to the test run's stderr) | test runs only |
+| 46 s -> 9 s of loading | all the game's threads on one CPU: the loader and the game took turns | the game's threads use all CPUs again (its lock is atomic now) |
+| over 1 s, at every pause | Logs' `btvs_report_prepare()` on the game thread (waits for a screenshot) | Logs' |
+
+What this does not show: how the game runs on an idle PC at normal priority. That needs a run the owner
+makes (see the checklist).
+
+## Frame limit and VSync
+
+`[display] fps_limit` (0: none) and `vsync`. The game steps its world by measured time
+(`TGame::ExecFrame(float dt)`), so the limit does not change its speed: the opening cutscene took the same
+46.0 s at limits 120, 144 and none, and four seconds of scripted running ended at the same place.
+
+## By hand: what only a visible run can show
+
+Test runs are hidden and muted, so none of this has been seen. Each line is one thing to try and what
+should happen.
+
+1. Start the game (borderless is the default). The picture fills the screen; the taskbar is covered; Alt+Tab
+   away and back works, with no mode switch.
+2. **Alt+Enter** and **F11**: borderless/fullscreen <-> windowed, each way, several times. The window comes
+   back at its old place and size; the picture is not stretched or cropped; the mouse cursor is visible over
+   the window in a menu.
+3. Windowed: drag the window, resize it by an edge, maximise it. The picture follows the window
+   (4:3 with bars, or wide, by the widescreen setting).
+4. Options -> Graphics -> fullscreen (mode 2) at the monitor's own resolution and at a lower one. The monitor
+   switches mode; Alt+Tab gives the desktop back in its own mode and the game minimises; coming back
+   restores the mode.
+5. Two monitors: move the window to the other one, then Alt+Enter. Fullscreen goes to the monitor the
+   window is on.
+6. Close the window with its X and with Alt+F4: the game ends at once and `btvs_settings.ini` keeps the
+   settings.
+7. VSync on and the limit at 0: no tearing; the frame rate is the monitor's. VSync off: tearing may show.
+8. Limits 120, 144 and 0 on a monitor that fast: `[display] show_fps` (or `BTVS_FPS_LOG=1` in a console)
+   should say so in a level, and the game should not run faster (walk across a room with a stopwatch).
+9. Widescreen 1 on a 16:9 monitor: menus 4:3 with black sides, levels wide, cutscene bars across the whole
+   screen, HUD in the middle part.
+10. A level at normal priority on an idle PC with `BTVS_HITCH_LOG=30`: how many `[HITCH]` lines in two
+    minutes, and what they name.
 
 ## How it draws
 
