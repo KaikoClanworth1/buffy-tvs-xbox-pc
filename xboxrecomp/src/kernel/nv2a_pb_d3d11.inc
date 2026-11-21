@@ -200,8 +200,20 @@ static void (*s_char_cb)(unsigned ch);
 void nv2a_gpu_set_close_callback(void (*cb)(void)) { s_close_cb = cb; }
 void nv2a_gpu_set_char_callback(void (*cb)(unsigned ch)) { s_char_cb = cb; }
 
+/* A window (of another process: a launcher's or supervisor's that outlives
+ * this one) to own window 1: window 1 stays in front of it, has no taskbar
+ * entry of its own, and is hidden and shown with it. Minimising window 1
+ * minimises the owner instead, which hides window 1 with it. Before the
+ * window is made. */
+static HWND s_gpu_owner;
+void nv2a_gpu_set_owner_window(void *hwnd) { s_gpu_owner = (HWND)hwnd; }
+
 static LRESULT CALLBACK gpu_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
+    if (m == WM_SYSCOMMAND && (w & 0xFFF0) == SC_MINIMIZE && h == s_gpu_hwnd && s_gpu_owner && IsWindow(s_gpu_owner)) {
+        ShowWindowAsync(s_gpu_owner, SW_MINIMIZE);
+        return 0;
+    }
     if (m == WM_CLOSE) {
         fprintf(stderr, "[GPU11] window closed: exiting\n");
         fflush(stderr);
@@ -261,7 +273,10 @@ static LRESULT CALLBACK gpu_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
          * in front (the window minimised), the game's again on return. */
         if (!w) {
             ChangeDisplaySettingsExW(s_fs_device, NULL, NULL, 0, NULL);
-            ShowWindow(h, SW_MINIMIZE);
+            if (s_gpu_owner && IsWindow(s_gpu_owner))
+                ShowWindowAsync(s_gpu_owner, SW_MINIMIZE);
+            else
+                ShowWindow(h, SW_MINIMIZE);
         } else {
             InterlockedExchange(&s_fs_reapply, 1);
             InterlockedExchange(&s_opt_dirty, 1);
@@ -475,7 +490,10 @@ static DWORD WINAPI gpu_window_thread(LPVOID ready)
     s_gpu_hwnd = CreateWindowA(wc.lpszClassName, g_nv2a_window_title,
                                WS_OVERLAPPEDWINDOW | (getenv("BUFFY_NO_WINDOW") ? 0 : WS_VISIBLE),
                                CW_USEDEFAULT, CW_USEDEFAULT,
-                               r.right - r.left, r.bottom - r.top, NULL, NULL, wc.hInstance, NULL);
+                               r.right - r.left, r.bottom - r.top, s_gpu_owner, NULL, wc.hInstance, NULL);
+    fprintf(stderr, "[GPU11] window %p made by process %lu%s, owner %p\n", (void *)s_gpu_hwnd, GetCurrentProcessId(),
+            getenv("BUFFY_NO_WINDOW") ? " (hidden)" : "", (void *)s_gpu_owner);
+    fflush(stderr);
     s_win2_w = r.right - r.left;
     s_win2_h = r.bottom - r.top;
     if (s_want_win2)

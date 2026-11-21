@@ -128,9 +128,43 @@ static void apply(void)
              wide == 0 ? "4:3" : wide == 1 ? "widescreen" : "stretched");
 }
 
+/* The session's window: told when this run's window is up, and asked to
+ * cover its place just before the game ends to be started again. */
+static HWND s_session_window;
+void nv2a_gpu_set_owner_window(void *hwnd);
+
+static void session_window_cover(void)
+{
+    DWORD_PTR r;
+    if (s_session_window)
+        SendMessageTimeoutA(s_session_window, WM_APP + 2, 0, 0, SMTO_ABORTIFHUNG, 500, &r);
+}
+
+void btvs_window_made(void)
+{
+    HWND w = (HWND)nv2a_gpu_window();
+    btvs_log("gfx", "window %p made by process %lu (run %s of the session), %s%s", (void *)w, GetCurrentProcessId(),
+             getenv("BTVS_RESTARTS") ? getenv("BTVS_RESTARTS") : "0",
+             s_session_window ? "owned by the session's window " : "a window of its own (no session window)",
+             s_session_window ? getenv("BTVS_SESSION_WINDOW") : "");
+    if (s_session_window && w)
+        PostMessageA(s_session_window, WM_APP + 1, (WPARAM)w, 0);
+}
+
 void btvs_window_boot(void)
 {
     g_nv2a_window_title = "Buffy the Vampire Slayer";
+    {   /* the session's window (btvs_boot_restart.c) owns this run's window */
+        const char *sw = getenv("BTVS_SESSION_WINDOW");
+        s_session_window = sw && *sw ? (HWND)(uintptr_t)strtoull(sw, NULL, 16) : NULL;
+        if (s_session_window && !IsWindow(s_session_window))
+            s_session_window = NULL;
+        if (s_session_window) {
+            extern void (*g_xbox_before_relaunch)(void);
+            nv2a_gpu_set_owner_window(s_session_window);
+            g_xbox_before_relaunch = session_window_cover;
+        }
+    }
     if (btvs_window_hidden())
         _putenv_s("BUFFY_NO_WINDOW", "1");       /* the runtime's name for it */
     /* No Xbox GPU is emulated: no pushbuffer thread, no vertical-blank

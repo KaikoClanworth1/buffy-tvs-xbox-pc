@@ -26,10 +26,186 @@
  */
 #include <windows.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define XBOX_EXIT_RELAUNCH 0x42544C52u
+
+/* ── the session's window ────────────────────────────────────────────────
+ * Every run of the game is a process with a window of its own, so at each
+ * restart -- menu to level, level to level, back to the menu -- the player
+ * saw the window close, the desktop behind it, and a new window that did
+ * not always get the keyboard. The supervisor lives for the whole session,
+ * so it has a window for the whole session:
+ *
+ * - "Buffy the Vampire Slayer" in the taskbar and Alt+Tab, with the exe's
+ *   icon: one entry from start to quit. Black, with "Loading..." in it.
+ * - Each game process makes its window *owned* by it (BTVS_SESSION_WINDOW in
+ *   its environment; nv2a_gpu_set_owner_window): always in front of it, no
+ *   taskbar entry of its own, hidden and shown with it. The game process
+ *   tells the session window its handle (SW_MSG_GAME).
+ * - While a game window is up the session window sits behind it, a little
+ *   smaller, so it never shows. When the game is about to end for a restart
+ *   it says so (SW_MSG_COVER) and the session window takes the game
+ *   window's place exactly: the game window goes, black stays -- no desktop
+ *   -- and Windows gives the keyboard to the owner, which is this process,
+ *   so the next game process (started by it) may take it.
+ * - Activating the session window (taskbar, Alt+Tab) activates the game
+ *   window; closing it closes the game window, or ends the session when
+ *   there is none; minimising the game window minimises the session window
+ *   (the runtime does that), which hides the game window with it.
+ *
+ * Window modes, Alt+Enter, resizing and all input stay where they were: in
+ * the game process's own window.
+ *
+ * BTVS_NO_WINDOW (test runs): the session window is made and never shown,
+ * as the game's is. BTVS_NO_SESSION_WINDOW=1: none (the game windows are
+ * ordinary top-level windows again). */
+#define SW_MSG_GAME   (WM_APP + 1)      /* wParam: the game process's window */
+#define SW_MSG_COVER  (WM_APP + 2)      /* the game window is about to go: cover its place */
+
+static struct {
+    HWND hwnd, game;
+    int hidden, closing;
+} s_sw;
+
+/* What can be seen of a window (without the invisible frame Windows 10 and
+ * 11 put round a sizable one). */
+static int visible_rect(HWND w, RECT *r)
+{
+    HMODULE dwm = GetModuleHandleA("dwmapi.dll");
+    typedef HRESULT (WINAPI *get_attr)(HWND, DWORD, void *, DWORD);
+    get_attr f;
+    if (!dwm)
+        dwm = LoadLibraryA("dwmapi.dll");
+    f = dwm ? (get_attr)(void *)GetProcAddress(dwm, "DwmGetWindowAttribute") : NULL;
+    if (f && f(w, 9 /* DWMWA_EXTENDED_FRAME_BOUNDS */, r, sizeof *r) == 0)
+        return 1;
+    return GetWindowRect(w, r);
+}
+
+/* Behind the game window (smaller by `inset` on every side), or -- inset 0 --
+ * exactly where it is. Never activates, never shown in a hidden run. */
+static void sw_place(int inset)
+{
+    RECT r;
+    if (!s_sw.hwnd || !s_sw.game || !IsWindow(s_sw.game) || IsIconic(s_sw.game) || IsIconic(s_sw.hwnd))
+        return;
+    if (!visible_rect(s_sw.game, &r) || r.right - r.left < 2 * inset + 16 || r.bottom - r.top < 2 * inset + 16)
+        return;
+    SetWindowPos(s_sw.hwnd, s_sw.game, r.left + inset, r.top + inset, r.right - r.left - 2 * inset,
+                 r.bottom - r.top - 2 * inset, SWP_NOACTIVATE | (s_sw.hidden ? 0 : SWP_SHOWWINDOW));
+}
+
+static LRESULT CALLBACK sw_proc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    switch (m) {
+    case SW_MSG_GAME:
+        s_sw.game = (HWND)w;
+        fprintf(stderr, "[boot] window: the game window %p is up, owned by the session window %p\n", (void *)s_sw.game, (void *)h);
+        fflush(stderr);
+        sw_place(24);
+        if (!s_sw.hidden && GetForegroundWindow() == h)
+            SetForegroundWindow(s_sw.game);
+        return 0;
+    case SW_MSG_COVER:
+        sw_place(0);
+        if (!s_sw.hidden)
+            UpdateWindow(h);
+        return 0;
+    case WM_TIMER:
+        if (s_sw.game && !IsWindow(s_sw.game))
+            s_sw.game = NULL;                    /* (its process ended: the place it had is kept) */
+        sw_place(24);
+        return 0;
+    case WM_ACTIVATE:
+        if (LOWORD(w) != WA_INACTIVE && !s_sw.hidden && s_sw.game && IsWindow(s_sw.game) && IsWindowVisible(s_sw.game))
+            SetForegroundWindow(s_sw.game);
+        return 0;
+    case WM_SYSCOMMAND:
+        if ((w & 0xFFF0) == SC_RESTORE || (w & 0xFFF0) == SC_MINIMIZE)
+            break;
+        if ((w & 0xFFF0) != SC_CLOSE)
+            return 0;                            /* (it is not for moving or sizing: the game window is) */
+        break;
+    case WM_CLOSE:
+        if (s_sw.game && IsWindow(s_sw.game))
+            PostMessageA(s_sw.game, WM_CLOSE, 0, 0);     /* the game quits in its own order; the session ends with it */
+        else
+            s_sw.closing = 1;
+        return 0;
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        RECT r;
+        HDC dc = BeginPaint(h, &ps);
+        GetClientRect(h, &r);
+        FillRect(dc, &r, (HBRUSH)GetStockObject(BLACK_BRUSH));
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, RGB(150, 120, 200));
+        DrawTextA(dc, "Loading...", -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        EndPaint(h, &ps);
+        return 0;
+    }
+    }
+    return DefWindowProcA(h, m, w, l);
+}
+
+static void sw_make(void)
+{
+    WNDCLASSEXA wc;
+    char v[32];
+    const char *nw = getenv("BTVS_NO_WINDOW");
+    if (getenv("BTVS_NO_SESSION_WINDOW"))
+        return;
+    s_sw.hidden = nw && *nw && *nw != '0';
+    memset(&wc, 0, sizeof wc);
+    wc.cbSize = sizeof wc;
+    wc.lpfnWndProc = sw_proc;
+    wc.hInstance = GetModuleHandleA(NULL);
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
+    wc.lpszClassName = "BuffySessionWindow";
+    wc.hIcon = (HICON)LoadImageA(wc.hInstance, MAKEINTRESOURCEA(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON),
+                                 GetSystemMetrics(SM_CYICON), 0);
+    wc.hIconSm = (HICON)LoadImageA(wc.hInstance, MAKEINTRESOURCEA(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                   GetSystemMetrics(SM_CYSMICON), 0);
+    RegisterClassExA(&wc);
+    /* made hidden and small: it is shown, in the game window's place, once there is a game window */
+    s_sw.hwnd = CreateWindowExA(0, wc.lpszClassName, "Buffy the Vampire Slayer", WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
+                                0, 0, 64, 64, NULL, NULL, wc.hInstance, NULL);
+    if (!s_sw.hwnd) {
+        fprintf(stderr, "[boot] window: no session window (error %lu): each run of the game has its own\n", GetLastError());
+        return;
+    }
+    SetTimer(s_sw.hwnd, 1, 50, NULL);
+    sprintf_s(v, sizeof v, "%llX", (unsigned long long)(uintptr_t)s_sw.hwnd);
+    SetEnvironmentVariableA("BTVS_SESSION_WINDOW", v);
+    fprintf(stderr, "[boot] window: session window %p made by the supervisor, process %lu%s\n", (void *)s_sw.hwnd,
+            GetCurrentProcessId(), s_sw.hidden ? " (hidden: test run)" : "");
+    fflush(stderr);
+}
+
+/* Wait for the game process, with the session window's messages handled.
+ * 0: it ended; 1: the session window was closed with no game window to pass
+ * that on to. */
+static int sw_wait(HANDLE process)
+{
+    for (;;) {
+        MSG msg;
+        DWORD r = MsgWaitForMultipleObjects(1, &process, FALSE, INFINITE, QS_ALLINPUT);
+        if (r == WAIT_OBJECT_0 || r == WAIT_FAILED)
+            return 0;
+        while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessageA(&msg);
+        }
+        if (s_sw.closing)
+            return 1;
+    }
+}
 
 /* `buffy_tvs.exe --prepare-shaders` or BTVS_PREPARE_SHADERS=1: make the
  * shaders and end (btvs_native.c, shaders_prepare), for an installer. */
@@ -105,6 +281,7 @@ int btvs_supervise(int *exit_code)
     }
     SetEnvironmentVariableA("BTVS_CHILD", "1");
     SetEnvironmentVariableA("RECOMP_RELAUNCH_FILE", next);
+    sw_make();                                   /* the session's window (above) */
 
     for (;;) {
         STARTUPINFOA si;
@@ -140,9 +317,18 @@ int btvs_supervise(int *exit_code)
         }
         if (job)
             AssignProcessToJobObject(job, pi.hProcess);
+        AllowSetForegroundWindow(pi.dwProcessId);    /* its window takes the keyboard from the session window */
         ResumeThread(pi.hThread);
         CloseHandle(pi.hThread);
-        WaitForSingleObject(pi.hProcess, INFINITE);
+        if (sw_wait(pi.hProcess)) {
+            /* the session window was closed while no game window was up (between two runs, or before the first) */
+            fprintf(stderr, "[boot] window: the session window was closed: the game is stopped\n");
+            TerminateProcess(pi.hProcess, 0);
+            WaitForSingleObject(pi.hProcess, 5000);
+            CloseHandle(pi.hProcess);
+            code = 0;
+            break;
+        }
         GetExitCodeProcess(pi.hProcess, &code);
         CloseHandle(pi.hProcess);
         runs++;
@@ -161,6 +347,10 @@ int btvs_supervise(int *exit_code)
     }
     DeleteFileA(launch);
     DeleteFileA(next);
+    if (s_sw.hwnd) {
+        fprintf(stderr, "[boot] window: session window %p closed after %d run(s) of the game\n", (void *)s_sw.hwnd, runs);
+        DestroyWindow(s_sw.hwnd);
+    }
     if (job)
         CloseHandle(job);
     *exit_code = (int)code;

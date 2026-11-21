@@ -77,6 +77,13 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 (Add a line here when you need something from another area.)
 
+- **Graphics → Extras (21 Nov): the session has one window now** (your request of b39fc70, done another
+  way: `docs/graphics.md`, "One window for the session"). The supervisor has a session window for the
+  whole session and each run's window is owned by it; every window made is in the log (`[boot] window:
+  ...`, `[gfx] window ...`). For the launcher nothing changes: it still starts one `buffy_tvs.exe` and
+  that process lives until the game is quit. What a hidden run cannot show -- black instead of the
+  desktop, the keyboard staying with the game -- is points 11 to 13 of the hand checklist there.
+
 - **Extras → Graphics (21 Nov, owner: "we also need the launcher to compile the game for the player and
   all the shaders etc."): a headless "build all shaders" entry point the launcher can run at install
   time.** Wanted: `buffy_tvs.exe --build-shaders` (or a small exe of its own) run in the game folder that

@@ -422,6 +422,10 @@ struct bridge_thread_start {
     uint32_t ctx1, ctx2, stack_top;
 };
 
+/* Called just before the process ends to be started again (the title
+ * launching its own image): a port's last word to whoever restarts it. */
+void (*g_xbox_before_relaunch)(void);
+
 static void bridge_write_handle(uint32_t handle_va, HANDLE h);
 
 static void bridge_run_thread_inline(recomp_func_t fn, uint32_t ctx1,
@@ -1204,6 +1208,8 @@ static void bridge_HalReturnToFirmware(void)
                 fprintf(stderr, "  [KERNEL] the title launches itself again: launch data saved, exiting to be restarted\n");
                 fflush(stderr);
                 RECOMP_ICALL_FEEDBACK_DUMP();
+                if (g_xbox_before_relaunch)
+                    g_xbox_before_relaunch();
                 ExitProcess(0x42544C52u);                  /* XBOX_EXIT_RELAUNCH */
             }
         }
@@ -1404,8 +1410,15 @@ static void ke_event_trace(const char *what, uint32_t guest_va)
                 GetCurrentThreadId(), (unsigned long long)GetTickCount64());
 }
 
+/* Looking the shadow up and making it when there is none is one step, under
+ * a lock of its own: two threads that met an event for the first time at the
+ * same moment -- one about to wait on it, the other to set it -- each made a
+ * shadow, and the wait was on one and the set on the other (XAPI's
+ * timeSetEvent waiting for its new timer thread: the game stood still at
+ * start-up, some runs in ten). */
 static HANDLE ke_event_shadow(uint32_t guest_va)
 {
+    static volatile LONG lock;
     HANDLE h = ke_shadow_lookup(guest_va);
     uint8_t type;
 
@@ -1414,9 +1427,15 @@ static HANDLE ke_event_shadow(uint32_t guest_va)
     type = *(uint8_t *)XBOX_TO_NATIVE(guest_va);
     if (type > 1)
         return NULL;
-    h = CreateEventA(NULL, type == 0, BRIDGE_MEM32(guest_va + 4) != 0, NULL);
-    if (h)
-        ke_shadow_insert(guest_va, h);
+    while (InterlockedCompareExchange(&lock, 1, 0) != 0)
+        SwitchToThread();
+    h = ke_shadow_lookup(guest_va);
+    if (!h) {
+        h = CreateEventA(NULL, type == 0, BRIDGE_MEM32(guest_va + 4) != 0, NULL);
+        if (h)
+            ke_shadow_insert(guest_va, h);
+    }
+    InterlockedExchange(&lock, 0);
     return h;
 }
 

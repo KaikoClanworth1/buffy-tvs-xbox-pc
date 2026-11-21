@@ -249,6 +249,51 @@ So the limits above 60 work (110 with the limit at 120, 162 with none) and the g
 not what the limit asked. An earlier run on a less loaded PC held 60.0 with 16.67 ms frames for minutes.
 Steady 120/144 has to be confirmed on an idle PC (checklist, point 8). VSync has not been run at all.
 
+## One window for the session
+
+The game starts itself again at every change between the menus and a level and from level to level
+(`btvs_boot_restart.c`): each run is a process, and each process made a top-level window of its own. The
+player saw the window close, the desktop, and a new window that did not always get the keyboard ("app
+restarts after Start Game").
+
+Now the supervisor -- the process that lives for the whole session -- has a **session window**
+(`sw_make`): "Buffy the Vampire Slayer" in the taskbar and Alt+Tab with the exe's icon, black with
+"Loading..." in it. Each game process makes its window **owned** by it (`BTVS_SESSION_WINDOW` in its
+environment, `nv2a_gpu_set_owner_window`): always in front of it, no taskbar entry of its own, hidden
+and shown with it.
+
+- While a game window is up the session window sits behind it, 24 pixels smaller on every side, so it
+  never shows (followed every 50 ms).
+- Just before the game ends to be started again it tells the session window (`g_xbox_before_relaunch`),
+  which takes the game window's place exactly. The game window goes, black stays; Windows gives the
+  keyboard to the owner, which is the supervisor, so the next game process may take it
+  (`AllowSetForegroundWindow`).
+- Activating the session window activates the game window; closing it closes the game window, or ends the
+  session when there is none; minimising the game window minimises the session window instead, which
+  hides the game window with it.
+- Window modes, Alt+Enter / F11, resizing, the swap chain and all input are where they were: in the game
+  process's own window. That is why the picture is not drawn *into* the session window: a window of
+  another process cannot have its style changed from here, and keyboard, mouse capture and mode changes
+  would all have had to be passed between the two processes. Changing level inside one process was not
+  tried: the game restarts itself to get its memory back empty, and nothing in it is written to be run
+  twice.
+
+Every window made is logged: `[boot] window: session window <handle> made by the supervisor, process
+<pid>`, then for each run `[gfx] window <handle> made by process <pid> (run <n> of the session), owned by
+the session's window <handle>` and `[boot] window: the game window <handle> is up, owned by ...`, and at
+the end `session window <handle> closed after <n> run(s) of the game`.
+
+Checked in a hidden run (`sw3`, 21 Nov): title -> Start Game -> level 1 -> pause -> Quit -> main menu ->
+Start Game -> level 1: four game processes, one session window (`1DA0260`) from the first line to the
+last. A change from one level to the next by playing was not made (no script finishes a level); it goes
+through the same restart. `BTVS_NO_WINDOW`: the session window is made and never shown.
+`BTVS_NO_SESSION_WINDOW=1`: none.
+
+Found on the way: the level sometimes stood still at start-up (one run in a few). XAPI's `timeSetEvent`
+waits for its new timer thread on an event; the two threads met that event for the first time at the
+same moment and each made its own stand-in for it (`ke_event_shadow`), so the wait was on one and the
+set on the other. Looking up and making is one step now.
+
 ## By hand: what only a visible run can show
 
 Test runs are hidden and muted, so none of this has been seen. Each line is one thing to try and what
@@ -275,6 +320,14 @@ should happen.
    screen, HUD in the middle part.
 10. A level at normal priority on an idle PC with `BTVS_HITCH_LOG=30`: how many `[HITCH]` lines in two
     minutes, and what they name.
+11. Start Game from the main menu, in borderless, windowed and fullscreen: between the menu and the level
+    the screen (or the window's place) goes black with "Loading...", never the desktop; the game has the
+    keyboard and pad when the level is up without a click; the taskbar has one "Buffy the Vampire Slayer"
+    entry all the time. The same on Quit from the pause menu back to the main menu.
+12. Windowed: drag the game window quickly: nothing black shows from behind it. Minimise it and bring it
+    back from the taskbar; Alt+Tab away and back: the game comes back, not a black window.
+13. Close the game with the window's X during a level, and once more while "Loading..." is up: the game
+    ends both times and nothing stays in the taskbar or in Task Manager.
 
 ## How it draws
 

@@ -880,6 +880,7 @@ void btvs_native_start(void)
         ExitProcess(1);
     }
     btvs_log("gfx", "native renderer on %s", gpu_adapter_name());
+    { void btvs_window_made(void); btvs_window_made(); }
     shaders_prepare();
 }
 
