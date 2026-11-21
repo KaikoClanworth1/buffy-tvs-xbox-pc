@@ -184,13 +184,13 @@ static int selftest(void)
     n = btvs_input_dump_recording(rec, stdout);
     CHECK(n > 10 && n < 40);                    /* changes only, not 1400 reads */
 
-    /* 5e. the usual clock is time from the game's first frame: a run that
+    /* 5e. the usual clock is time from the game's first pad read: a run that
      * starts later (a longer load) gets the same pads at the same time after
      * it, and when reads stop for a while the recording does not fall behind */
     btvs_input__test_reset();
     s_t = 300000.0;
     CHECK(btvs_input_playback(rec));
-    s_t += 7000.0;                              /* nothing for 7 s: no frame, no read */
+    s_t += 7000.0;                              /* nothing for 7 s: a longer load */
     for (i = 0; i < TICKS - 30; i++) {
         int j = i < 300 ? i : i + 25;           /* 400 ms without a read at tick 300 */
         if (i == 300)

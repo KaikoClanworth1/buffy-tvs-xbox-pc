@@ -553,16 +553,14 @@ static void live_pad(int port, btvs_pad *g, int hw)
 
 static uint32_t s_frame;
 static int s_frame_external;        /* Graphics calls btvs_input_frame() */
-static int s_frame1;                /* this run of the game has shown a frame ... */
-static double s_frame1_ms;          /* ... and when the first one was */
+static int s_read1;                 /* this run of the game has read a pad ... */
+static double s_read1_ms;           /* ... and when the first read was. The game starts its
+                                     * pad timer when it is ready to run (after a level's
+                                     * load), so this is the same moment in every run. */
 
 static void frame_count(void)
 {
     s_frame++;
-    if (!s_frame1) {
-        s_frame1 = 1;
-        s_frame1_ms = now_ms();
-    }
 }
 
 void btvs_input_frame(void)
@@ -958,9 +956,9 @@ static void script_apply(int port, btvs_pad *g)
  *                  the fields the mask names (u16, u8 x n, i16 x n)
  *   end record     tag = 0xFF, varint polls x 4 (reads since each port's last
  *                  record), varint frames, varint ms
- *   first frame    tag = 0xFE, varint ms since the recording began: when the
- *                  game showed its first frame. Only in a recording begun
- *                  before that (a run recorded from its start).
+ *   first read     tag = 0xFE, varint ms since the recording began: when the
+ *                  game read a pad for the first time in this run. Only in a
+ *                  recording begun by then (a run recorded from its start).
  * A record is written when a port's pad differs from its previous record, so a
  * resting pad costs nothing. A file without an end record (the game died) is
  * still good: playback stops at the last record. */
@@ -974,7 +972,7 @@ static struct {
     uint32_t frame;
     double ms, flushed, t0;
     int unwritten;                  /* records since the last flush */
-    int anchored;                   /* the first-frame record is written, or there will be none */
+    int anchored;                   /* the first-read record is written, or there will be none */
 } R;
 
 static void put_varint(FILE *f, uint32_t v)
@@ -992,9 +990,9 @@ static void record_poll(int port, int connected, const btvs_pad *g)
         return;
     R.polls[port]++;
     t = now_ms();
-    if (!R.anchored && s_frame1) {
+    if (!R.anchored && s_read1) {
         fputc(0xFE, R.f);
-        put_varint(R.f, (uint32_t)(s_frame1_ms > R.t0 ? s_frame1_ms - R.t0 + 0.5 : 0.0));
+        put_varint(R.f, (uint32_t)(s_read1_ms > R.t0 ? s_read1_ms - R.t0 + 0.5 : 0.0));
         R.anchored = 1;
         R.unwritten = 1;
     }
@@ -1065,7 +1063,7 @@ int btvs_input_record_begin(const char *path)
         fwrite(hdr, 4, 2, R.f);
         R.frame = s_frame;
         R.ms = R.flushed = R.t0 = now_ms();
-        R.anchored = s_frame1;        /* begun in mid-game: no first frame to mark */
+        R.anchored = s_read1;         /* begun in mid-game: no first read to mark */
         IN_LOG("recording to %s", path);
     } else {
         IN_LOG("cannot record to %s", path);
@@ -1131,7 +1129,7 @@ static int get_varint(const uint8_t **p, const uint8_t *end, uint32_t *v)
     return 0;
 }
 
-static int s_parse_anchor;          /* the recording just read: ms of its first-frame record, -1 none */
+static int s_parse_anchor;          /* the recording just read: ms of its first-read record, -1 none */
 
 /* Read a whole recording. Returns the record count, -1 when it is not one. */
 static int recording_parse(const char *path, pb_rec *out[BTVS_PORTS], int n[BTVS_PORTS],
@@ -1246,16 +1244,16 @@ int btvs_input_playback(const char *path)
         P.active = 1;
         P.mode = mode && !_stricmp(mode, "frame") ? PB_FRAME : mode && !_stricmp(mode, "time") ? PB_TIME
                : mode && !_stricmp(mode, "poll") ? PB_POLL : PB_GAME;
-        /* The game clock needs both runs caught before their first frame;
-         * anything else (a recording begun or played in mid-game) goes by
-         * read count. */
-        if (P.mode == PB_GAME && (s_parse_anchor < 0 || s_frame1))
+        /* The game clock needs both runs caught before their first pad
+         * read; anything else (a recording begun or played in mid-game) goes
+         * by read count. */
+        if (P.mode == PB_GAME && (s_parse_anchor < 0 || s_read1))
             P.mode = PB_POLL;
         P.anchor = s_parse_anchor > 0 ? (uint32_t)s_parse_anchor : 0;
         P.f0 = s_frame;
         P.t0 = now_ms();
         IN_LOG("playback clock: %s", P.mode == PB_POLL ? "pad reads" : P.mode == PB_FRAME ? "frames" : P.mode == PB_TIME ? "time"
-               : "time from the first frame");
+               : "time from the game's first pad read");
         for (p = 1; p < BTVS_PORTS; p++)
             if (P.total[p] > P.total[P.main_port])
                 P.main_port = p;
@@ -1295,17 +1293,11 @@ static int playback_poll(int port, btvs_pad *g)
         key = (uint32_t)(now_ms() - P.t0);
         over = key > P.end_ms;
     } else {
-        /* Until this run shows its first frame (a level loading, however long
-         * that takes) the recording waits at its own first frame; from there
-         * both go by the clock. */
+        /* Both runs count from their own first pad read, so how long the
+         * level took to load does not matter, and the recording keeps up
+         * with the clock when the game stops reading the pad for a while. */
         double t = now_ms();
-        if (!s_frame1) {
-            key = (uint32_t)(t - P.t0);
-            if (key >= P.anchor)
-                key = P.anchor ? P.anchor - 1 : 0;
-        } else {
-            key = P.anchor + (uint32_t)(t > s_frame1_ms ? t - s_frame1_ms : 0.0);
-        }
+        key = P.anchor + (uint32_t)(t > s_read1_ms ? t - s_read1_ms : 0.0);
         over = key > P.end_ms;
     }
     if (over) {
@@ -1345,7 +1337,7 @@ int btvs_input_dump_recording(const char *path, FILE *out)
                 r->pad.analog[5], r->pad.analog[6], r->pad.analog[7], r->pad.lx, r->pad.ly, r->pad.rx, r->pad.ry);
     }
     if (s_parse_anchor >= 0)
-        fprintf(out, "first frame of the game: %.3f s\n", s_parse_anchor / 1000.0);
+        fprintf(out, "first pad read of the game: %.3f s\n", s_parse_anchor / 1000.0);
     fprintf(out, "end: %.3f s, %u frames, reads %u %u %u %u\n", end_ms / 1000.0, end_frame,
             total[0], total[1], total[2], total[3]);
     for (i = 0; i < BTVS_PORTS; i++)
@@ -1589,6 +1581,10 @@ int btvs_input_poll(int port, btvs_pad *g)
         return 0;
     LOCK();
     env_start();
+    if (!s_read1) {
+        s_read1 = 1;
+        s_read1_ms = now_ms();
+    }
     load_settings();
     if (port == 0 && !s_frame_external)
         frame_count();                          /* nobody counts frames: one read of port 1 is one */
@@ -1741,7 +1737,7 @@ void btvs_input__test_reset(void)
     memset(s_last, 0, sizeof s_last);
     memset(&K, 0, sizeof K);
     s_capture_active = 0;
-    s_frame = 0; s_frame_external = 0; s_frame1 = 0;
+    s_frame = 0; s_frame_external = 0; s_read1 = 0;
     s_test_pad = NULL;
     InterlockedExchange(&C.loaded, 0);
     UNLOCK();
