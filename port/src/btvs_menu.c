@@ -105,6 +105,7 @@ void GUI_TBuffyMenu_OnUpdate_00219480(void);
 void GUI_TMenuNameSession_OnUpdate_00222F00(void);
 void GUI_TMenuPause_OnUpdate_00223D70(void);
 void GUI_TBuffyMenu_OnBuffyCommand_00218C20(void);
+void GUI_TBuffyManager_DrawString_00218410(void);
 void GUI_TCanvas_GotoControl_001EA460(void);
 void GUI_TTextButton_SetText_001EE0A0(void);          /* SetText(char *) */
 void GUI_UTControl_TLinkList_Add_001EB360(void);
@@ -118,6 +119,7 @@ void Z_YAPAXI_op2_002BC1A0(void);                     /* operator new(size) */
 #define VA_MAIN_ONMESSAGE     0x002226B0u
 #define VA_PAUSE_ONLOAD       0x00223760u
 #define VA_PAUSE_ONMESSAGE    0x00223A60u
+#define VA_DRAWSTRING         0x00218410u   /* GUI::TBuffyManager::DrawString */
 #define VA_BUFFYMENU_ONUPDATE 0x00219480u
 #define VA_NAMESESSION_ONUPDATE 0x00222F00u
 #define VA_PAUSE_ONUPDATE     0x00223D70u
@@ -546,6 +548,7 @@ static void build_rows(void)
         if (i) rowf(3, "FPS Limit: %d", i); else rowf(3, "FPS Limit: Uncapped");
         rowf(4, "Picture: %s", k_wide[wrap(btvs_setting_int("display", "widescreen", 0), 3)]);
         rowf(5, "Overlay: %s", k_overlay[wrap(btvs_setting_int("display", "show_fps", 0), 3)]);
+        rowf(6, "Menu Shadow: %s", btvs_setting_int("menu", "highlight_shadow", 0) ? "Original" : "Off");
         break;
     case PG_AUDIO:
         rowf(0, "Master Volume: %d", btvs_setting_int("audio", "master", 100));
@@ -729,6 +732,7 @@ static int act(int item, int dir)
         case 3: btvs_setting_set_int("display", "fps_limit", k_fps[wrap(fps_index() + step, NFPS)]); break;
         case 4: cycle("display", "widescreen", 0, 3, step); break;
         case 5: cycle("display", "show_fps", 0, 3, step); break;
+        case 6: cycle("menu", "highlight_shadow", 0, 2, step); break;
         }
         break;
     case PG_AUDIO: {
@@ -1201,15 +1205,40 @@ static void hook_pause_onmessage(void)
     GUI_TMenuPause_OnMessage_00223A60();
 }
 
+/* ── the highlighted line's shadow ───────────────────────────────────── */
+
+/* The game draws the selected line of a menu twice (TBuffyManager::DrawString, 0x218729..):
+ * every letter in black at the line's own place, then in its colour 5 right and 5 up. It does
+ * so only while the manager's byte +0x474 is set; with +0x475 set and +0x474 clear the same
+ * function draws the line once, at its own place. [menu] highlight_shadow=1 keeps the original. */
+#define MGR_SHADOW   0x474
+#define MGR_BUFFY    0x475
+
+static void hook_drawstring(void)
+{
+    uint32_t mgr = g_ecx;
+    uint8_t shadow = MEM8(mgr + MGR_SHADOW), buffy = MEM8(mgr + MGR_BUFFY);
+    if (!shadow || btvs_setting_int("menu", "highlight_shadow", 0)) {
+        GUI_TBuffyManager_DrawString_00218410();
+        return;
+    }
+    MEM8(mgr + MGR_SHADOW) = 0;
+    MEM8(mgr + MGR_BUFFY) = 1;
+    GUI_TBuffyManager_DrawString_00218410();
+    MEM8(mgr + MGR_SHADOW) = shadow;
+    MEM8(mgr + MGR_BUFFY) = buffy;
+}
+
 /* ── the hook table (recomp_lookup_manual asks this first) ───────────── */
 
 recomp_func_t btvs_menu_lookup(uint32_t va)
 {
     static int off = -1;
-    if (va < VA_BUFFYMENU_ONUPDATE || va > VA_PAUSE_ONUPDATE) return 0;
+    if (va < VA_DRAWSTRING || va > VA_PAUSE_ONUPDATE) return 0;
     if (off < 0) off = btvs_setting_int("menu", "pc_entries", 1) ? 0 : 1;   /* BTVS_MENU_PC_ENTRIES=0: untouched menus */
     if (off) return 0;
     switch (va) {
+    case VA_DRAWSTRING:         return hook_drawstring;
     case VA_OPTIONS_ONLOAD:     return hook_options_onload;
     case VA_OPTIONS_ONMESSAGE:  return hook_options_onmessage;
     case VA_OPTIONS_ONCOMMAND:  return hook_options_oncommand;

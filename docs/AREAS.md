@@ -61,6 +61,15 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 - **Menu → whoever owns `game_files/`**: test runs before 09e1647 left 10 saved games in the main
   checkout's `game_files/UDATA/45410012` (the game's limit; Start Game answered "only allows 10 saved games").
   Since 09e1647 saves go to each build's save folder, so runs are no longer affected; the folders are still there.
+- **Menu → Graphics**: lines of a menu that are not selected are striped above 640x480. At 1920x1080
+  every other row or so of each letter is missing (main menu "Options", the Options list, PC pages; frames
+  `port/runs/shots/*_menu3_1080_*.png`); at 640x480 the same lines are solid. The selected line is solid
+  at both sizes. The draw: `GUI::TBuffyManager::DrawString` (`0x218410`) draws an unselected letter at
+  `0x2186A1..0x2186EA` through the render interface (`Interface::GetGameInterface()->[+0x4C]`), method
+  `[vtable+0x28]`, with one argument more than the selected line's method `[vtable+0x24]`: the manager's
+  `+0x68` (pushed first), then the letter's four texture coordinates, 1, 0, the colour (4 floats), the
+  font's texture and the two corners. Likely that method draws the letter in strips one 640x480 row high
+  (a wave or shimmer) and they do not fill their height at a larger picture.
 - **Menu → Controls**: let a binding capture be driven in a hidden run. `capture_step()` returns while the
   window is not in front and reads only the real keyboard, so a pad script's `K:<key>` (or a scripted
   pad button for the controller slot) is never taken: the capture ends after 8 s with nothing bound.
