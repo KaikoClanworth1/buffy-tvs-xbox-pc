@@ -30,7 +30,7 @@
 double btvs_frame_seconds(void);
 void nv2a_gpu_set_texture_pack(const WCHAR *root, int dump, int load, int prefetch);
 
-#define GLYPH_VERSION 13            /* a change in the drawing: files are made again */
+#define GLYPH_VERSION 15            /* a change in the drawing: files are made again */
 #define SCALE 4                    /* the port's pictures are this many times the game's */
 
 enum { SET_KEYS, SET_XBOX, SET_PS, SET_ORIGINAL };
@@ -534,41 +534,48 @@ enum { M_LEFT = 1, M_RIGHT = 2, M_WHEEL = 4, M_UP = 8, M_DOWN = 16, M_MOVED = 32
 
 static void mouse_pic(cv *c, float cx, float cy, float d, int st, int lit)
 {
-    const float *ink = st == ST_PRESSED ? DARK : INK;
-    float hw = d * 0.30f, hh = d * 0.46f, split = cy - hh * 0.18f;
+    /* the button that is meant is amber: white would read as part of the outline */
+    static const float AMBER0[3] = { 1.00f, 0.86f, 0.36f }, AMBER1[3] = { 0.98f, 0.62f, 0.16f };
+    const float *ink = st == ST_PRESSED ? DARK : INK, *on0 = st == ST_PRESSED ? D0 : AMBER0, *on1 = st == ST_PRESSED ? D1 : AMBER1;
+    const float *off = st == ST_PRESSED ? INK : DARK;
+    float hw = d * 0.36f, hh = d * 0.48f, split = cy + hh * 0.06f, gap = d * 0.04f;
     float keep[4];
-    shape s = sh(SH_RBOX, cx, cy, hw, hh, hw * 0.95f, 0), wheel;
-    int half;
+    shape s = sh(SH_RBOX, cx, cy, hw, hh, hw * 0.92f, 0), wheel;
+    int half, both = (lit & (M_LEFT | M_RIGHT)) == (M_LEFT | M_RIGHT);
     plate(c, &s, d, st);
     memcpy(keep, s_clip, sizeof keep);
-    for (half = 0; half < 2; half++) {          /* a lit half above the split */
+    for (half = 0; half < 2; half++) {          /* the button that is meant: all of it light */
         if (!(lit & (half ? M_RIGHT : M_LEFT)))
             continue;
         s_clip[1] = cy - hh; s_clip[3] = split;
-        s_clip[0] = half ? cx : cx - hw; s_clip[2] = half ? cx + hw : cx;
-        paint(c, &s, P_FILL, 0, st == ST_PRESSED ? D0 : INK, st == ST_PRESSED ? D1 : LILAC, 1.0f);
+        s_clip[0] = half ? cx + (both ? 0 : gap) : cx - hw; s_clip[2] = half ? cx + hw : cx - (both ? 0 : gap);
+        paint(c, &s, P_FILL, 0, on0, on1, 1.0f);
         memcpy(s_clip, keep, sizeof keep);
-        paint(c, &s, P_STROKE, d * 0.065f, ink, ink, 1.0f);
     }
-    line(c, cx - hw, split, cx + hw, split, d * 0.05f, ink, 1.0f);
-    line(c, cx, cy - hh, cx, split, d * 0.05f, (lit & (M_LEFT | M_RIGHT)) == (M_LEFT | M_RIGHT) && st != ST_PRESSED ? DARK : ink, 1.0f);
-    wheel = sh(SH_RBOX, cx, cy - hh * 0.56f, d * 0.065f, d * 0.13f, d * 0.065f, 0);
-    if (lit & M_WHEEL) {
-        paint(c, &wheel, P_FILL, 0, st == ST_PRESSED ? D0 : INK, st == ST_PRESSED ? D1 : LILAC, 1.0f);
-        paint(c, &wheel, P_STROKE, d * 0.045f, st == ST_PRESSED ? INK : DARK, st == ST_PRESSED ? INK : DARK, 1.0f);
+    if (lit & (M_LEFT | M_RIGHT))
+        paint(c, &s, P_STROKE, d * 0.065f, ink, ink, 1.0f);
+    line(c, cx - hw, split, cx + hw, split, d * 0.055f, ink, 1.0f);
+    if (lit & M_WHEEL) {                        /* the wheel: big and light, the two buttons dark */
+        line(c, cx, cy - hh, cx, split, d * 0.05f, ink, 1.0f);
+        wheel = sh(SH_RBOX, cx, cy - hh * 0.46f, d * 0.105f, d * 0.19f, d * 0.105f, 0);
+        paint(c, &wheel, P_GLOW, d * 0.10f, on0, on0, st == ST_PRESSED ? 0.0f : 0.55f);
+        paint(c, &wheel, P_FILL, 0, on0, on1, 1.0f);
+        paint(c, &wheel, P_STROKE, d * 0.05f, off, off, 1.0f);
     } else {
+        line(c, cx, cy - hh, cx, split, both ? d * 0.07f : d * 0.05f, both ? off : ink, 1.0f);
+        wheel = sh(SH_RBOX, cx, cy - hh * 0.46f, d * 0.05f, d * 0.115f, d * 0.05f, 0);
         paint(c, &wheel, P_FILL, 0, st == ST_PRESSED ? INK : D0, st == ST_PRESSED ? LILAC : D1, 1.0f);
-        paint(c, &wheel, P_STROKE, d * 0.045f, ink, ink, 1.0f);
+        paint(c, &wheel, P_STROKE, d * 0.04f, lit & (M_LEFT | M_RIGHT) && both ? off : ink, lit & (M_LEFT | M_RIGHT) && both ? off : ink, 1.0f);
     }
     if ((lit & (M_UP | M_DOWN)) == (M_UP | M_DOWN)) {   /* the wheel, turned */
-        arrow(c, cx, cy + hh * 0.22f, d * 0.17f, -1.5707963f, d * 0.055f, ink, 1.0f);
-        arrow(c, cx, cy + hh * 0.62f, d * 0.17f, 1.5707963f, d * 0.055f, ink, 1.0f);
+        arrow(c, cx, cy + hh * 0.30f, d * 0.15f, -1.5707963f, d * 0.055f, ink, 1.0f);
+        arrow(c, cx, cy + hh * 0.68f, d * 0.15f, 1.5707963f, d * 0.055f, ink, 1.0f);
     } else if (lit & (M_UP | M_DOWN)) {
-        arrow(c, cx, cy + hh * 0.42f, d * 0.26f, lit & M_UP ? -1.5707963f : 1.5707963f, d * 0.07f, ink, 1.0f);
+        arrow(c, cx, cy + hh * 0.50f, d * 0.24f, lit & M_UP ? -1.5707963f : 1.5707963f, d * 0.07f, ink, 1.0f);
     }
     if (lit & M_MOVED) {
-        arrow(c, cx - hw - d * 0.12f, cy, d * 0.10f, 3.1415927f, d * 0.055f, ink, 1.0f);
-        arrow(c, cx + hw + d * 0.12f, cy, d * 0.10f, 0, d * 0.055f, ink, 1.0f);
+        arrow(c, cx - hw - d * 0.10f, cy, d * 0.10f, 3.1415927f, d * 0.055f, ink, 1.0f);
+        arrow(c, cx + hw + d * 0.10f, cy, d * 0.10f, 0, d * 0.055f, ink, 1.0f);
     }
 }
 
@@ -831,6 +838,40 @@ static void write_tex(const cv *c, int x0, int y0, int w, int h, const char *wha
     s_written += cv_write(c, x0, y0, w, h, path);
 }
 
+/* A button as the menus show it. With keyboard and mouse that is the key
+ * that works in a menu: no mouse button (the mouse is free there), and for A
+ * and B the menu keys (btvs_input.c: Enter / Space confirm, Esc / Backspace
+ * cancel) - the one of them the action is also bound to, so that it is the
+ * same key on the inventory screens, which are not menus to the port. */
+static void menu_source(const char *action, gsrc *g)
+{
+    static const char *const k_menu_key[2][2] = { { "Enter", "Space" }, { "Backspace", "Escape" } };
+    char buf[2][48];
+    int a = action_index(action), which = !strcmp(action, "A") ? 0 : !strcmp(action, "B") ? 1 : -1, k, m;
+    if (s_set != SET_KEYS || a < 0) {
+        action_source(action, g);
+        return;
+    }
+    for (k = 0; k < 2; k++)
+        btvs_input_binding_text(a, k, buf[k], sizeof buf[k]);
+    if (which >= 0 && btvs_setting_int("controls", "menu_keys", 1)) {
+        for (m = 0; m < 2; m++)
+            for (k = 0; k < 2; k++)
+                if (!strcmp(buf[k], k_menu_key[which][m])) {
+                    key_source(buf[k], g);
+                    return;
+                }
+        key_source(which ? "Escape" : "Enter", g);
+        return;
+    }
+    for (k = 0; k < 2; k++)
+        if (buf[k][0] && strncmp(buf[k], "Mouse", 5) && strncmp(buf[k], "Wheel", 5)) {
+            key_source(buf[k], g);
+            return;
+        }
+    action_source(action, g);
+}
+
 /* The menus' buttons: a 64x64 texture each, the button's middle at (cx, cy). */
 static const struct { const char *hash, *action; int st; float cx, cy; } k_menu[] = {
     { "2c2cffdf2d9f3df0", "A", ST_NORMAL, 28.5f, 35.5f },            { "900e2cb5737cf8c5", "A", ST_PRESSED, 28.5f, 35.5f },
@@ -849,7 +890,7 @@ static void build_menu(void)
         gsrc g;
         if (!cv_make(&c, 64 * SCALE, 64 * SCALE))
             return;
-        action_source(k_menu[i].action, &g);
+        menu_source(k_menu[i].action, &g);
         draw_glyph(&c, k_menu[i].cx * SCALE, k_menu[i].cy * SCALE, 25.0f * SCALE, &g, k_menu[i].st);
         write_tex(&c, 0, 0, c.w, c.h, "menu", k_menu[i].hash);
         free(c.p);
@@ -889,8 +930,11 @@ static void build_page(void)
         gsrc g;
         float w = (float)(k_page[i].x1 - k_page[i].x0), h = (float)(k_page[i].y1 - k_page[i].y0);
         page_source(i, &g);
-        draw_glyph(&c, (float)(k_page[i].x0 + k_page[i].x1) * 0.5f * SCALE, (float)(k_page[i].y0 + k_page[i].y1) * 0.5f * SCALE,
-                   (w < h ? w : h) * 0.85f * SCALE, &g, ST_INLINE);     /* (room around it: the next word follows at once) */
+        /* Room around it, and more on the right: the game sets the next letter
+         * about two pixels inside the picture's box, so a full stop straight
+         * after a picture ("... and press (Q).") was under its edge. */
+        draw_glyph(&c, ((float)(k_page[i].x0 + k_page[i].x1) * 0.5f - 1.6f) * SCALE, (float)(k_page[i].y0 + k_page[i].y1) * 0.5f * SCALE,
+                   (w < h ? w : h) * 0.80f * SCALE, &g, ST_INLINE);
     }
     write_tex(&c, 0, 0, c.w, c.h, "tips", "da8653b18cdf8d7a");
     free(c.p);
@@ -1178,7 +1222,8 @@ static void stamp_text(char *out, size_t size)
 {
     char buf[48];
     int a, n = btvs_input_action_count(), slot;
-    size_t o = (size_t)sprintf_s(out, size, "v%d set %d mouse %d\n", GLYPH_VERSION, s_set, btvs_setting_int("controls", "mouse_look", 1));
+    size_t o = (size_t)sprintf_s(out, size, "v%d set %d mouse %d menu %d\n", GLYPH_VERSION, s_set, btvs_setting_int("controls", "mouse_look", 1),
+                                 btvs_setting_int("controls", "menu_keys", 1));
     for (a = 0; a < n; a++)
         for (slot = 0; slot < BTVS_BIND_SLOTS; slot++) {
             btvs_input_binding_text(a, slot, buf, sizeof buf);

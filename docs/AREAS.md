@@ -498,6 +498,16 @@ the disc-file sharing are as they were.*
 - **Controls -> Menu**: with keyboard and mouse the tips' sentences are reworded in memory ("Press (Shift)"
   for "Pull the (L) trigger"); if a menu line for it is wanted, the switch today is only the test one,
   `BTVS_GLYPH_NO_TIP_TEXT`.
+- **Everyone** (FYI, 21 Nov evening): the **default keys changed** (Space jump, left / right mouse punch /
+  kick, E use, Shift target, Ctrl look, Tab inventory, R ammo swap, Esc pause; `docs/controls.md`,
+  "Defaults"), and **in menus Enter / Space are A and Esc / Backspace are B** whatever is bound. A pad
+  script's `K:` lines go through the same rules: `K:Space` on a menu confirms, in a level it jumps;
+  `K:Enter` no longer pauses (`K:Escape` does). Pad-button lines (`A`, `START` ...) are untouched. A
+  settings file with the old defaults untouched is rewritten once with the new ones.
+- **Controls -> Menu**: `btvs_input_menu_mode(int)` (0 play, 1 menu, 2 title) is set by Controls' own probe
+  (no level, or the pause screen open). If your pages know better when a menu is up (the inventory
+  screens are not caught), call it. A PC Controls line for `[controls] menu_keys` (On / Off) would fit;
+  Reset Bindings already gives the new defaults.
 - **Controls -> Graphics / toolkit** (request, 21 Nov): the Controls page now has a pad version and a
   keyboard-and-mouse version, and the owner wants the pictures to change when the device in use changes.
   Today they change at the next level load or start, because the texture pack is read once per process

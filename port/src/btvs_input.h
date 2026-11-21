@@ -65,6 +65,9 @@ int btvs_input_mouse_captured(void);
 /* The game (or the Menu area) says whether mouse look may capture the mouse:
  * 1 while playing, 0 in menus / pause / cutscenes. Default 1. */
 void btvs_input_allow_mouse_look(int allow);
+/* 0: a level is being played; 1: a menu is up (Enter / Space are A, Esc /
+ * Backspace are B); 2: the title screen (Enter / Space are Start too). */
+void btvs_input_menu_mode(int mode);
 
 /* ── tests: scripted input ───────────────────────────────────────────────── */
 

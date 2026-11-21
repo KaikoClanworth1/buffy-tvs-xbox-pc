@@ -74,7 +74,22 @@ static int selftest(void)
     /* 1. bindings table */
     CHECK(btvs_input_action_count() == 24);
     CHECK(!strcmp(btvs_input_action_name(0), "A"));
-    CHECK(!strcmp(btvs_input_binding_text(0, 0, buf, sizeof buf), "Space"));
+    CHECK(!strcmp(btvs_input_binding_text(0, 0, buf, sizeof buf), "MouseRight"));
+    CHECK(!strcmp(btvs_input_binding_text(1, 0, buf, sizeof buf), "Space"));       /* B jumps */
+    {   /* every action has a key and no key is on two actions */
+        char seen[64][24], k[48];
+        int n = 0, ai, slot, j;
+        for (ai = 0; ai < btvs_input_action_count(); ai++) {
+            CHECK(btvs_input_binding_text(ai, 0, k, sizeof k)[0] != 0);
+            for (slot = 0; slot < 2; slot++) {
+                if (!btvs_input_binding_text(ai, slot, k, sizeof k)[0])
+                    continue;
+                for (j = 0; j < n; j++)
+                    CHECK(strcmp(seen[j], k) != 0);
+                strcpy_s(seen[n++], sizeof seen[0], k);
+            }
+        }
+    }
     CHECK(!strcmp(btvs_input_binding_text(4, 2, buf, sizeof buf), "Pad LB"));      /* Black on LB */
     CHECK(!strcmp(btvs_input_binding_text(5, 2, buf, sizeof buf), "Pad RB"));      /* White on RB */
 
@@ -233,7 +248,7 @@ static int selftest(void)
     btvs_input__test_reset();
     s_focus = 0;
     s_t = 90000.0;
-    CHECK(btvs_input_script_load_text("0.1 K:Space K:W for 0.2; 0.5 K:MouseLeft K:J for 0.2") == 2);
+    CHECK(btvs_input_script_load_text("0.1 K:Enter K:W for 0.2; 0.5 K:MouseLeft K:J for 0.2") == 2);
     CHECK(btvs_input_connected() == 1);
     tick(&a, &b, NULL);
     CHECK(a.analog[BTVS_AN_A] == 0 && a.ly == 0);
@@ -262,6 +277,33 @@ static int selftest(void)
     tick(&a, &b, NULL);
     CHECK(a.rx == 32767);
     btvs_input_allow_mouse_look(0);
+
+    /* 5c2. the menu keys: Space is B in play and A in a menu, Esc is Start in
+     * play and B in a menu; a key held across the change does nothing until
+     * it is let go; on the title screen Space is Start too */
+    btvs_input__test_reset();
+    s_focus = 0;
+    s_t = 97000.0;
+    CHECK(btvs_input_script_load_text("0.1 K:Space for 0.2; 0.5 K:Escape for 0.2; 1.0 K:Space for 0.2; 1.4 K:Escape for 0.6; 2.4 K:Space for 0.2") == 5);
+    tick(&a, &b, NULL);
+    s_t += 160.0; tick(&a, &b, NULL);
+    CHECK(a.analog[BTVS_AN_B] == 255 && a.analog[BTVS_AN_A] == 0);      /* play: jump */
+    s_t += 400.0; tick(&a, &b, NULL);
+    CHECK((a.buttons & BTVS_BTN_START) && a.analog[BTVS_AN_B] == 0);    /* play: pause */
+    s_t += 200.0; tick(&a, &b, NULL);
+    btvs_input_menu_mode(1);
+    s_t += 300.0; tick(&a, &b, NULL);
+    CHECK(a.analog[BTVS_AN_A] == 255 && a.analog[BTVS_AN_B] == 0 && !(a.buttons & BTVS_BTN_START));   /* menu: confirm */
+    s_t += 400.0; tick(&a, &b, NULL);
+    CHECK(a.analog[BTVS_AN_B] == 255 && !(a.buttons & BTVS_BTN_START)); /* menu: cancel */
+    btvs_input_menu_mode(0);                                            /* ... which closed the menu, Esc still down */
+    s_t += 100.0; tick(&a, &b, NULL);
+    CHECK(a.analog[BTVS_AN_B] == 0 && !(a.buttons & BTVS_BTN_START));
+    s_t += 600.0; tick(&a, &b, NULL);
+    btvs_input_menu_mode(2);
+    s_t += 300.0; tick(&a, &b, NULL);
+    CHECK(a.analog[BTVS_AN_A] == 255 && (a.buttons & BTVS_BTN_START));  /* title: Space starts */
+    btvs_input_menu_mode(0);
 
     /* 5d. rumble goes to the controller of the player the game named, scaled
      * by the strength setting, and stops when the window loses focus */

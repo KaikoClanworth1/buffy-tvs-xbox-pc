@@ -114,17 +114,24 @@ static const char *const k_ps_names[PS_COUNT] = {
     "LT", "RT", "LS-Up", "LS-Down", "LS-Left", "LS-Right", "RS-Up", "RS-Down", "RS-Left", "RS-Right",
 };
 
+/* The keys are what a PC player expects of a third-person action game, for
+ * what the buttons do in this one: B jumps (Space), X punches (left mouse),
+ * A kicks (right mouse), Y uses (E), the right trigger targets (Shift, middle
+ * mouse), the left one looks / aims (Ctrl, F), White is the inventory (Tab),
+ * Black swaps ammo (R), Start pauses (Esc). No key is on two actions
+ * (the self-test checks). In menus Enter / Space and Esc / Backspace are
+ * A and B whatever is bound: see menu_keys. */
 static const struct { const char *name, *label, *keys; int pad; } k_act[ACT_COUNT] = {
-    { "A",            "A button",          "Space",                  PS_BTN + HB_A },
-    { "B",            "B button",          "Backspace, MouseMiddle", PS_BTN + HB_B },
-    { "X",            "X button",          "E, MouseLeft",           PS_BTN + HB_X },
-    { "Y",            "Y button",          "Q, MouseRight",          PS_BTN + HB_Y },
-    { "Black",        "Black button",      "Z",                      PS_BTN + HB_LB },
-    { "White",        "White button",      "C",                      PS_BTN + HB_RB },
-    { "LeftTrigger",  "Left trigger",      "LShift",                 PS_LT },
-    { "RightTrigger", "Right trigger",     "F, RShift",              PS_RT },
-    { "Start",        "Start",             "Enter",                  PS_BTN + HB_START },
-    { "Back",         "Back",              "Escape",                 PS_BTN + HB_BACK },
+    { "A",            "A button",          "MouseRight, Enter",      PS_BTN + HB_A },
+    { "B",            "B button",          "Space, Backspace",       PS_BTN + HB_B },
+    { "X",            "X button",          "MouseLeft, Q",           PS_BTN + HB_X },
+    { "Y",            "Y button",          "E",                      PS_BTN + HB_Y },
+    { "Black",        "Black button",      "R",                      PS_BTN + HB_LB },
+    { "White",        "White button",      "Tab",                    PS_BTN + HB_RB },
+    { "LeftTrigger",  "Left trigger",      "LCtrl, F",               PS_LT },
+    { "RightTrigger", "Right trigger",     "LShift, MouseMiddle",    PS_RT },
+    { "Start",        "Start",             "Escape",                 PS_BTN + HB_START },
+    { "Back",         "Back",              "B",                      PS_BTN + HB_BACK },
     { "DpadUp",       "D-pad up",          "Up",                     PS_BTN + HB_UP },
     { "DpadDown",     "D-pad down",        "Down",                   PS_BTN + HB_DOWN },
     { "DpadLeft",     "D-pad left",        "Left, WheelDown",        PS_BTN + HB_LEFT },
@@ -137,9 +144,17 @@ static const struct { const char *name, *label, *keys; int pad; } k_act[ACT_COUN
     { "LookDown",     "Look down",         "K",                      PS_RS_DOWN },
     { "LookLeft",     "Look left",         "J",                      PS_RS_LEFT },
     { "LookRight",    "Look right",        "L",                      PS_RS_RIGHT },
-    { "LeftStickClick",  "Left stick click",  "LCtrl",               PS_BTN + HB_L3 },
+    { "LeftStickClick",  "Left stick click",  "C",                   PS_BTN + HB_L3 },
     { "RightStickClick", "Right stick click", "V",                   PS_BTN + HB_R3 },
 };
+
+/* The keys before 21 Nov, evening (the Chaos Bleeds port's): a settings file that
+ * still holds exactly these is moved to the ones above, once. */
+static const char *const k_old_keys[ACT_COUNT] = {
+    "Space", "Backspace, MouseMiddle", "E, MouseLeft", "Q, MouseRight", "Z", "C", "LShift", "F, RShift", "Enter", "Escape",
+    "Up", "Down", "Left, WheelDown", "Right, WheelUp", "W", "S", "A", "D", "I", "K", "J", "L", "LCtrl", "V",
+};
+#define KEY_DEFAULTS 2                  /* [controls] key_defaults: which defaults the file was last checked against */
 
 enum { BACKEND_AUTO, BACKEND_XINPUT, BACKEND_SDL, BACKEND_NONE };
 
@@ -150,6 +165,7 @@ static struct {
     int   trigger_dz;               /* 0..254 */
     int   invert_x, invert_y;
     int   mouse_look;
+    int   menu_keys;
     float mouse_sens;
     int   kb_port;                  /* 0-3, -1 nobody */
     int   key[ACT_COUNT][2];
@@ -202,6 +218,40 @@ static void on_setting_changed(const char *section, const char *key, void *user)
     InterlockedExchange(&C.loaded, 0);              /* re-read at the next poll */
 }
 
+/* Old default keys in the file, none changed: the new defaults are written
+ * over them. Anything else (a player's own keys) is left alone and pinned as
+ * it reads today. The file itself is asked, so a test run's BTVS_CONTROLS_*
+ * overrides do not count as a player's change. */
+static void move_old_defaults(void)
+{
+    char name[64], have[96];
+    const char *path = btvs_settings_path();
+    int a, old[2], cur[2], untouched = 1;
+    if (btvs_setting_int("controls", "key_defaults", 0) >= KEY_DEFAULTS)
+        return;
+    for (a = 0; a < ACT_COUNT && untouched; a++) {
+        sprintf_s(name, sizeof name, "key_%s", k_act[a].name);
+        have[0] = 0;
+        if (path && *path)
+            GetPrivateProfileStringA("controls", name, "", have, sizeof have, path);
+        if (!have[0])
+            continue;                               /* never written: nothing of the player's */
+        parse_keys(have, cur);
+        parse_keys(k_old_keys[a], old);
+        untouched = cur[0] == old[0] && cur[1] == old[1];
+    }
+    for (a = 0; a < ACT_COUNT; a++) {
+        sprintf_s(name, sizeof name, "key_%s", k_act[a].name);
+        if (untouched)
+            btvs_setting_set_str("controls", name, k_act[a].keys);
+        else                                        /* a key the file does not name keeps its old default */
+            btvs_setting_set_str("controls", name, btvs_setting_str("controls", name, k_old_keys[a]));
+    }
+    btvs_setting_set_int("controls", "key_defaults", KEY_DEFAULTS);
+    btvs_settings_save();
+    IN_LOG("keys: %s", untouched ? "the default keys are the new ones (21 Nov)" : "the settings file has the player's own keys: kept");
+}
+
 static void load_settings(void)
 {
     static int registered;
@@ -212,6 +262,7 @@ static void load_settings(void)
         return;
     if (!registered) {
         registered = 1;
+        move_old_defaults();
         btvs_setting_on_change("controls", NULL, on_setting_changed, NULL);
     }
     s = btvs_setting_str("controls", "backend", "auto");
@@ -227,6 +278,7 @@ static void load_settings(void)
     C.invert_y = btvs_setting_int("controls", "invert_y", 0) != 0;
     C.invert_x = btvs_setting_int("controls", "invert_x", 0) != 0;
     C.mouse_look = btvs_setting_int("controls", "mouse_look", 1) != 0;
+    C.menu_keys = btvs_setting_int("controls", "menu_keys", 1) != 0;
     v = btvs_setting_int("controls", "sensitivity", 5);           /* 1..10, 5 = normal */
     C.mouse_sens = (float)(v < 1 ? 1 : v > 10 ? 10 : v) / 5.0f;
     v = btvs_setting_int("controls", "keyboard_player", 1);       /* 1-4, 0 = keyboard off */
@@ -479,6 +531,69 @@ static int key_value(int code, int mouse_ok, int hw)
     return in_key_down(code);
 }
 
+/* The menu keys. In the game's menus (no level running, or the pause screen
+ * open) Enter and Space are A and Esc and Backspace are B, whatever those keys
+ * are bound to in play: Space jumps (B) but confirms, Esc pauses (Start) but
+ * cancels. On the title screen Enter and Space are Start as well. A key held
+ * while the game goes from play to a menu or back does nothing until it is let
+ * go, or Esc would pause and at once cancel the pause. [controls] menu_keys=0
+ * turns it off. */
+static int s_menu_mode;                         /* 0 play, 1 a menu, 2 the title screen */
+static int s_mk_code[4], s_mk_blocked[4];       /* Enter, Space, Escape, Backspace */
+static void used_dev(int kind);
+
+static void menu_key_codes(void)
+{
+    if (!s_mk_code[0]) {
+        s_mk_code[0] = in_key_code("Enter"); s_mk_code[1] = in_key_code("Space");
+        s_mk_code[2] = in_key_code("Escape"); s_mk_code[3] = in_key_code("Backspace");
+    }
+}
+
+/* Game thread (the same that reads the pads). */
+void btvs_input_menu_mode(int mode)
+{
+    int i;
+    if ((mode != 0) != (s_menu_mode != 0)) {    /* into a menu or out of one: what is held now waits */
+        menu_key_codes();
+        for (i = 0; i < 4; i++)
+            s_mk_blocked[i] = key_value(s_mk_code[i], 1, !s_clock_fn && !s_test_pad);
+    }
+    s_menu_mode = mode;
+}
+
+static void keys_to_actions(float *v, int mouse_ok, int hw, int port)
+{
+    int *const code = s_mk_code, *const blocked = s_mk_blocked;
+    int down[4], menu = C.menu_keys ? s_menu_mode : 0, a, i, k;
+    menu_key_codes();
+    for (i = 0; i < 4; i++)
+        down[i] = key_value(code[i], 1, hw);
+    for (i = 0; i < 4; i++)
+        if (!down[i])
+            blocked[i] = 0;
+    for (a = 0; a < ACT_COUNT; a++)
+        for (k = 0; k < 2; k++) {
+            int c = C.key[a][k];
+            for (i = 0; i < 4 && c; i++)
+                if (c == code[i] && (menu || blocked[i]))
+                    c = 0;
+            if (key_value(c, mouse_ok, hw)) {
+                v[a] = 1.0f;
+                if (hw && port == 0)
+                    used_dev(2);
+            }
+        }
+    for (i = 0; menu && i < 4; i++)
+        if (down[i] && !blocked[i]) {
+            v[i < 2 ? ACT_A : ACT_B] = 1.0f;
+            if (menu == 2 && i < 2)
+                v[ACT_START] = 1.0f;
+            if (hw && port == 0)
+                used_dev(2);
+        }
+}
+
 /* hw 0: the window has no focus, so no device, key or mouse is asked; only
  * keys held by a pad script count. */
 /* What player 1 last touched (1 a controller, 2 keyboard or mouse), kept in
@@ -539,9 +654,7 @@ static void live_pad(int port, btvs_pad *g, int hw)
         }
 
     if (port == C.kb_port && !hw) {
-        for (a = 0; a < ACT_COUNT; a++)
-            if (key_value(C.key[a][0], 1, 0) || key_value(C.key[a][1], 1, 0))
-                v[a] = 1.0f;
+        keys_to_actions(v, 1, 0, port);
         /* the script's mouse is the camera under the same rules as a real one */
         if (s_script_mouse && C.mouse_look && s_allow_mouse_look) {
             mlx = (float)s_script_mdx * 0.04f * C.mouse_sens;
@@ -559,12 +672,7 @@ static void live_pad(int port, btvs_pad *g, int hw)
         } else if (t >= s_wheel_until) {
             s_wheel_dir = 0;
         }
-        for (a = 0; a < ACT_COUNT; a++)
-            if (key_value(C.key[a][0], cap, 1) || key_value(C.key[a][1], cap, 1)) {
-                v[a] = 1.0f;
-                if (port == 0)
-                    used_dev(2);
-            }
+        keys_to_actions(v, cap, 1, port);
         if (cap) {
             in_mouse_delta(&dx, &dy);
             mlx = (float)dx * 0.04f * C.mouse_sens;
@@ -1782,6 +1890,8 @@ void btvs_input__test_reset(void)
     memset(s_last, 0, sizeof s_last);
     memset(&K, 0, sizeof K);
     s_capture_active = 0;
+    s_menu_mode = 0;
+    memset(s_mk_blocked, 0, sizeof s_mk_blocked);
     s_frame = 0; s_frame_external = 0; s_read1 = 0;
     s_test_pad = NULL;
     InterlockedExchange(&C.loaded, 0);

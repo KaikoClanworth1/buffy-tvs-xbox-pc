@@ -301,6 +301,7 @@ static void game_probe(void)
         was_paused = paused;
     }
     btvs_input_allow_mouse_look(player != 0 && !paused);
+    btvs_input_menu_mode(player != 0 && !paused ? 0 : !player && menu == 10 ? 2 : 1);
 }
 
 /* BTVS_INPUT_POS_LOG=<n>: every n reads of player 1's pad, where the player

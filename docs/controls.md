@@ -78,28 +78,39 @@ CMake compiles `btvs_input_xapi.c` in only when the generated code was made with
 
 Controller (any pad, by position; Black / White are the bumpers):
 
-| Xbox pad | PC pad | Keyboard / mouse |
-|---|---|---|
-| A | A / Cross | Space |
-| B | B / Circle | Backspace, middle mouse |
-| X | X / Square | E, left mouse |
-| Y | Y / Triangle | Q, right mouse |
-| Black | LB / L1 | Z |
-| White | RB / R1 | C |
-| Left trigger | LT / L2 (analog) | Left Shift |
-| Right trigger | RT / R2 (analog) | F, Right Shift |
-| Start | Start / Options | Enter |
-| Back | Back / Share | Escape |
-| D-pad | D-pad | arrow keys (wheel down / up = left / right) |
-| Left stick | left stick | W A S D |
-| Right stick | right stick | I J K L, and the mouse |
-| Stick clicks | L3 / R3 | Left Ctrl / V |
+| Xbox pad | does (first level) | PC pad | Keyboard / mouse |
+|---|---|---|---|
+| A | kick | A / Cross | right mouse, Enter |
+| B | jump | B / Circle | Space, Backspace |
+| X | punch | X / Square | left mouse, Q |
+| Y | use | Y / Triangle | E |
+| Black | ammo swap | LB / L1 | R |
+| White | inventory | RB / R1 | Tab |
+| Left trigger | look / aim, resets the camera | LT / L2 (analog) | Left Ctrl, F |
+| Right trigger | target | RT / R2 (analog) | Left Shift, middle mouse |
+| Start | pause (skips a cutscene) | Start / Options | Escape |
+| Back | "Back" on the game's Controls page | Back / Share | B |
+| D-pad | weapon select | D-pad | arrow keys (wheel down / up = left / right) |
+| Left stick | move | left stick | W A S D |
+| Right stick | camera | right stick | the mouse, and I J K L |
+| Stick clicks | | L3 / R3 | C / V |
 
-Mouse buttons act only while the mouse is the camera. The keyboard defaults are the Chaos Bleeds
-port's and are provisional. What the buttons do in this game, as seen in the first level: B jumps,
-A and X strike, Start pauses (and skips a cutscene), Black and White open the inventory screens
-(B closes them), the right stick turns the camera and the left trigger resets it (the game's own
-tip). So jump is on Backspace today, which wants changing once the owner has played.
+Every action has a key and no key is on two actions (the self-test checks both). Mouse buttons act
+only while the mouse is the camera, which is why punch and kick have a key as well.
+
+**In menus** (no level running, or the pause screen open) four keys mean what a PC player expects,
+whatever they are bound to in play: **Enter and Space confirm** (A), **Esc and Backspace cancel**
+(B). So Space jumps but confirms, and Esc pauses and then leaves the pause menu again. On the title
+screen Enter and Space are Start as well. A key that is down while the game goes into a menu or out
+of one does nothing until it is let go (Esc would otherwise pause and cancel the pause in one
+press). `[controls] menu_keys = 0` turns this off. The inventory screens are not menus to the port
+(it cannot tell they are open): there Enter and Backspace are confirm and cancel because A and B are
+bound to them, Space is B too, and Esc pauses.
+
+**A settings file from before 21 Nov** (the defaults then were the Chaos Bleeds port's: Space A,
+Backspace B, E X, Q Y ...) is moved once (`move_old_defaults` in `btvs_input.c`, marked with
+`key_defaults = 2`): if every `key_<Action>` in the file is still the old default, the new defaults
+are written; if the player changed even one, all of them stay exactly as they were.
 
 ## Settings (`[controls]` in `btvs_settings.ini`)
 
@@ -116,7 +127,9 @@ tip). So jump is on Backspace today, which wants changing once the owner has pla
 | `keyboard_player` | 1 | which player the keyboard and mouse are; 0 = off |
 | `button_pictures` | `auto` | `auto`, `xbox`, `playstation`, `keyboard`, `original`: see "Button pictures" |
 | `last_device` | | written by the port: `controller` or `keyboard`, whichever player 1 used last (for `auto`) |
-| `key_<Action>` | see above | up to two keys: `key_A = Space, MouseMiddle`; `None` = unbound |
+| `key_<Action>` | see above | up to two keys: `key_B = Space, Backspace`; `None` = unbound |
+| `menu_keys` | 1 | in menus Enter / Space are A and Esc / Backspace are B (see Defaults); 0 off |
+| `key_defaults` | | written by the port: which default keys the file was last checked against |
 | `pad_<Action>` | see above | one controller input: `pad_Black = LB` |
 
 Actions: `A B X Y Black White LeftTrigger RightTrigger Start Back DpadUp DpadDown DpadLeft DpadRight
@@ -354,7 +367,7 @@ itself, for the device the player is on:
 |---|---|---|
 | Xbox | an XInput pad (or any pad that is not a PlayStation one) is player 1 | A B X Y in their colours, `LB RB LT RT`, sticks `L` `R` |
 | PlayStation | player 1's pad is named DualSense / DualShock / PS4 / PS5 / Sony | cross, circle, square, triangle; `L1 R1 L2 R2` |
-| Keyboard and mouse | no pad, or the keyboard or mouse was the last thing used | the keys and mouse buttons bound, by name: `Space`, `E`, a mouse with the button lit |
+| Keyboard and mouse | no pad, or the keyboard or mouse was the last thing used | the keys and mouse buttons bound: `Space`, `E`, and a mouse whose left button, right button or wheel (the middle button) is amber |
 
 `[controls] button_pictures` chooses: `auto` (default), `xbox`, `playstation`, `keyboard`, or
 `original` for the game's own art untouched. The pictures follow the **bindings**: rebind jump to
@@ -383,6 +396,15 @@ folder to the runtime's **texture pack** (`xboxrecomp/src/kernel/nv2a_texpack.in
 of the texture's contents; the game's own coordinates then land on the bigger picture. Drawing takes
 about 0.2 s and is done again only when something it depends on changed (the set, a binding, the
 drawing itself: `load\made_from.txt`).
+
+With keyboard and mouse the menus' buttons show the key that works *in a menu* (`menu_source`): never
+a mouse button, and for A and B the menu keys, so CONFIRM is `Enter` and CANCEL is `Bksp` with the
+default keys. The tips, which are shown in play, show the first key bound: punch is the left mouse
+button there.
+
+A picture in a line of text sits a little left in its box and is 0.80 of it: the game sets the next
+letter about two pixels inside the box, and a full stop straight after a picture ("... and press
+(E).") was under the picture's edge.
 
 The menus fade a button that does nothing on a page themselves, so there is one look for a button
 and one for the moment it is pressed. Labels (SELECT, BACK, the Controls page's "Jump", "Kick" ...)
@@ -475,6 +497,15 @@ In hidden runs (21 Nov), frames dumped by the game, the game's own art against t
   `mouse_look = 0`: the new keys are beside "Kick", "Pause", "Punch" and "Look", lit on the
   keyboard, and Camera has its four keys instead of the line to the mouse.
 
+- 21 Nov, evening, with the new default keys (`btn_keys2_*`): the Controls page at 640x480 and
+  1080p; all eleven tips again at 1080p (left and right mouse buttons can be told apart, the full
+  stop after a picture shows: `btn_keys2_zoom_fullstop_and_mouse_before_after.png`); the Xbox set's
+  camera tip, unchanged but for the picture's place. Driven with keys only: Enter on the title
+  screen, Space and Enter to confirm, Esc and Backspace to go back (the log's menu ids), and in the
+  level Esc opened the pause screen and Esc again closed it. A settings file with one changed key
+  (`key_B = Tab`) and the rest old came out of a run unchanged, with the keys it did not name
+  written as the old defaults.
+
 Not seen: the journal's pages; a tip with A / B / X / Y, an arrow, "+" or White / Black in it (same
 page of pictures as the two that were seen; whether each sits well in its line was not looked at);
 the reworded tips at 640x480 other than the camera one; the keyboard Controls page with the game's
@@ -497,7 +528,7 @@ no hardware; menus 20 Nov 2026, the first level 21 Nov):
   four d-pad directions and a diagonal, both sticks in all four directions and at part deflection.
   Each was stored by the game with the expected value; values under the game's own thresholds
   (analog 30, stick dead zone) were stored as nothing. 29 of 29, no mismatch.
-- **The keyboard and mouse-button mapping** (`all_keys.txt`): each of the 29 default keys held by the
+- **The keyboard and mouse-button mapping** (`all_keys.txt`): each of the 29 default keys of that time (before 21 Nov; the script now holds the new ones and has not been run again with `BTVS_INPUT_VERIFY`) held by the
   script went through the bindings table and the same per-read function, and the game stored the
   input it is bound to. The key *reading* itself (`GetAsyncKeyState`) is not part of this.
 - **Bindings and options from the settings file**: with `key_A=K`, `key_LookDown=Num5`, `invert_y=1`
@@ -590,12 +621,15 @@ pause, **Report a Problem**, one line saying which step.
    still work. Plug it back in: it works again within about two seconds, without a restart.
    Then plug in a second pad: the first keeps player 1.
 5. **Keyboard and mouse.** W A S D walk, the mouse turns the camera (too fast or too slow? note
-   which; Options -> PC Controls -> Sensitivity changes it), Space is A, E or left click is X,
-   Q or right click is Y, Backspace is B (jump), Enter is Start, Z and C are the bumpers. The
-   cursor is hidden while playing, and free in the pause menu and after Alt+Tab.
+   which; Options -> PC Controls -> Sensitivity changes it), Space jumps, left click punches,
+   right click kicks, E uses, Shift targets, Ctrl looks, Tab is the inventory, R swaps ammo, Esc
+   pauses. In the menus Enter or Space confirms and Esc or Backspace goes back. The cursor is
+   hidden while playing, and free in the pause menu and after Alt+Tab. Your settings file had the
+   old keys: if you never changed one, the new ones are there now; if you did, yours are kept
+   (Reset Bindings gives the new ones).
 6. **Rebinding a key.** Options -> PC Controls -> Key Bindings: choose "B", press A, press the key
    you want for jump. Back in the level that key jumps. Quit the game, start it again: it still
-   does. Then Reset Bindings: Backspace jumps again.
+   does. Then Reset Bindings: Space jumps again.
 
 7. **Button pictures.** With the Xbox pad plugged in, start the game: the menus show coloured
    A B X Y discs (not the old purple medallions), Options -> Controls shows a modern controller,
@@ -608,12 +642,13 @@ pause, **Report a Problem**, one line saying which step.
    a level: the menus, the tips and the Controls page show the new one. Say which pictures look
    wrong, too small or too big.
 
-Not expected to be right yet: the default keys are the Chaos Bleeds port's and were chosen before
-this game could be played (jump on Backspace is the obvious one to change).
+Not checked by anyone playing: whether the new default keys feel right (they were chosen from
+what the buttons do in the first level, not from play).
 
 ## Not done
 
-- Keyboard defaults that suit this game (see the end of the checklist).
+- The inventory screens are not treated as menus (see Defaults): the port has no sign that they
+  are open. `IInventory::SetOpen` (0x22E4E0) is where to look.
 - The mouse is still captured during cutscenes and in the inventory screens.
 - Button pictures, and with them the Controls page (pad or keyboard and mouse), change set only at
   a level load or a start, not the moment another device is touched: the runtime's texture pack is

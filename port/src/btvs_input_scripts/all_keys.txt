@@ -1,20 +1,24 @@
 # The default keyboard and mouse bindings, one key at a time, as held keys ("K:<name>"):
-# they pass through the bindings table like real key presses. Run with BTVS_INPUT_VERIFY=1.
+# they pass through the bindings table like real key presses. Run with BTVS_INPUT_VERIFY=1
+# and BTVS_CONTROLS_MENU_KEYS=0: it runs on the title screen, where the menu keys would make
+# Enter / Space into A + Start and Esc / Backspace into B.
 after title
 hold 0.4
-2.0 K:Backspace        # B
-+0.6 K:MouseMiddle     # B
-+0.6 K:E               # X
+2.0 K:MouseRight       # A
++0.6 K:Enter           # A
++0.6 K:Space           # B
++0.6 K:Backspace       # B
 +0.6 K:MouseLeft       # X
-+0.6 K:Q               # Y
-+0.6 K:MouseRight      # Y
-+0.6 K:Z               # Black
-+0.6 K:C               # White
-+0.6 K:LShift          # left trigger
-+0.6 K:F               # right trigger
-+0.6 K:RShift          # right trigger
-+0.6 K:Escape          # Back
-+0.6 K:LCtrl           # left stick click
++0.6 K:Q               # X
++0.6 K:E               # Y
++0.6 K:R               # Black
++0.6 K:Tab             # White
++0.6 K:LCtrl           # left trigger
++0.6 K:F               # left trigger
++0.6 K:LShift          # right trigger
++0.6 K:MouseMiddle     # right trigger
++0.6 K:B               # Back
++0.6 K:C               # left stick click
 +0.6 K:V               # right stick click
 +0.6 K:Up
 +0.6 K:Down
@@ -29,5 +33,4 @@ hold 0.4
 +0.6 K:K
 +0.6 K:J
 +0.6 K:L
-+0.6 K:Enter           # Start
-+0.6 K:Space           # A
++0.6 K:Escape          # Start
