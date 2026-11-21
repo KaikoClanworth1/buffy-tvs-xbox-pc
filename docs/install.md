@@ -180,7 +180,7 @@ For tests and scripts. Nothing is shown and no focus is taken.
 
 ## What was checked on 21 Nov 2026, 19:21 build (main at 9ee65f8)
 
-`GAMEuffy_tvs.exe` reports commit `1912eafbe5`, built Nov 21 2026 19:21:53 (main at 9ee65f8 plus
+`GAME/buffy_tvs.exe` reports commit `1912eafbe5`, built Nov 21 2026 19:21:53 (main at 9ee65f8 plus
 Extras' prototype tools, which are not part of the exe). No regen was needed. No game was running in
 `GAME\` at deploy time. The owner's `btvs_settings.ini` and six save files have the same checksums
 before and after: the hidden checks used a copy of the settings and their own save and log folders.
@@ -188,8 +188,8 @@ before and after: the hidden checks used a copy of the settings and their own sa
 - Through the launcher's Play path: main menu at 2.2 s, `m00_spanishmission_1` loaded 11.7 s into the
   second process, exit code 0. One session window for both runs of the game, from the supervisor's lines.
 - The same with no console: level loaded at 11.9 s, exit code 0.
-- Controls' move to the new default keys happened in the checks' **copy** of the settings: only `key_`
-  lines differ from the owner's file. The owner's own file changes the same way at their next start.
+- Controls' move to the new default keys happened in the checks' **copy** of the settings: only `key_` lines and a new `button_pictures=auto`
+  line differ from the owner's file. The owner's own file changes the same way at their next start.
 
 ## What was checked on 21 Nov 2026, 13:25 build (main at 628385a)
 
