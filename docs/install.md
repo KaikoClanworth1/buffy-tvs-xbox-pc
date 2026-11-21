@@ -178,6 +178,39 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
+## What was checked on 21 Nov 2026, 23:11 build (main at ff8d8b0)
+
+`GAME/buffy_tvs.exe` reports commit `ff8d8b0dde`, built Nov 21 2026 23:11:31 (Graphics' fix for the slow
+level load inside the process). No regen was needed; no game was running from `GAME`. The owner's
+`btvs_settings.ini` and save files have the same checksums before and after.
+
+Same check as the 22:47 build's, one round longer: main menu -> Start Game -> level 1 -> the cemetery
+(`BTVS_TEST_RELAUNCH=40:m03_cemetery_1`) -> pause -> Quit -> main menu -> Start Game -> level 1: four
+restarts. No `BTVS_REBOOT`; hidden, muted, movies skipped, input by script.
+
+- **One process, one window**, by the log (`restarts: inside this process, same window`) and from outside
+  (`winwatch.py`): through the launcher's Play path the supervisor and one game process (39920) with one
+  game window (0329070C) from 1.3 s to the end; without the launcher the same (47276, 012E064A). Exit
+  code 0 both times.
+- **Load times** (restart to the first frame; the two runs): level 1 3.6 / 3.6 s, the cemetery 4.3 /
+  4.3 s, back to the menu 0.4 / 0.4 s, level 1 again 3.4 / 3.7 s. (22:47 build: 23 and 27.5 s.)
+- **Memory of the game process** (run without the launcher; working set from `tasklist` every 3 s,
+  private bytes from `winwatch.py`):
+
+  | Run | Working set | Private |
+  |---|---|---|
+  | main menu | 378 MB | 378 MB |
+  | level 1 | 393-413 MB | 404-426 MB |
+  | the cemetery | 408-424 MB | 406-416 MB |
+  | main menu after Quit | 421-422 MB | 370-372 MB |
+  | level 1 again | 417-427 MB, 420 at the end | 385-429 MB, 394 at the end |
+
+  Private memory at the second menu is back under the first menu's; the second level 1 ends lower than
+  the first peaked. No leak seen in two rounds. The working set does not come down at the menu (Windows
+  leaves pages with a process until it wants them).
+
+Not seen: a level change made by finishing a level, and more than two rounds.
+
 ## What was checked on 21 Nov 2026, 22:47 build (main at 9d86f9d)
 
 `GAME/buffy_tvs.exe` reports commit `9d86f9dd6e`, built Nov 21 2026 22:47:58 (all four areas'
