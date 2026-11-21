@@ -20,7 +20,7 @@
  *                                          the game's exit code
  *   --identify <image | folder | xbe>      which game and release it is
  *   --list <image>                         "<bytes>\t<path>" per file
- *   --capture <install|busy|error|play> <out.bmp> [game folder]
+ *   --capture <install|busy|translate|build|buildfail|error|play> <out.bmp> [game folder]
  *                                          the window's picture, drawn off screen
  *   --version
  *
@@ -1610,7 +1610,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
             return 0;
         }
         fwprintf(stderr, L"usage: --install <image> <folder> [--quiet] | --play [game folder] | --identify <image|folder|xbe> | --list <image> "
-                         L"| --capture <install|busy|error|play> <out.bmp> [game folder] | --version\n");
+                         L"| --capture <install|busy|translate|build|buildfail|error|play> <out.bmp> [game folder] | --version\n");
         return 1;
     }
 
@@ -1639,6 +1639,19 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
                 s_installing = 1;
                 s_permille = 420;
                 set_status(0, L"Copying the game from your disc image: 0.79 of 1.87 GB");
+            } else if (!wcscmp(argv[2], L"build")) {
+                /* the build of the game's code, mid-way: the line build_compile() posts */
+                s_installing = 1;
+                s_permille = B_P_TRANSLATE + (B_P_COMPILE - B_P_TRANSLATE) * 21 / 46;
+                set_status(0, L"Building the game for this PC: %d of %d parts done, %lu:%02lu so far (%d at a time)",
+                           21, 46, 1ul, 12ul, 8);
+            } else if (!wcscmp(argv[2], L"translate")) {
+                s_installing = 1;
+                s_permille = B_P_COPY + (B_P_TRANSLATE - B_P_COPY) * 2 / 9;
+                set_status(0, L"Translating the game's code (step %d of %d): %s", 3, 9, L"finding the game's functions");
+            } else if (!wcscmp(argv[2], L"buildfail")) {
+                set_status(1, L"Building the game failed at %s. The compiler's message is in " INSTALL_LOG
+                              L" in the game folder. Install again to retry: what is built is kept.", L"recomp_0012.c");
             } else if (!wcscmp(argv[2], L"error")) {
                 XbeInfo other;
                 memset(&other, 0, sizeof other);
