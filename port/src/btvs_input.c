@@ -553,12 +553,23 @@ static void live_pad(int port, btvs_pad *g, int hw)
 
 static uint32_t s_frame;
 static int s_frame_external;        /* Graphics calls btvs_input_frame() */
+static int s_frame1;                /* this run of the game has shown a frame ... */
+static double s_frame1_ms;          /* ... and when the first one was */
+
+static void frame_count(void)
+{
+    s_frame++;
+    if (!s_frame1) {
+        s_frame1 = 1;
+        s_frame1_ms = now_ms();
+    }
+}
 
 void btvs_input_frame(void)
 {
     LOCK();
     s_frame_external = 1;
-    s_frame++;
+    frame_count();
     UNLOCK();
 }
 
@@ -573,6 +584,8 @@ typedef struct {
     int has_ls, has_rs;
     int key[4], nkey;               /* "K:<key name>": keyboard keys held, through the bindings */
     int has_mouse, mdx, mdy;        /* "M:<dx>,<dy>": mouse movement, counts for each pad read */
+    int seen;                       /* a pad read has fallen inside its time */
+    double late;                    /* it began this much late (the game was not reading the pad) */
 } sc_event;
 typedef struct { char mark[24]; int fired; double t0; uint32_t f0; } sc_segment;
 
@@ -846,7 +859,7 @@ int btvs_input_script_done(void)
     for (i = 0; done && i < s_nev; i++) {
         const sc_event *e = &s_ev[i];
         double rel = e->frames ? (double)(s_frame - s_seg[cur].f0) : now_ms() - s_seg[cur].t0;
-        if (e->seg == cur && e->every <= 0.0 && rel < e->at + e->dur)
+        if (e->seg == cur && e->every <= 0.0 && (!e->seen || rel < e->at + e->late + e->dur))
             done = 0;
     }
     UNLOCK();
@@ -872,7 +885,10 @@ static void script_start(void)
     }
 }
 
-static int script_event_on(const sc_event *e, int cur)
+/* A press whose whole time passed with no pad read (the game stalled: a load,
+ * a frame dump) is not lost: it starts at the first read after and lasts as
+ * long as written. */
+static int script_event_on(sc_event *e, int cur)
 {
     double rel;
     if (e->seg != cur)
@@ -881,8 +897,12 @@ static int script_event_on(const sc_event *e, int cur)
     if (rel < 0.0)
         return 0;
     if (e->every > 0.0)
-        rel = fmod(rel, e->every);
-    return rel < e->dur;
+        return fmod(rel, e->every) < e->dur;
+    if (!e->seen) {
+        e->seen = 1;
+        e->late = rel >= e->dur ? rel : 0.0;
+    }
+    return rel - e->late < e->dur;
 }
 
 /* The keys the script holds down now (they belong to the keyboard's player). */
@@ -916,7 +936,7 @@ static void script_apply(int port, btvs_pad *g)
         return;
     cur = script_current();
     for (i = 0; i < s_nev; i++) {
-        const sc_event *e = &s_ev[i];
+        sc_event *e = &s_ev[i];
         if (e->nkey || e->has_mouse || e->port != port || !script_event_on(e, cur))
             continue;
         g->buttons |= e->pad.buttons;
@@ -938,6 +958,9 @@ static void script_apply(int port, btvs_pad *g)
  *                  the fields the mask names (u16, u8 x n, i16 x n)
  *   end record     tag = 0xFF, varint polls x 4 (reads since each port's last
  *                  record), varint frames, varint ms
+ *   first frame    tag = 0xFE, varint ms since the recording began: when the
+ *                  game showed its first frame. Only in a recording begun
+ *                  before that (a run recorded from its start).
  * A record is written when a port's pad differs from its previous record, so a
  * resting pad costs nothing. A file without an end record (the game died) is
  * still good: playback stops at the last record. */
@@ -949,8 +972,9 @@ static struct {
     int have[BTVS_PORTS], conn[BTVS_PORTS];
     btvs_pad last[BTVS_PORTS];
     uint32_t frame;
-    double ms, flushed;
+    double ms, flushed, t0;
     int unwritten;                  /* records since the last flush */
+    int anchored;                   /* the first-frame record is written, or there will be none */
 } R;
 
 static void put_varint(FILE *f, uint32_t v)
@@ -968,6 +992,12 @@ static void record_poll(int port, int connected, const btvs_pad *g)
         return;
     R.polls[port]++;
     t = now_ms();
+    if (!R.anchored && s_frame1) {
+        fputc(0xFE, R.f);
+        put_varint(R.f, (uint32_t)(s_frame1_ms > R.t0 ? s_frame1_ms - R.t0 + 0.5 : 0.0));
+        R.anchored = 1;
+        R.unwritten = 1;
+    }
     if (R.unwritten && t - R.flushed > 1000.0) {    /* a crash loses at most a second */
         fflush(R.f);
         R.flushed = t;
@@ -1034,7 +1064,8 @@ int btvs_input_record_begin(const char *path)
         fwrite(REC_MAGIC, 1, 8, R.f);
         fwrite(hdr, 4, 2, R.f);
         R.frame = s_frame;
-        R.ms = R.flushed = now_ms();
+        R.ms = R.flushed = R.t0 = now_ms();
+        R.anchored = s_frame1;        /* begun in mid-game: no first frame to mark */
         IN_LOG("recording to %s", path);
     } else {
         IN_LOG("cannot record to %s", path);
@@ -1071,7 +1102,7 @@ int btvs_input_recording(void)
 /* ── playback ────────────────────────────────────────────────────────────── */
 
 typedef struct { uint32_t poll, frame, ms; btvs_pad pad; uint8_t conn; } pb_rec;
-enum { PB_POLL, PB_FRAME, PB_TIME };
+enum { PB_POLL, PB_FRAME, PB_TIME, PB_GAME };
 static struct {
     int active, mode;
     pb_rec *rec[BTVS_PORTS];
@@ -1082,6 +1113,8 @@ static struct {
     uint32_t end_frame, end_ms;
     uint32_t f0;
     double t0;
+    uint32_t anchor;                /* PB_GAME: the recording's first frame, ms from its start */
+    double frame1;                  /* PB_GAME: this run's first frame as counted from; 0 = not yet */
 } P;
 
 static int get_varint(const uint8_t **p, const uint8_t *end, uint32_t *v)
@@ -1098,6 +1131,8 @@ static int get_varint(const uint8_t **p, const uint8_t *end, uint32_t *v)
     return 0;
 }
 
+static int s_parse_anchor;          /* the recording just read: ms of its first-frame record, -1 none */
+
 /* Read a whole recording. Returns the record count, -1 when it is not one. */
 static int recording_parse(const char *path, pb_rec *out[BTVS_PORTS], int n[BTVS_PORTS],
                            uint32_t total[BTVS_PORTS], uint32_t *end_frame, uint32_t *end_ms)
@@ -1113,6 +1148,7 @@ static int recording_parse(const char *path, pb_rec *out[BTVS_PORTS], int n[BTVS
     memset(last, 0, sizeof last);
     for (port = 0; port < BTVS_PORTS; port++) { out[port] = NULL; n[port] = 0; total[port] = 0; }
     *end_frame = *end_ms = 0;
+    s_parse_anchor = -1;
     if (!f)
         return -1;
     fseek(f, 0, SEEK_END);
@@ -1140,6 +1176,12 @@ static int recording_parse(const char *path, pb_rec *out[BTVS_PORTS], int n[BTVS
             if (get_varint(&p, end, &df)) frame += df;
             if (get_varint(&p, end, &dm)) ms += dm;
             break;
+        }
+        if (tag == 0xFE) {
+            if (!get_varint(&p, end, &dm))
+                break;
+            s_parse_anchor = (int)dm;
+            continue;
         }
         port = tag & 3;
         if (!get_varint(&p, end, &dp) || !get_varint(&p, end, &df) || !get_varint(&p, end, &dm) || end - p < 2)
@@ -1202,9 +1244,18 @@ int btvs_input_playback(const char *path)
     count = recording_parse(path, P.rec, P.n, P.total, &P.end_frame, &P.end_ms);
     if (count >= 0) {
         P.active = 1;
-        P.mode = mode && !_stricmp(mode, "frame") ? PB_FRAME : mode && !_stricmp(mode, "time") ? PB_TIME : PB_POLL;
+        P.mode = mode && !_stricmp(mode, "frame") ? PB_FRAME : mode && !_stricmp(mode, "time") ? PB_TIME
+               : mode && !_stricmp(mode, "poll") ? PB_POLL : PB_GAME;
+        /* The game clock needs both runs caught before their first frame;
+         * anything else (a recording begun or played in mid-game) goes by
+         * read count. */
+        if (P.mode == PB_GAME && (s_parse_anchor < 0 || s_frame1))
+            P.mode = PB_POLL;
+        P.anchor = s_parse_anchor > 0 ? (uint32_t)s_parse_anchor : 0;
         P.f0 = s_frame;
         P.t0 = now_ms();
+        IN_LOG("playback clock: %s", P.mode == PB_POLL ? "pad reads" : P.mode == PB_FRAME ? "frames" : P.mode == PB_TIME ? "time"
+               : "time from the first frame");
         for (p = 1; p < BTVS_PORTS; p++)
             if (P.total[p] > P.total[P.main_port])
                 P.main_port = p;
@@ -1240,8 +1291,21 @@ static int playback_poll(int port, btvs_pad *g)
     } else if (P.mode == PB_FRAME) {
         key = s_frame - P.f0;
         over = key > P.end_frame;
-    } else {
+    } else if (P.mode == PB_TIME) {
         key = (uint32_t)(now_ms() - P.t0);
+        over = key > P.end_ms;
+    } else {
+        /* Until this run shows its first frame (a level loading, however long
+         * that takes) the recording waits at its own first frame; from there
+         * both go by the clock. */
+        double t = now_ms();
+        if (!s_frame1) {
+            key = (uint32_t)(t - P.t0);
+            if (key >= P.anchor)
+                key = P.anchor ? P.anchor - 1 : 0;
+        } else {
+            key = P.anchor + (uint32_t)(t > s_frame1_ms ? t - s_frame1_ms : 0.0);
+        }
         over = key > P.end_ms;
     }
     if (over) {
@@ -1280,6 +1344,8 @@ int btvs_input_dump_recording(const char *path, FILE *out)
                 r->pad.analog[0], r->pad.analog[1], r->pad.analog[2], r->pad.analog[3], r->pad.analog[4],
                 r->pad.analog[5], r->pad.analog[6], r->pad.analog[7], r->pad.lx, r->pad.ly, r->pad.rx, r->pad.ry);
     }
+    if (s_parse_anchor >= 0)
+        fprintf(out, "first frame of the game: %.3f s\n", s_parse_anchor / 1000.0);
     fprintf(out, "end: %.3f s, %u frames, reads %u %u %u %u\n", end_ms / 1000.0, end_frame,
             total[0], total[1], total[2], total[3]);
     for (i = 0; i < BTVS_PORTS; i++)
@@ -1525,7 +1591,7 @@ int btvs_input_poll(int port, btvs_pad *g)
     env_start();
     load_settings();
     if (port == 0 && !s_frame_external)
-        s_frame++;                              /* nobody counts frames: one read of port 1 is one */
+        frame_count();                          /* nobody counts frames: one read of port 1 is one */
 
     conn = -2;
     if (P.active)
@@ -1675,7 +1741,7 @@ void btvs_input__test_reset(void)
     memset(s_last, 0, sizeof s_last);
     memset(&K, 0, sizeof K);
     s_capture_active = 0;
-    s_frame = 0; s_frame_external = 0;
+    s_frame = 0; s_frame_external = 0; s_frame1 = 0;
     s_test_pad = NULL;
     InterlockedExchange(&C.loaded, 0);
     UNLOCK();

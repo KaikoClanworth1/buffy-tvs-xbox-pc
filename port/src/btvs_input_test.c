@@ -161,7 +161,9 @@ static int selftest(void)
     /* 5. the recording gives the same pads back, read for read */
     btvs_input__test_reset();
     s_t = 50000.0;
+    _putenv_s("BTVS_INPUT_REPLAY_CLOCK", "poll");
     CHECK(btvs_input_playback(rec));
+    _putenv_s("BTVS_INPUT_REPLAY_CLOCK", "");
     CHECK(btvs_input_playback_active());
     for (i = 0; i < TICKS; i++) {
         btvs_input_frame();
@@ -181,6 +183,29 @@ static int selftest(void)
     CHECK(!btvs_input_playback_active());
     n = btvs_input_dump_recording(rec, stdout);
     CHECK(n > 10 && n < 40);                    /* changes only, not 1400 reads */
+
+    /* 5e. the usual clock is time from the game's first frame: a run that
+     * starts later (a longer load) gets the same pads at the same time after
+     * it, and when reads stop for a while the recording does not fall behind */
+    btvs_input__test_reset();
+    s_t = 300000.0;
+    CHECK(btvs_input_playback(rec));
+    s_t += 7000.0;                              /* nothing for 7 s: no frame, no read */
+    for (i = 0; i < TICKS - 30; i++) {
+        int j = i < 300 ? i : i + 25;           /* 400 ms without a read at tick 300 */
+        if (i == 300)
+            s_t += 400.0;
+        btvs_input_frame();
+        btvs_input_poll(0, &a);
+        c1 = btvs_input_poll(1, &b);
+        if (memcmp(&a, &seq[j][0], sizeof a) || memcmp(&b, &seq[j][1], sizeof b) || c1 != seqc[j]) {
+            printf("FAIL: playback by time differs at read %d\n", i);
+            print_pad(s_t, 0, 1, &seq[j][0]); print_pad(s_t, 0, 1, &a);
+            s_fail++;
+            break;
+        }
+        s_t += 16.0;
+    }
     DeleteFileA(rec);
 
     /* 5a. a mark reached while a recording plays is kept, and the script goes
