@@ -306,6 +306,11 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 **From Audio, 21 Nov (found while checking sound in the first level; details in `docs/audio.md`):**
 
+*The hitch and movie-decoder items were measured while the game had one CPU. On `a70227f` and later
+(all CPUs) the menu holds 60 frames a second and the movies run at their own speed with a handful of
+short sound dropouts, so those two are close to settled; the spinning thread, the read logging and
+the disc-file sharing are as they were.*
+
 - **Audio -> Graphics (runtime), the spinning thread, with a tried fix.** It is `XapiMmTimerThread`:
   `KeWaitForMultipleObjects(count 1, no timeout)` on a guest `KEVENT` (type 1, e.g. `0x01110E00`).
   `bridge_KeWaitForMultipleObjects` passes that guest address to Windows as a handle, the wait fails at
