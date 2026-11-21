@@ -366,32 +366,104 @@ static GpuShader *nvs_passthrough(void)
  * through the matrix the title's port put in constant slots 188..191 (its
  * four columns: world * view * projection, the viewport folded in), colours
  * and texture coordinates as they are. No lighting, no texture transforms. */
-static GpuShader *s_nfix_vs[256];
+/* ... and each stage's texture matrix (D3DTSS_TEXTURETRANSFORMFLAGS): a title
+ * lays a texture over the world with one -- a drifting layer of light or
+ * mist multiplied over the ground, an effect's picture placed by position --
+ * and without it the stage sampled the texture at the vertices' raw
+ * coordinates: thousands of repeats across a wall, a different texel every
+ * frame the camera moved (flashing). The port puts the four matrices, by
+ * rows, in constant slots 172..187 (stage n: 172 + 4n).
+ *
+ * Per stage in the key: the coordinate set (2 bits), the count the flags ask
+ * for (3), projected (1), how many components the vertex has (2) and the
+ * generated coordinates D3DTSS_TEXCOORDINDEX's high word asks for (2). D3D
+ * puts a 1 after the vertex's last component and 0 after that, multiplies
+ * (row vector) by the matrix, keeps `count` components and, projected,
+ * divides by the last of them.
+ *
+ * Generated coordinates (a shiny floor's reflection, a texture laid on by
+ * the camera's view): the vertex's normal, position or reflection vector in
+ * camera space instead of a coordinate set, three components. The port puts
+ * world * view, by rows, in slots 168..171. */
+typedef struct { uint64_t key; GpuShader *vs; } NFixVs;
+static NFixVs s_nfix_vs[96];
+static int s_nfix_count;
 
-/* `tss`: the texture stages. Each stage takes the texture coordinate set its
- * D3DTSS_TEXCOORDINDEX names (a light-map pass draws the second set through
- * stage 0), not the set with its own number. */
-static GpuShader *nvs_fixed(const uint32_t *tss)
+static GpuShader *nvs_fixed(const uint32_t *tss, const NativeAttr *attr)
 {
-    uint32_t key = 0, st;
+    static char src[8192];
+    uint64_t key = 0;
+    uint32_t st;
+    int any_gen = 0;
+    Sb b;
+    int i;
     if (nenv("BUFFY_NATIVE_NO_TEXCOORDINDEX"))   /* (testing: as it was before) */
         tss = NULL;
-    for (st = 0; st < 4; st++)
-        key |= ((tss ? tss[st * 32 + NTS_TEXCOORDINDEX] : st) & 3u) << (st * 2);
-    if (!s_nfix_vs[key]) {
-        static char src[4096];
-        sprintf_s(src, sizeof src, "%s"
-            "P vs(VI I) {\n"
-            "  P p; float4 v = float4(I.v[0].xyz, 1.0);\n"
-            "  p.p = float4(dot(v, c[188]), dot(v, c[189]), dot(v, c[190]), dot(v, c[191]));\n"
-            "  p.p.x *= vpp[3].z; p.p.y *= vpp[3].x;\n"
-            "  p.c0 = saturate(I.v[3]); p.c1 = saturate(I.v[4]);\n"
-            "  p.t0 = I.v[%u]; p.t1 = I.v[%u]; p.t2 = I.v[%u]; p.t3 = I.v[%u];\n"
-            "  p.fog = float4(1, 0, 0, 1);\n"
-            "  return p; }\n", s_vsh_head, 9 + (key & 3), 9 + (key >> 2 & 3), 9 + (key >> 4 & 3), 9 + (key >> 6 & 3));
-        s_nfix_vs[key] = nvs_compile(src);
+    for (st = 0; st < 4; st++) {
+        uint32_t tci = (tss ? tss[st * 32 + NTS_TEXCOORDINDEX] : st) & 3u;
+        int on = tss && attr && !nenv("BUFFY_NATIVE_NO_TEXMATRIX") && tss[st * 32 + NTS_COLOROP] > 1;
+        uint32_t ttff = on ? tss[st * 32 + 21] : 0;
+        uint32_t gen = on ? (tss[st * 32 + NTS_TEXCOORDINDEX] >> 16) & 3u : 0;
+        uint32_t count = ttff & 0xFF, k = tci;
+        if (count >= 1 && count <= 4) {
+            uint32_t size = (attr[9 + tci].fmt >> 4) & 0xF;
+            if (size < 1 || size > 4)
+                size = 2;
+            k |= count << 2 | ((ttff >> 8) & 1u) << 5 | (size - 1) << 6;
+        }
+        k |= gen << 8;
+        key |= (uint64_t)k << (st * 10);
     }
-    return s_nfix_vs[key];
+    for (i = 0; i < s_nfix_count; i++)
+        if (s_nfix_vs[i].key == key)
+            return s_nfix_vs[i].vs;
+    b.p = src; b.n = 0; b.cap = sizeof src;
+    src[0] = 0;
+    sb_add(&b, "%s"
+        "P vs(VI I) {\n"
+        "  P p; float4 v = float4(I.v[0].xyz, 1.0);\n"
+        "  p.p = float4(dot(v, c[188]), dot(v, c[189]), dot(v, c[190]), dot(v, c[191]));\n"
+        "  p.p.x *= vpp[3].z; p.p.y *= vpp[3].x;\n"
+        "  p.c0 = saturate(I.v[3]); p.c1 = saturate(I.v[4]);\n", s_vsh_head);
+    for (st = 0; st < 4; st++)
+        if ((key >> (st * 10 + 8)) & 3)
+            any_gen = 1;
+    if (any_gen)                                 /* camera space: position, normal, reflection of the eye's ray */
+        sb_add(&b, "  float3 cp = v.x * c[168].xyz + v.y * c[169].xyz + v.z * c[170].xyz + c[171].xyz;\n"
+                   "  float3 n0 = I.v[2].xyz;\n"
+                   "  float3 cn = n0.x * c[168].xyz + n0.y * c[169].xyz + n0.z * c[170].xyz;\n"
+                   "  cn = dot(cn, cn) > 0.0 ? normalize(cn) : float3(0, 0, 1);\n"
+                   "  float3 ce = dot(cp, cp) > 0.0 ? normalize(cp) : float3(0, 0, 1);\n"
+                   "  float3 cr = ce - 2.0 * dot(ce, cn) * cn;\n");
+    for (st = 0; st < 4; st++) {
+        uint32_t k = (uint32_t)(key >> (st * 10)) & 0x3FF, tci = k & 3, count = (k >> 2) & 7, proj = (k >> 5) & 1;
+        uint32_t size = ((k >> 6) & 3) + 1, gen = (k >> 8) & 3;
+        static const char *const pad[4] = { "float4(q.x, 1, 0, 0)", "float4(q.xy, 1, 0)", "float4(q.xyz, 1)", "q" };
+        static const char *const genv[4] = { "", "cn", "cp", "cr" };
+        if (!count) {
+            if (gen)
+                sb_add(&b, "  p.t%u = float4(%s, 1);\n", st, genv[gen]);
+            else
+                sb_add(&b, "  p.t%u = I.v[%u];\n", st, 9 + tci);
+            continue;
+        }
+        if (gen)
+            sb_add(&b, "  { float4 q = float4(%s, 1);\n", genv[gen]);
+        else
+            sb_add(&b, "  { float4 q = I.v[%u]; q = %s;\n", 9 + tci, pad[size - 1]);
+        sb_add(&b, "    float4 r = q.x * c[%u] + q.y * c[%u] + q.z * c[%u] + q.w * c[%u];\n",
+               172 + st * 4, 173 + st * 4, 174 + st * 4, 175 + st * 4);
+        if (!proj)
+            sb_add(&b, "    p.t%u = float4(%s, 1); }\n", st, count == 1 ? "r.x, 0, 0" : count == 2 ? "r.xy, 0" : "r.xyz");
+        else
+            sb_add(&b, "    p.t%u = %s; }\n", st, count == 2 ? "float4(r.x, 0, 0, r.y)" : count == 3 ? "float4(r.xy, 0, r.z)" : "r");
+    }
+    sb_add(&b, "  p.fog = float4(1, 0, 0, 1);\n  return p; }\n");
+    if (s_nfix_count >= (int)(sizeof s_nfix_vs / sizeof s_nfix_vs[0]))
+        return s_nfix_count ? s_nfix_vs[0].vs : NULL;
+    s_nfix_vs[s_nfix_count].key = key;
+    s_nfix_vs[s_nfix_count].vs = nvs_compile(src);
+    return s_nfix_vs[s_nfix_count++].vs;
 }
 
 /* ── pixel shaders: fixed function (texture stages) ── */
@@ -399,7 +471,7 @@ static GpuShader *nvs_fixed(const uint32_t *tss)
 typedef struct {
     uint32_t op[4][6];                 /* per stage: colorop, arg1, arg2, alphaop, arg1, arg2 */
     uint32_t arg0[4][2];               /* colorarg0, alphaarg0 (3-argument ops) */
-    uint32_t bound;                    /* bit per stage: a texture is bound */
+    uint32_t bound;                    /* bit per stage: a texture is bound; bit 4 + stage: it is a cube map */
 } NFfKey;
 
 typedef struct { NFfKey key; GpuShader *ps; } NFfEntry;
@@ -482,7 +554,9 @@ static int nff_generate(const NFfKey *k, char *out, int cap)
     }
     sb_add(&b, "  float4 t0 = 0, t1 = 0, t2 = 0, t3 = 0, tmp = 0;\n");
     for (st = 0; st < 4; st++)
-        if (k->bound & (1u << st))
+        if ((k->bound & (1u << st)) && (k->bound & (16u << st)))    /* a cube map: by direction (a reflection) */
+            sb_add(&b, "  t%d = Q%d.Sample(S%d, i.t%d.xyz);\n", st, st, st, st);
+        else if (k->bound & (1u << st))
             sb_add(&b, "  t%d = T%d.Sample(S%d, i.t%d.xy / (i.t%d.w != 0.0 ? i.t%d.w : 1.0) * texnorm[%d].xy);\n",
                    st, st, st, st, st, st, st);
     sb_add(&b, "  float4 cur = i.c0;\n");
@@ -666,8 +740,8 @@ void nv2a_native_prewarm_fixed(void)
     static const uint32_t own[32 * 4] = { [28] = 0, [32 + 28] = 1, [64 + 28] = 2, [96 + 28] = 3 };
     static const uint32_t second[32 * 4] = { [28] = 1, [32 + 28] = 1, [64 + 28] = 2, [96 + 28] = 3 };
     nvs_passthrough();
-    nvs_fixed(own);
-    nvs_fixed(second);
+    nvs_fixed(own, NULL);
+    nvs_fixed(second, NULL);
 }
 
 /* This PC's own list (ShaderCache\shader_keys.bin), all of it. */
@@ -916,6 +990,7 @@ typedef struct {
     uint32_t checked;                  /* s_frame_no of the last hash check */
     DWORD last_use;
     GpuBuffer *buf;
+    uint32_t changes;                  /* times its bytes were found changed */
 } NVbEntry;
 
 #define NVB_CACHE 1024
@@ -1002,20 +1077,31 @@ static GpuBuffer *nvb_stream(uint32_t va, uint32_t stride, uint32_t bytes, int s
     }
     if (e && e->bytes >= bytes) {
         e->last_use = now;
-        if (e->checked == s_frame_no && nenv("BUFFY_NATIVE_VBCHECK")) {
+        int every = scratch || ((e->bytes <= 4096 || e->changes >= 2) && !nenv("BUFFY_NATIVE_VB_ONCE"));
+        if (e->checked == s_frame_no && !every && nenv("BUFFY_NATIVE_VBCHECK")) {
             /* debug: data rewritten since this frame's check -> stale draw */
             static unsigned n;
             if (nvb_hash(mem + va, e->bytes) != e->hash && n++ < 40)
                 fprintf(stderr, "[NATIVE] stale VB va=%08X stride=%u bytes=%u frame=%u\n",
                         va, stride, e->bytes, s_frame_no);
         }
-        if (e->checked != s_frame_no || scratch) {
+        /* Once a frame is enough for geometry that never changes -- and wrong
+         * for memory the title fills again for each draw: particles, beams,
+         * flames, each a few quads built in the same small buffer several
+         * times a frame. Every draw after the first then showed the first
+         * one's vertices (an effect's quads at another effect's place, a
+         * sprite stretched across the screen for a frame). So a small stream,
+         * and one whose bytes have been seen to change, is looked at at every
+         * use. BUFFY_NATIVE_VB_ONCE=1: once a frame for all, as before (testing). */
+        if (e->checked != s_frame_no || every) {
             uint64_t h = nvb_hash(mem + va, e->bytes);
             e->checked = s_frame_no;
             if (h != e->hash) {
                 e->hash = h;
                 gpu_buffer_update(e->buf, mem + va);
                 s_nvb_stat[2]++;
+                if (e->changes < 1000)
+                    e->changes++;
             }
         }
         return e->buf;
@@ -1792,7 +1878,7 @@ static int nv2a_native_draw_one(const NativeDraw *d, GpuTexture *rt, GpuTexture 
         try_gpu = idx && !nenv("BUFFY_NATIVE_CPUVB") && nvb_supported(d, &mask) && !(d->passthrough && mask);
         gpu_mask = try_gpu ? mask : 0;
     }
-    vs = d->passthrough == 2 ? nvs_fixed(d->tss) : d->passthrough ? nvs_passthrough() : nvs_program(d->vp_start, &uses_viewport, gpu_mask);
+    vs = d->passthrough == 2 ? nvs_fixed(d->tss, d->attr) : d->passthrough ? nvs_passthrough() : nvs_program(d->vp_start, &uses_viewport, gpu_mask);
     if (!vs || !s_nlayout) { s_nstat[1]++; return 0; }
 
     /* the inputs: the game's own buffers on the GPU (indexed draws), else
@@ -1959,7 +2045,7 @@ static int nv2a_native_draw_one(const NativeDraw *d, GpuTexture *rt, GpuTexture 
                 break;
             }
         }
-        k.bound = bound;
+        k.bound = bound | cube << 4;
         gpu_argb(d->rs[NRS_TEXTUREFACTOR], &cb[24]);
         ps = nff_get(&k);
     }

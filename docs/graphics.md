@@ -312,6 +312,58 @@ waits for its new timer thread on an event; the two threads met that event for t
 same moment and each made its own stand-in for it (`ke_event_shadow`), so the wait was on one and the
 set on the other. Looking up and making is one step now.
 
+## Effects in cutscenes: flashing, wrong for a frame
+
+The owner: "some cutscenes have flashing effects and broken effects". Looked at with the cemetery's
+opening cutscene (lightning, a flame in a hand, smoke, a portal), level 1's and the high school's, every
+frame dumped (`BTVS_SHOT_FRAMES`) and scored for what differs from both its neighbours. Four causes
+found, all in the renderer, none in the game's timing:
+
+1. **Vertex data looked at once a frame.** The game's vertex streams are uploaded once and checked for
+   change at most once a frame (`nvb_stream`). Right for geometry; wrong for the small buffer an effect
+   builds its quads in again for each draw -- every draw after the first that frame showed the first
+   one's vertices. `BUFFY_NATIVE_VBCHECK=1` counted it: 40 in the first frame it looked at. Now a stream
+   of up to 4 KB, and any stream whose bytes have been seen to change twice, is checked at every use.
+2. **A texture's change detected from 64 words.** `gpu_tex_hash` sampled 64 words of a texture, wherever
+   they fell. An effect's picture -- mostly empty, a few texels of lightning -- could change without one of
+   the 64 changing, and the old picture stayed: the first frame of the lightning was a white rectangle,
+   the flame showed a wrong picture for single frames (two or three a minute). Now every byte is hashed
+   (up to 256 KB; one word in eight of anything larger).
+3. **No texture matrices in the fixed-function path.** `D3DTSS_TEXTURETRANSFORMFLAGS` was ignored: a
+   stage that lays a texture over the world by position (the cemetery multiplies a drifting layer over
+   its walls and gate; an effect places its picture the same way) sampled it at the vertices' raw
+   coordinates -- thousands of repeats, a different texel each frame the camera moved: a bright striped
+   patch that flickered. `nvs_fixed` now multiplies by the stage's matrix with D3D's rules (the port
+   passes the four in constant slots 172..187).
+4. **No generated coordinates, no cube maps there.** `D3DTSS_TEXCOORDINDEX`'s high word (camera-space
+   normal, position, reflection vector) was ignored and a cube map bound to a texture stage was never
+   sampled (the high school has a reflection-vector stage). Both are done now; world * view is in slots
+   168..171.
+
+Before / after, in `port/runs/shots`: `2250_cemetery_gate_flashing_patch_before_after.png`,
+`2250_lightning_first_frame_before_white_rectangle.png` / `..._after.png`,
+`2250_cemetery_cutscene_sheet_before.png` / `..._after.png`, `2250_highschool_cutscene_before_after_sheet.png`.
+Cost: none measurable (cemetery fight, game thread 12.8 ms a frame either way on a busy PC).
+
+**`BTVS_STATE_CENSUS=1`** logs every distinct texture-stage set-up, blend / test set-up and deferred
+render-state value a draw comes with, once, with frame and time, whether the draw is fixed-function or a
+vertex program's, the texture matrices in use, and `!!` at what the renderer does not do. The three
+cutscenes' census is `2250_state_census_three_cutscenes.txt`. What it shows as still not done:
+
+- `BUMPENVMAP` on characters (stage 0 of their four): the bump map does not shift the next stage's
+  environment map; the stage passes its input on. Known since the brightness round; a look, not a flash.
+- Nothing else in these three cutscenes: no `PREMODULATE`, no result to `TEMP`, no colour key, alpha
+  kill or signed colour, no blend operation outside add / subtract / min / max.
+
+**Not fixed, and what it is:** in the cemetery cutscene the flame is a tall column for one frame after
+the cut to the close-up. That frame follows a frame of 0.4 s (the cut), and the flame's particles are
+moved by the time since the last frame: the game's own reaction to a long frame, the same family as
+objects jumping after a hitch. The fix is the long frame, not the flame.
+
+**Not checked:** cutscenes other than these three openings; the reflection in the high school by eye
+against the console (which object it is on was not found in the frames: no visible difference before /
+after); whether fixed-function draws anywhere rely on fog (that path draws without fog, as before).
+
 ## One process for the session
 
 The owner, after playing the build with the session window: "When loading a new chaper/mission the

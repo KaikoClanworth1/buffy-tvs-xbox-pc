@@ -217,6 +217,21 @@ void btvs_shot_frame(void)
         every_next += every;
         save_frame(path);
     }
+    {   /* BTVS_SHOT_FRAMES=<from>-<to> (seconds): every frame shown in that time, as
+         * shot_f<frame>_<seconds>.png -- for what lasts one frame (a flash). */
+        static double from = -1.0, to;
+        static unsigned long frame;
+        frame++;
+        if (from < 0.0) {
+            const char *e = getenv("BTVS_SHOT_FRAMES"), *dash = e ? strchr(e, '-') : NULL;
+            from = e ? atof(e) : 0.0;
+            to = dash ? atof(dash + 1) : 0.0;
+        }
+        if (to > 0.0 && now >= from && now <= to) {
+            sprintf_s(path, sizeof path, "%s\\shot_f%06lu_%07.2f.png", dir, frame, now);
+            save_frame(path);
+        }
+    }
     if (s_want[0]) {
         lock();
         strcpy_s(path, sizeof path, s_want);

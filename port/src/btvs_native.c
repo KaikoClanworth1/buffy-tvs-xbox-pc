@@ -326,6 +326,116 @@ static void native_viewport_consts(void)
     nv2a_native_const(59, (const float *)XBOX_PTR(buf), 1);
 }
 
+/* ── BTVS_STATE_CENSUS=1: what the game asks of the fixed-function pipeline ──
+ * Every distinct texture-stage set-up, blend / test set-up and deferred
+ * render-state value a draw comes with is logged once, with the frame and
+ * time it was first seen, and what the renderer does not do of it is marked
+ * with "!!". For finding the state behind an effect that is drawn wrong:
+ * run the scene, read the [CENSUS] lines of that stretch. */
+static int census_on(void)
+{
+    static int on = -1;
+    if (on < 0)
+        on = getenv("BTVS_STATE_CENSUS") != NULL;
+    return on;
+}
+
+static int census_seen(uint32_t *tab, int *n, int cap, const uint32_t *key, int words)
+{
+    int i;
+    for (i = 0; i < *n; i++)
+        if (!memcmp(tab + i * words, key, (size_t)words * 4))
+            return 1;
+    if (*n >= cap)
+        return 1;
+    memcpy(tab + *n * words, key, (size_t)words * 4);
+    (*n)++;
+    return 0;
+}
+
+static float s_tm[8][16];
+static void census(const NativeDraw *d, int ff)
+{
+    static const char *const k_op[] = { "?", "DISABLE", "SELECTARG1", "SELECTARG2", "MODULATE", "MODULATE2X",
+        "MODULATE4X", "ADD", "ADDSIGNED", "ADDSIGNED2X", "SUBTRACT", "ADDSMOOTH", "BLENDDIFFUSEALPHA",
+        "BLENDTEXTUREALPHA", "BLENDFACTORALPHA", "BLENDTEXTUREALPHAPM", "BLENDCURRENTALPHA", "PREMODULATE",
+        "MODULATEALPHA_ADDCOLOR", "MODULATECOLOR_ADDALPHA", "MODULATEINVALPHA_ADDCOLOR",
+        "MODULATEINVCOLOR_ADDALPHA", "DOTPRODUCT3", "MULTIPLYADD", "LERP", "BUMPENVMAP", "BUMPENVMAPLUMINANCE" };
+    static uint32_t s_stage[512 * 16], s_blend[256 * 10], s_def[1024 * 2];
+    static int n_stage, n_blend, n_def, def_count[160];
+    const uint32_t *r = d->rs;
+    double t = btvs_frame_seconds();
+    int st, i;
+
+    if (!d->pixel_shader) {
+        for (st = 0; st < 4; st++) {
+            const uint32_t *s = d->tss + st * 32;
+            uint32_t key[16];
+            char bad[160] = "";
+            if (s[12] <= 1)
+                break;
+            if (s[21] & 0xFF) {                      /* a texture matrix: what is in it, a few times */
+                static int shown[4];
+                static unsigned long last[4];
+                if (shown[st] < 10 && s_frame >= last[st] + 20) {
+                    const float *m = s_tm[2 + st];
+                    last[st] = s_frame;
+                    shown[st]++;
+                    fprintf(stderr, "[CENSUS] f%lu %.2fs texture matrix %d (%s draw): [%.3f %.3f %.3f %.3f] [%.3f %.3f %.3f %.3f] [%.3f %.3f %.3f %.3f] [%.3f %.3f %.3f %.3f]\n",
+                            s_frame, t, st, ff ? "fixed-function" : "program", m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7],
+                            m[8], m[9], m[10], m[11], m[12], m[13], m[14], m[15]);
+                }
+            }
+            key[0] = (uint32_t)st | (uint32_t)ff << 8; key[1] = s[12]; key[2] = s[14]; key[3] = s[15]; key[4] = s[13];
+            key[5] = s[16]; key[6] = s[18]; key[7] = s[19]; key[8] = s[17]; key[9] = s[20];
+            key[10] = s[21]; key[11] = s[28]; key[12] = s[9]; key[13] = s[11]; key[14] = s[10];
+            key[15] = d->tex[st].res != 0;
+            if (census_seen(s_stage, &n_stage, 512, key, 16))
+                continue;
+            if (s[12] == 17 || s[16] == 17) strcat_s(bad, sizeof bad, " !!PREMODULATE");
+            if (s[12] == 25 || s[12] == 26) strcat_s(bad, sizeof bad, " !!bump-map shift of the next stage");
+            if (s[12] > 26 || s[16] > 26)   strcat_s(bad, sizeof bad, " !!unknown operation");
+            if (s[20] != 1 && s[20] != 0)   strcat_s(bad, sizeof bad, " !!result to TEMP");
+            if ((s[14] & 15) == 5 || (s[15] & 15) == 5 || (s[18] & 15) == 5 || (s[19] & 15) == 5)
+                strcat_s(bad, sizeof bad, " (reads TEMP)");
+            if (s[21] & 0xFF)               strcat_s(bad, sizeof bad, " texture matrix");
+            if (s[21] & 0x100)              strcat_s(bad, sizeof bad, " projected");
+            if (s[28] >> 16)                strcat_s(bad, sizeof bad, " texgen");
+            if (s[9])                       strcat_s(bad, sizeof bad, " !!colour key");
+            if (s[11])                      strcat_s(bad, sizeof bad, " !!alpha kill");
+            if (s[10])                      strcat_s(bad, sizeof bad, " !!signed colour");
+            if (!key[15] && ((s[14] & 15) == 2 || (s[15] & 15) == 2 || (s[18] & 15) == 2 || (s[19] & 15) == 2))
+                strcat_s(bad, sizeof bad, " (TEXTURE with none bound)");
+            fprintf(stderr, "[CENSUS] f%lu %.2fs %s stage %d: colour %s(%X,%X;%X) alpha %s(%X,%X;%X) result %X transform %X coord %X%s\n",
+                    s_frame, t, ff ? "fixed-function" : "program", st, s[12] <= 26 ? k_op[s[12]] : "?", s[14], s[15], s[13],
+                    s[16] <= 26 ? k_op[s[16]] : "?", s[18], s[19], s[17], s[20], s[21], s[28], bad);
+        }
+    }
+    {
+        uint32_t key[10];
+        key[0] = r[59] != 0; key[1] = r[59] ? r[62] : 0; key[2] = r[59] ? r[63] : 0; key[3] = r[59] ? r[74] : 0;
+        key[4] = r[60] != 0; key[5] = r[60] ? r[58] : 0; key[6] = r[57]; key[7] = r[64] != 0;
+        key[8] = r[67]; key[9] = r[RS_FIRST_COMPLEX + 7];
+        if (!census_seen(s_blend, &n_blend, 256, key, 10))
+            fprintf(stderr, "[CENSUS] f%lu %.2fs blend %u src %X dst %X op %X | alpha test %u func %X | z enable %u func %X write %u | colour write %X%s\n",
+                    s_frame, t, key[0], key[1], key[2], key[3], key[4], key[5], key[9], key[6], key[7], key[8],
+                    key[0] && key[3] != 0x8006 && key[3] != 0x800A && key[3] != 0x800B && key[3] != 0x8007 && key[3] != 0x8008
+                        ? " !!blend operation" : "");
+    }
+    /* the deferred and complex states, by index: each value once, six values an index */
+    for (i = RS_FIRST_DEFERRED; i < RS_FIRST_COMPLEX + 30 && i < 160; i++) {
+        uint32_t key[2];
+        key[0] = (uint32_t)i; key[1] = r[i];
+        if (def_count[i] < 6 && !census_seen(s_def, &n_def, 1024, key, 2)) {
+            float f;
+            memcpy(&f, &r[i], 4);
+            def_count[i]++;
+            fprintf(stderr, "[CENSUS] f%lu %.2fs render state %d (deferred+%d, complex%+d) = %08X (%g)\n", s_frame, t, i,
+                    i - RS_FIRST_DEFERRED, i - RS_FIRST_COMPLEX, r[i], f);
+        }
+    }
+}
+
 static void log_draw(int path, const NativeDraw *d, uint32_t dev, uint32_t up_stride)
 {
     uint32_t vs = MEM32(dev + DEV_VSHADER);
@@ -427,9 +537,8 @@ static void log_draw(int path, const NativeDraw *d, uint32_t dev, uint32_t up_st
  * (A first version transformed the vertices here and handed the backend
  * screen-space positions: 300,000 vertices a frame, each array hashed and
  * uploaded again for every draw -- 25 frames a second in the first level.) */
-static float s_tm[8][16];
 static int s_tm_set[8];
-static float s_ff_saved[4][4];
+static float s_ff_saved[4][4], s_ff_saved_tm[20][4];
 
 static void mat_mul(float *o, const float *a, const float *b)
 {
@@ -477,6 +586,17 @@ static int ff_begin(NativeDraw *d, uint32_t dev, uint32_t sw, uint32_t sh)
         nv2a_native_const_get(188 + (uint32_t)k, s_ff_saved[k]);
     }
     nv2a_native_const(188, &col[0][0], 4);
+    /* each stage's texture matrix, by rows, in 172..187 (nvs_fixed uses the ones the stage's
+     * D3DTSS_TEXTURETRANSFORMFLAGS ask for) */
+    for (k = 0; k < 20; k++)
+        nv2a_native_const_get(168 + (uint32_t)k, s_ff_saved_tm[k]);
+    for (k = 0; k < 4; k++)
+        nv2a_native_const(172 + (uint32_t)k * 4, s_tm_set[2 + k] ? s_tm[2 + k] : ident, 4);
+    {   /* world * view, by rows, in 168..171: for coordinates made from the vertex in camera space */
+        float wv[16];
+        mat_mul(wv, s_tm_set[6] ? s_tm[6] : ident, s_tm[0]);
+        nv2a_native_const(168, wv, 4);
+    }
     d->passthrough = 2;
     return 1;
 }
@@ -484,6 +604,7 @@ static int ff_begin(NativeDraw *d, uint32_t dev, uint32_t sw, uint32_t sh)
 static void ff_end(void)
 {
     nv2a_native_const(188, &s_ff_saved[0][0], 4);
+    nv2a_native_const(168, &s_ff_saved_tm[0][0], 20);
 }
 
 static int ff_off(void);
@@ -527,6 +648,8 @@ static void native_draw(int path, uint32_t prim, uint32_t count, uint32_t index_
     d.tss = (const uint32_t *)XBOX_PTR(D3D_TEXTURE_STATE);
     if (log_on() && (long)s_frame == s_detail_frame)
         log_draw(path, &d, dev, up_stride);
+    if (census_on())
+        census(&d, vs && !(flags & 0x12));
     if (vs && !(flags & 0x12)) {
         /* fixed-function transform: no program, not screen space */
         if (ff_off() || !ff_begin(&d, dev, tg.sw, tg.sh)) {

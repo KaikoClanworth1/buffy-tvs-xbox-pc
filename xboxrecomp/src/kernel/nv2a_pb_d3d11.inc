@@ -1710,13 +1710,38 @@ static uint32_t tex_reg(int stage, uint32_t method)
     return s_tex_src[(method + stage * 0x40 - NV_TEX_FIRST) / 4];
 }
 
+/* Has a texture's memory changed? All of its bytes are looked at (up to
+ * 256 KB; one 8-byte word in every 64 bytes of anything larger). It used to
+ * be 64 words of the whole texture, wherever they fell: a texture the title
+ * draws into -- a lightning bolt, a flame's next picture, mostly empty with
+ * a few texels changed -- could change without one of the 64 changing, and
+ * the old picture stayed on screen (an effect flashing or showing another
+ * effect's picture for a frame or longer). BUFFY_TEX_HASH_SAMPLED=1: the 64
+ * words, as before (testing). */
 static uint32_t gpu_tex_hash(const uint8_t *p, size_t bytes)
 {
-    uint32_t h = 2166136261u;
-    size_t step = bytes / 64 + 1, i;
-    for (i = 0; i + 4 <= bytes; i += step * 4)
-        h = (h ^ *(const uint32_t *)(p + i)) * 16777619u;
-    return h;
+    static int sampled = -1;
+    uint64_t h = 0x9E3779B97F4A7C15ull ^ (uint64_t)bytes;
+    size_t n8 = bytes / 8, step, i;
+    if (sampled < 0)
+        sampled = getenv("BUFFY_TEX_HASH_SAMPLED") != NULL;
+    if (sampled) {
+        uint32_t h4 = 2166136261u;
+        step = bytes / 64 + 1;
+        for (i = 0; i + 4 <= bytes; i += step * 4)
+            h4 = (h4 ^ *(const uint32_t *)(p + i)) * 16777619u;
+        return h4;
+    }
+    step = bytes <= 262144 ? 1 : 8;
+    for (i = 0; i < n8; i += step) {
+        uint64_t v;
+        memcpy(&v, p + i * 8, 8);
+        h = (h ^ v) * 0xFF51AFD7ED558CCDull;
+        h ^= h >> 32;
+    }
+    for (i = n8 * 8; i < bytes; i++)
+        h = (h ^ p[i]) * 0x100000001B3ull;
+    return (uint32_t)(h ^ (h >> 32));
 }
 
 #include "nv2a_pb_psh.inc"
