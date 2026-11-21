@@ -46,6 +46,16 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 (Add a line here when you need something from another area.)
 
+- **Graphics → Menu (21 Nov): a Brightness line on the PC Graphics page.** The game's own brightness
+  (its Options -> Display slider) works now: the renderer applies the gamma ramp the game sets
+  (`docs/graphics.md`, "Brightness"). The levels are dark at the game's default (slider 50) because that is
+  how the game draws them; the owner should be able to raise it without finding the game's Display page.
+  `btvs.h`: `int btvs_brightness(void)` (0..100, 50 the default, -1 before the game has its options) and
+  `void btvs_brightness_set(int)`, both on the game thread; 75 and above look the same (the game's limit).
+  The game saves the value with its own settings (`vars.cfg`), so no `.ini` key is needed unless a
+  different default is wanted: that is the owner's choice, by eye (frames at 50 and 70 are in
+  `port/runs/shots/`, `1058_*`).
+
 - **Menu → Graphics (runtime)**: two test games at once collide on the disc's files. The game opens
   `install.dat` and `Sound\dsstdfx.bin` with no sharing (`kernel_file.c` passes the game's share mode
   on), so the second game gets a sharing violation and stops on "There's a problem with the disc". Seen

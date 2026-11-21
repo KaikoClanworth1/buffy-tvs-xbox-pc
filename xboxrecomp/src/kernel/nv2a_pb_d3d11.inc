@@ -1791,6 +1791,8 @@ static GpuTexture *gpu_texture(int st, float norm[2], int *mips, int *cube)
     levels = l;
     if (block && (w < 4 || h < 4))
         levels = 1;
+    if (getenv("BUFFY_TEX_LEVEL0"))                 /* (testing: only the top level of every texture) */
+        levels = 1;
     face_bytes = 0;
     for (l = 0; l < levels; l++) {
         uint32_t lw = w >> l ? w >> l : 1, lh = h >> l ? h >> l : 1;

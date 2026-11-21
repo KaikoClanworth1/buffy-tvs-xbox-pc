@@ -436,6 +436,89 @@ void nv2a_gpu_overlay_blit(GpuTexture *target, GpuTexture *tex)
 #endif
 }
 
+/* The display's gamma ramp (D3DDevice_SetGammaRamp: 256 red, 256 green and
+ * 256 blue output levels, a byte each) applied to the frame `src`, the result
+ * in `target` (a render target of the same size): on the console the video
+ * encoder did this to the finished picture, so a title's brightness setting
+ * works through it. The caller skips a ramp that changes nothing. 0: could
+ * not be done. */
+int nv2a_gpu_gamma_ramp(GpuTexture *target, GpuTexture *src_tex, const uint8_t *ramp)
+{
+#if defined(_WIN32) /* guard */
+    static const char src[] =
+        "Texture2D t0 : register(t0); Texture2D t1 : register(t1); SamplerState s0 : register(s0);\n"
+        "struct V { float4 p : SV_Position; float2 uv : TEXCOORD0; };\n"
+        "float4 ps(V i) : SV_Target {\n"
+        "  float4 c = t0.Sample(s0, i.uv);\n"
+        "  float3 x = saturate(c.rgb) * (255.0 / 256.0) + 0.5 / 256.0;\n"
+        "  return float4(t1.Sample(s0, float2(x.r, 0.5)).r, t1.Sample(s0, float2(x.g, 0.5)).g,\n"
+        "                t1.Sample(s0, float2(x.b, 0.5)).b, c.a); }\n";
+    static GpuShader *ps;
+    static GpuBlendState *opaque;
+    static GpuTexture *lut;
+    static uint32_t lut_px[256];
+    static uint8_t have[768];
+    static int have_set;
+    GpuTextureDesc td;
+    GpuViewport vp;
+    GpuTexture *tex[2], *none[2] = { NULL, NULL };
+    int i;
+    if (!target || !src_tex || target == src_tex || !ramp || !s_blit_vs)
+        return 0;
+    if (!ps && !(ps = gpu_shader_create(GPU_PS, src, "ps")))
+        return 0;
+    if (!opaque) {
+        GpuBlendDesc bd;
+        memset(&bd, 0, sizeof bd);
+        bd.src = bd.src_alpha = GPU_BLEND_ONE;
+        bd.dst = bd.dst_alpha = GPU_BLEND_ZERO;
+        bd.op = bd.op_alpha = GPU_BLENDOP_ADD;
+        bd.write_mask = GPU_WRITE_ALL;
+        if (!(opaque = gpu_blend_create(&bd)))
+            return 0;
+    }
+    gpu_texture_desc(target, &td);
+    if (!lut) {
+        GpuTextureDesc ld;
+        memset(&ld, 0, sizeof ld);
+        ld.width = 256; ld.height = 1; ld.mips = 1;
+        ld.format = GPU_FMT_BGRA8;
+        ld.flags = GPU_TEX_SAMPLED;
+        if (!(lut = gpu_texture_create(&ld, NULL)))
+            return 0;
+        have_set = 0;
+    }
+    if (!have_set || memcmp(have, ramp, 768)) {
+        for (i = 0; i < 256; i++)
+            lut_px[i] = 0xFF000000u | (uint32_t)ramp[i] << 16 | (uint32_t)ramp[256 + i] << 8 | ramp[512 + i];
+        gpu_texture_update(lut, 0, 0, lut_px, 256 * 4);
+        memcpy(have, ramp, 768);
+        have_set = 1;
+    }
+    vp.x = 0.0f; vp.y = 0.0f;
+    vp.w = (float)td.width; vp.h = (float)td.height;
+    vp.min_z = 0.0f; vp.max_z = 1.0f;
+    tex[0] = src_tex; tex[1] = lut;
+    gpu_set_targets(target, NULL);
+    gpu_set_blend(opaque);
+    gpu_set_depth(NULL, 0);
+    gpu_set_raster(s_blit_rs);
+    gpu_set_viewport(&vp);
+    gpu_set_layout(NULL);
+    gpu_set_topology(GPU_TOPO_TRIANGLES);
+    gpu_set_shaders(s_blit_vs, ps);
+    gpu_set_textures(0, 2, tex);
+    gpu_set_samplers(0, 1, &s_gsamp[1]);
+    gpu_draw(3, 0);
+    gpu_set_textures(0, 2, none);
+    gpu_set_targets(NULL, NULL);
+    return 1;
+#else
+    (void)target; (void)src_tex; (void)ramp;
+    return 0;
+#endif
+}
+
 static void gpu_overlay_draw(GpuSwapchain *sc)
 {
 #if defined(_WIN32) /* guard */

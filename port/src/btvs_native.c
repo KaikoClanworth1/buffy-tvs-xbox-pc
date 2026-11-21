@@ -128,6 +128,46 @@ static int fb_ready(void)
     return 1;
 }
 
+/* The frame as it is shown: the game's frame, or -- when the game has set a
+ * gamma ramp that changes something -- that frame through the ramp, in a
+ * target of its own (the game's frame is left as drawn: it is not always
+ * drawn again before the next Swap). Port text, frame dumps and the window
+ * all take the shown frame. */
+static uint8_t s_ramp[768];
+static int s_ramp_on;
+static GpuTexture *s_shown;
+static uint32_t s_shown_w, s_shown_h;
+static int s_shown_ok;
+
+int nv2a_gpu_gamma_ramp(GpuTexture *target, GpuTexture *src_tex, const uint8_t *ramp);
+
+static void gamma_frame(void)
+{
+    static int off = -1;
+    s_shown_ok = 0;
+    if (off < 0)
+        off = getenv("BTVS_NO_GAMMA") != NULL;       /* (testing: the game's ramp ignored, as before) */
+    if (!s_ramp_on || off || !s_fb.tex)
+        return;
+    if (!s_shown || s_shown_w != s_fb.pw || s_shown_h != s_fb.ph) {
+        GpuTexture *z = NULL;
+        if (s_shown)
+            gpu_texture_release(s_shown);
+        s_shown = NULL;
+        if (!make_targets(s_fb.pw, s_fb.ph, &s_shown, &z))
+            return;
+        if (z)
+            gpu_texture_release(z);
+        s_shown_w = s_fb.pw; s_shown_h = s_fb.ph;
+    }
+    s_shown_ok = nv2a_gpu_gamma_ramp(s_shown, s_fb.tex, s_ramp);
+}
+
+static GpuTexture *shown(void)
+{
+    return s_shown_ok && s_shown ? s_shown : s_fb.tex;
+}
+
 void btvs_native_frame_size(uint32_t *w, uint32_t *h)
 {
     *w = s_fb.pw;
@@ -136,7 +176,7 @@ void btvs_native_frame_size(uint32_t *w, uint32_t *h)
 
 GpuTexture *btvs_native_frame_texture(void)
 {
-    return s_fb.tex;
+    return shown();
 }
 
 /* Render-to-texture: a GPU target per guest surface the game renders into
@@ -298,7 +338,7 @@ static void log_draw(int path, const NativeDraw *d, uint32_t dev, uint32_t up_st
         if (d->tex[i].res) {
             uint32_t t = d->tex[i].res, w, h;
             surface_size(t, &w, &h);
-            fprintf(stderr, " t%d=%08X(fmt %02X %ux%u)", i, t, (MEM32(t + 0xC) >> 8) & 0xFF, w, h);
+            fprintf(stderr, " t%d=%08X(fmt %02X %ux%u word %08X data %08X pal %08X)", i, t, (MEM32(t + 0xC) >> 8) & 0xFF, w, h, MEM32(t + 0xC), MEM32(t + 4), d->tex[i].palette);
         }
     fprintf(stderr, " A");
     for (i = 0; i < 16; i++)
@@ -306,6 +346,50 @@ static void log_draw(int path, const NativeDraw *d, uint32_t dev, uint32_t up_st
             fprintf(stderr, " %d:%X/%u", i, d->attr[i].fmt, d->attr[i].stride);
     fprintf(stderr, " | z %u zfunc %X zw %u blend %u %X %X atest %u ref %X cop0 %u aop0 %u\n", r[RS_ZENABLE], r[57], r[64],
             r[59], r[62], r[63], r[60], r[61], d->tss[12], d->tss[16]);
+    if (d->tex[0].res && ((MEM32(d->tex[0].res + 0xC) >> 8) & 0xFF) == 0x0B && d->tex[0].palette) {
+        /* a palettised texture: its palette (every 16th entry) and what its texels are */
+        uint32_t pal = nv2a_native_resolve(MEM32(d->tex[0].palette + 4)), tx = nv2a_native_resolve(MEM32(d->tex[0].res + 4));
+        uint32_t w, h, n, lo = 255, hi = 0, k;
+        unsigned long long sum = 0, lum = 0;
+        surface_size(d->tex[0].res, &w, &h);
+        n = w * h;
+        for (k = 0; k < n; k++) {
+            uint32_t ix = MEM8(tx + k), c = MEM32(pal + ix * 4);
+            if (ix < lo) lo = ix;
+            if (ix > hi) hi = ix;
+            sum += ix;
+            lum += ((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255);
+        }
+        if (getenv("BTVS_P8_DUMP")) {                /* <folder>: palette + indices of each, for a look outside */
+            char fn[MAX_PATH];
+            FILE *f = NULL;
+            sprintf_s(fn, sizeof fn, "%s/p8_%08X_%ux%u.bin", getenv("BTVS_P8_DUMP"), MEM32(d->tex[0].res + 4), w, h);
+            if (!fopen_s(&f, fn, "wb") && f) {
+                fwrite(XBOX_PTR(pal), 1, 1024, f);
+                fwrite(XBOX_PTR(tx), 1, n, f);
+                fclose(f);
+            }
+        }
+        fprintf(stderr, "[NATIVE]    palette %08X (word %08X):", pal, MEM32(d->tex[0].palette + 0xC));
+        for (k = 0; k < 256; k += 16)
+            fprintf(stderr, " %08X", MEM32(pal + k * 4));
+        fprintf(stderr, " | index %u..%u mean %.1f, mean colour %.1f of 255\n", lo, hi, (double)sum / n, (double)lum / (3.0 * n));
+    }
+    for (i = 0; i < 4; i++) {                    /* the texture stages, raw (D3DTSS 9..28), to the first disabled one */
+        const uint32_t *t = d->tss + i * 32;
+        int k;
+        fprintf(stderr, "[NATIVE]    stage %d:", i);
+        for (k = 9; k <= 28; k++)
+            if (k >= 22 && k <= 27) fprintf(stderr, " %.2f", *(const float *)&t[k]);
+            else fprintf(stderr, " %X", t[k]);
+        fprintf(stderr, "\n");
+        if (t[12] <= 1)
+            break;
+    }
+    fprintf(stderr, "[NATIVE]    stencil %u func %X ref %X mask %X write %X fail %X zfail %X pass %X, cull %X front %X, colour write %X\n",
+            r[RS_FIRST_COMPLEX + 8], r[70], r[71], r[72], r[73], r[RS_FIRST_COMPLEX + 9], r[68], r[69],
+            r[RS_FIRST_COMPLEX + 11], r[RS_FIRST_COMPLEX + 10], r[67]);
+    fprintf(stderr, "[NATIVE]    texture modes %X, factor %08X, specular %X\n", r[RS_FIRST_COMPLEX], r[RS_FIRST_COMPLEX + 12], MEM32(0x59FAF4));
     {   /* the first vertices, attribute by attribute */
         int v;
         for (v = 0; v < 3 && (uint32_t)v < d->count; v++) {
@@ -448,6 +532,18 @@ static void native_draw(int path, uint32_t prim, uint32_t count, uint32_t index_
             return;
         }
         ff = 1;
+    }
+    {   /* (testing) BTVS_WORLD_PASS=1: the level without its light-map pass; 2: the light maps alone */
+        static int pass = -1;
+        static uint32_t rs2[256];
+        if (pass < 0)
+            pass = getenv("BTVS_WORLD_PASS") ? atoi(getenv("BTVS_WORLD_PASS")) : 0;
+        if (pass && ff && d.rs[62] == 0x306) {
+            if (pass == 1) { ff_end(); return; }
+            memcpy(rs2, d.rs, sizeof rs2);
+            rs2[59] = 0;                             /* no blending: the light map itself */
+            d.rs = rs2;
+        }
     }
     native_viewport_consts();
     full = wide_full_width(&d, path, tg.sw);
@@ -654,8 +750,24 @@ void D3DDevice_PersistDisplay_00593A80(void)
     g_esp += 4;
 }
 
+/* void SetGammaRamp(DWORD Flags, CONST D3DGAMMARAMP *): 256 red, 256 green,
+ * 256 blue bytes. The game's own brightness setting (Options -> Display; its
+ * console variable "gamma", 1.0 = no change) arrives here, from
+ * TIF_Render_Implement::State_SetGamma: level i becomes 255 * (i/255)^gamma.
+ * The ramp is kept and applied to each finished frame (gamma_frame). */
 void D3DDevice_SetGammaRamp_005926E0(void)
 {
+    uint32_t ramp = MEM32(g_esp + 8);
+    if (ramp) {
+        const uint8_t *r = (const uint8_t *)XBOX_PTR(ramp);
+        int i, same = 1;
+        memcpy(s_ramp, r, sizeof s_ramp);
+        for (i = 0; i < 256 && same; i++)
+            same = r[i] == i && r[256 + i] == i && r[512 + i] == i;
+        s_ramp_on = !same;
+        btvs_log("gfx", "gamma ramp%s: red %u %u %u %u %u (of 0 64 128 192 255), green[128] %u, blue[128] %u",
+                 same ? " (no change)" : "", r[0], r[64], r[128], r[192], r[255], r[256 + 128], r[512 + 128]);
+    }
     D3DDevice_SetGammaRamp_005926E0_orig();
 }
 
@@ -783,8 +895,18 @@ void btvs_native_overlay(void)
     void btvs_overlay_frame(GpuTexture *frame, uint32_t pw, uint32_t ph);
     if (!s_up || !s_fb.tex)
         return;
+    {   /* (testing) BTVS_GAME_GAMMA=<0.5..2>: the game's own brightness setting, as its
+         * Options -> Display slider would leave it (TGameOptions + 0x118; below 1 is brighter) */
+        static float g = -1.0f;
+        uint32_t game = MEM32(0x7D0090), opt = game ? MEM32(game + 0x20) : 0;
+        if (g < 0.0f)
+            g = getenv("BTVS_GAME_GAMMA") ? (float)atof(getenv("BTVS_GAME_GAMMA")) : 0.0f;
+        if (g > 0.0f && opt)
+            MEMF(opt + 0x118) = g;
+    }
+    gamma_frame();
     btvs_overlay_test();
-    btvs_overlay_frame(s_fb.tex, s_fb.pw, s_fb.ph);
+    btvs_overlay_frame(shown(), s_fb.pw, s_fb.ph);
 }
 
 void btvs_native_present(void)
@@ -792,7 +914,7 @@ void btvs_native_present(void)
     if (!s_up || !fb_ready())
         return;
     s_vp_dirty = 1;
-    nv2a_gpu_native_present(s_fb.tex, GUEST_W, GUEST_H, s_fb.pw, s_fb.ph);
+    nv2a_gpu_native_present(shown(), GUEST_W, GUEST_H, s_fb.pw, s_fb.ph);
     nv2a_native_interp_frame_end();
     nv2a_native_interp_setup(0, s_fb.tex);
     if (log_on()) {

@@ -197,3 +197,35 @@ void XGetVideoFlags_00579D81(void)
     if (n++ < 4)
         btvs_log("gfx", "XGetVideoFlags -> %08X (asked from %08X)", g_eax, MEM32(g_esp - 4));
 }
+
+/* Brightness (btvs.h): the game's own. TGameOptions (the game object's +0x20)
+ * holds the console variable "gamma" at +0x118; the game's Options -> Display
+ * slider shows 100 - 50 * gamma and writes (100 - position) * 0.02 back.
+ * TGame::Render hands it to the renderer every frame, State_SetGamma makes
+ * the ramp (level i -> 255 * (i/255)^gamma, gamma kept to 0.5..3) and
+ * D3DDevice_SetGammaRamp gets it: btvs_native.c applies it to the frame. */
+static uint32_t game_options(void)
+{
+    uint32_t game = MEM32(0x7D0090);
+    return game ? MEM32(game + 0x20) : 0;
+}
+
+int btvs_brightness(void)
+{
+    uint32_t opt = game_options();
+    int s;
+    if (!opt)
+        return -1;
+    s = (int)(100.0f - 50.0f * MEMF(opt + 0x118) + 0.5f);
+    return s < 0 ? 0 : s > 100 ? 100 : s;
+}
+
+void btvs_brightness_set(int slider)
+{
+    uint32_t opt = game_options();
+    if (!opt)
+        return;
+    if (slider < 0) slider = 0;
+    if (slider > 100) slider = 100;
+    MEMF(opt + 0x118) = (float)(100 - slider) * 0.02f;
+}

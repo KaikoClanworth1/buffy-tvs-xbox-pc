@@ -34,8 +34,11 @@ Known faults and things not done:
   directly with `BTVS_MAP`, the first minute of `m01_highschool_1` (corridor) and `m03_cemetery_1` (a fight
   with skeletons, blue fire, the enemy's health bar). No level has been played through, and no level-to-level
   change has been made by playing.
-- The picture in play looks dark next to the cutscenes. The game's gamma (`State_SetGamma`,
-  `D3DDevice_SetGammaRamp`) is hooked but not applied: the likely cause, not looked into.
+- The levels are dark at the game's default brightness: that is how the game draws them (see "Brightness").
+  Whether the default should be brighter on a PC monitor is the owner's call, by eye.
+- A texture stage with `D3DTOP_BUMPENVMAP` (characters and props: the faint sheen from a shared 64x64
+  environment texture, scaled by a texture factor of 12/255) passes the colour on correctly but does not
+  shift the next stage's coordinates.
 - Loading is slow (about 25 s for the first level from the menu in a test run).
 - 2D text and HUD are drawn with nearest-pixel sampling: blocky at 4K.
 
@@ -57,6 +60,42 @@ With 1 and a frame wider than 4:3:
 Checked by frame dumps at 1920x1080 (menu, cutscene, gameplay) and 3840x2160 (menu). Not handled: the
 game's own culling still thinks 4:3 x a wider angle, which is a superset, so nothing should pop at the
 sides, but that has only been looked at in the first level's opening.
+
+## Brightness
+
+**What the owner sees dark is the game's own picture at its default setting; the game has a brightness
+slider, and it works now.**
+
+The game: Options -> Display has a brightness slider. It is the console variable `gamma` in `TGameOptions`
+(+0x118; default 1.0, the slider's middle; the default settings file inside `install.dat` says `gamma=1.00000`
+too). `TGame::Render` hands it to the renderer every frame, `TIF_Render_Implement::State_SetGamma` makes a
+ramp (level i becomes 255 x (i/255)^gamma, gamma kept to 0.5..3) and calls `D3DDevice_SetGammaRamp`. On
+the console the video encoder applied that ramp to the finished picture.
+
+The port ignored the ramp, so the slider did nothing. Now `D3DDevice_SetGammaRamp` keeps the ramp and every
+finished frame goes through it into a target of its own (`gamma_frame` in `btvs_native.c`,
+`nv2a_gpu_gamma_ramp` in the runtime); frame dumps, the port's own text and the window take that picture.
+At 1.0 the game sets no ramp and nothing is done. `btvs_brightness()` / `btvs_brightness_set(0..100)` in
+`btvs.h` read and set the game's slider for Menu; the game saves it with its own settings.
+
+Why the levels are dark at 1.0, checked on 21 Nov in `m01_highschool_1` (the first corridor) and
+`m03_cemetery_1`, each by a test switch and a frame dump:
+
+| Suspect | Found |
+|---|---|
+| Gamma ramp | the game calls `State_SetGamma(1.0, 1.0)` once and sets no ramp: nothing to apply at the default |
+| Texture-stage ops (modulate 2x/4x) | the level is drawn in two passes: the light map (palettised 256x256 pages, `MODULATE` texture x factor FFFFFFFF), then the texture multiplied onto it (blend DESTCOLOR, ZERO; depth EQUAL). Plain 1x. Characters: four stages (bump, environment x diffuse, x factor, `MULTIPLYADD` diffuse x texture): no 2x either |
+| Light maps drawn wrong | no: each page is drawn with its own palette (palette and texels dumped with `BTVS_P8_DUMP` and looked at: a night-time school, moonlight through windows, small lamps; most pages average 9 % of full brightness). `BTVS_WORLD_PASS=1` shows the light maps alone, `=2` the textures alone (fully bright) |
+| Texture coordinate set | the second pass names set 1 through stage 0 (`D3DTSS_TEXCOORDINDEX`), which the fixed-function shader ignored. Fixed; in these two levels both sets are equal in that pass, so the picture did not change |
+| Stencil shadows | every frame has a full-screen black quad at 34 % (the shadow pass): it is stencil-tested and only darkens shadows (same picture with and without it, `BTVS_NO_SHADOW_QUAD` while testing) |
+| Fog | off in both levels |
+| Mip levels | the light-map pages have one level; smaller ones are made from it (same picture with `BUFFY_TEX_LEVEL0=1`) |
+| Missing draws | every draw call the game links is hooked; none is skipped in these frames |
+
+So the dark corridor is the level's light maps times its textures, as the game asks. Pictures of the
+original on the web look brighter than the default here; they cannot be matched frame for frame from a
+hidden test run, and a player's slider position is not known. With the game's slider at 70 (gamma 0.6) the
+corridor looks like those pictures.
 
 ## Slow frames
 
@@ -207,6 +246,11 @@ A change to that file needs a regen and a rebuild of the translated code, in the
 | `BTVS_NATIVE_LOG=1` / `=f<frame>` | draw counts every 2 s / that frame draw by draw |
 | `BTVS_GAME_LOG=1` | first calls of the hooked game-layer functions |
 | `BTVS_D3D_DRAWS=1` | also run the library's own draw code (fills the pushbuffer only) |
+| `BTVS_GAME_GAMMA=<0.5..2>` | the game's brightness setting for the run (its `gamma`; 1 the default, below 1 brighter) |
+| `BTVS_NO_GAMMA=1` | the game's gamma ramp not applied |
+| `BTVS_WORLD_PASS=1` / `2` | the level with its light maps alone / its textures alone |
+| `BTVS_P8_DUMP=<folder>` | with `BTVS_NATIVE_LOG=f<frame>` or `t<seconds>`: each palettised texture drawn in that frame, palette + indices |
+| `BUFFY_TEX_LEVEL0=1`, `BUFFY_NATIVE_NO_TEXCOORDINDEX=1` | runtime: only the top mip level of every texture; texture coordinate sets by stage number |
 
 ## Boot log
 
