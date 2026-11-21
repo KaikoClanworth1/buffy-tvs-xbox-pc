@@ -77,7 +77,23 @@ makes (see the checklist).
 
 `[display] fps_limit` (0: none) and `vsync`. The game steps its world by measured time
 (`TGame::ExecFrame(float dt)`), so the limit does not change its speed: the opening cutscene took the same
-46.0 s at limits 120, 144 and none, and four seconds of scripted running ended at the same place.
+46-47 s at limits 60, 120, 144 and none (47.2, 46.2, 46.2, 45.9 s), and four seconds of scripted running
+ended at the same place.
+
+Measured in the first level, 30 s after the cutscene, four hidden runs on 21 Nov **with the PC's CPUs all
+at 100 %**:
+
+| Limit | Median frames a second | Best second | Average frame | Worst frame |
+|---|---|---|---|---|
+| 60 | 45.4 | 51.3 | 25.5 ms | 1068 ms |
+| 120 | 43.3 | 110.0 | 30.9 ms | 967 ms |
+| 144 | 50.0 | 56.5 | 20.0 ms | 82 ms |
+| none | 50.8 | 161.7 | 18.0 ms | 71 ms |
+
+So the limits above 60 work (110 with the limit at 120, 162 with none) and the game can render well over
+60 in this level, but under that load no setting held its rate: the medians are what the loaded PC allowed,
+not what the limit asked. An earlier run on a less loaded PC held 60.0 with 16.67 ms frames for minutes.
+Steady 120/144 has to be confirmed on an idle PC (checklist, point 8). VSync has not been run at all.
 
 ## By hand: what only a visible run can show
 
