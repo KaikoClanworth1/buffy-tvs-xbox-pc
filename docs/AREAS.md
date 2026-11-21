@@ -64,19 +64,27 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 - **Menu → Controls / Audio**: PC Controls and PC Audio write `[controls] sensitivity invert_y rumble`
   and `[audio] master music effects speech`; Key Bindings uses your `btvs_input_*` binding calls (seen
   working: list, slot choice). Rebinding by capture was not driven in a test.
-- **Graphics, 20 Nov 22:32: the second library is ready** (main checkout, 7166290: built with
-  `/d2SSAOptimizer-`, hooks for the game's lock and `File_Read`). Rebase on main and rebuild. The game now
-  boots to the title screen and its menus (frame dumps in the main checkout's `port/runs/shots/`). For test
-  runs: `BTVS_SKIP_MOVIES=1` skips the logos and intro (100 s); a first run installs 105 MB into
-  `<exe>/XboxData/Cache`; the game's threads share one CPU (`BTVS_GAME_CPUS`). `btvs_quit()` /
-  `btvs_on_quit()` are in `btvs.h`; the window gives Menu its `WM_CHAR` and Controls the wheel, the cursor
-  capture and `btvs_input_frame()`.
-  Open (Graphics is on it): after the difficulty menu a new game fades to black and stays there. Cause
-  found so far: the game has no map list. `TGame::Map_Set` asks the resource manager for the text resource
-  `GameInfo\MissionList` (it is in `pak/res_null.pak`), gets nothing, and so never makes its
-  `TMapSequencer`; the difficulty menu then has no map to launch (`GUI::TMenuDifficulty::OnUpdate`).
-  Also open: the hard disk's `TDATA`/`UDATA` still land in `game_files/` (the runtime's
-  `xbox_path_set_hdd_dir` is not used yet).
+- **Graphics, 21 Nov 01:00: third library (main checkout, 0163078 and later) and what changed for everyone.**
+  Rebase on main and rebuild. The game now goes from the logos to the first level, drawn, 60 fps.
+  - **The exe is a supervisor.** The game loads a level by launching itself again, so `buffy_tvs.exe` starts
+    the game as a child process (`BTVS_CHILD=1`) and starts it again when it asks. Anything kept in memory
+    is gone at a level change (menu -> level, level -> level): keep state on disk. `BTVS_RESTARTS` is the
+    number of restarts so far. Stop a test run by the supervisor's PID as before (the children die with it).
+  - **Pad scripts are per run of the game**: `BTVS_PAD_SCRIPT` for the first run, `BTVS_PAD_SCRIPT_1` for
+    the level after the first restart, and so on. To get into the first level:
+    `"BTVS_PAD_SCRIPT=1.0 START every 1.5; after menu; 2.5 A every 2.5; after menu12; 2.5 A every 2.5; after menu13; 2.5 A every 2.5"`.
+  - **Saves and settings** are in `<exe>/XboxData/HardDisk/` (`TDATA`, `UDATA`), no longer in `game_files/`
+    (the `TDATA`/`UDATA` folders test runs left there can be deleted by whoever owns `game_files`). A test
+    run that starts a new game makes a saved game; ten and the game refuses a new one: delete
+    `port/build/Release/XboxData/HardDisk/UDATA` between runs.
+  - `BTVS_SKIP_MOVIES=1` skips the logos and intro (100 s). A first run installs 105 MB into
+    `XboxData/Cache`. The game's threads share one CPU (`BTVS_GAME_CPUS`).
+  - `btvs.h`: `btvs_quit()` / `btvs_on_quit()`, `btvs_overlay_rect/text/text_width` (640x480 units, every
+    frame, any thread). The window gives Menu its `WM_CHAR` and Controls the wheel, the cursor capture and
+    `btvs_input_frame()`.
+  - **Logs**: `btvs_report_prepare()` (called when the pause menu opens) holds the game thread for over a
+    second waiting for its screenshot: seen as a 2 fps second each time the pause menu opened.
+  - **Audio**: music now arrives (file rename works); nothing about sound was checked by Graphics.
 - **Graphics, 20 Nov 20:06: the new library is ready.** The main checkout (d9394d3) has a regen with every
   entry of `port/src/manual_functions.json` as of that commit (Graphics, Audio, Controls, Logs, Menu) and a
   built `port/build/Release/btvs_recomp.lib` + `buffy_tvs.exe`. Rebase on main and rebuild your worktree

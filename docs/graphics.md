@@ -5,19 +5,34 @@ Updated as the work goes; the newest facts are at the top of each section.
 
 ## Status
 
+Checked with muted, hidden test runs (CPUs 8-15, below-normal priority) and the frame dumps in the main
+checkout's `port/runs/shots/` (21 Nov, 01:00).
+
 | Item | State |
 |---|---|
-| Boot to the game's main loop | works: title screen and menus, driven by `BTVS_PAD_SCRIPT` (see "Boot log") |
-| Game's Direct3D 8 drawn natively (no NV2A emulation) | movies, title screen, main menu (with the 3D Buffy model), Start Game and Difficulty menus drawn right at 640x480, 60 fps (frame dumps in `port/runs/shots/`). Known fault: the highlighted menu item has a dark double. No level seen yet: a new game stays black after the difficulty menu |
-| Logo movies (WMV) | play through the game's own decoder (YUY2 texture, one quad a frame), steady 60 presents a second; sound not checked (Audio's) |
-| Window: windowed / borderless / fullscreen, Alt+Enter, F11 | from the runtime; settings wired; **not checked** |
-| Resolutions to 4K, internal rendering at that size | wired (`[display] width/height`); **not checked** |
-| Widescreen | picture shape wired (4:3 bars, 16:9, stretch); a wider *view* needs the game's projection changed: not done |
-| VSync, frame limit | wired (`[display] vsync`, `fps_limit`); **not checked** |
-| Frame dumps (`BTVS_SHOT_AT`, `BTVS_SHOT_EVERY`) | work (PNG, folder made if missing) |
-| `btvs_screenshot`, `btvs_gpu_info`, `btvs_fps` | in `btvs.h` |
-| Overlay text / rectangles for Menu and Logs | not done |
-| A level | **not reached**: a new game fades to black after the difficulty menu. The game has no map list: `TGame::Map_Set` asks for the text resource `GameInfo\MissionList` (in `pak/res_null.pak`), the resource manager returns nothing (`TResourceManager::LoadTextFile` is never called for it), no `TMapSequencer` is made, and `GUI::TMenuDifficulty::OnUpdate` has nothing to launch. Next: why the lookup in the resource tree fails |
+| Boot to the game's main loop | works: logos, intro movie, title, menus, new game, first level (see "Boot log") |
+| Game's Direct3D 8 drawn natively (no NV2A emulation) | movies, title screen, menus (with the 3D Buffy model), the first level (`m00_spanishmission_1`): world with light maps, characters, cutscene captions, HUD, tips. Seen at 640x480, 1920x1080 and 2880x2160 |
+| Frame rate | 60 a second in the menus and in the first level once it has loaded, at 640x480 and at 2880x2160; about 20-30 while a level loads (the game streams from its loader thread), and a dip to 30-50 for some seconds at one point of the opening cutscene (not looked into) |
+| Resolutions to 4K, internal rendering at that size | work: `[display] width/height`; 1920x1080 and 3840x2160 (a 2880x2160 picture at 4:3) dumped and looked at |
+| Widescreen | the picture's shape only: 4:3 with bars, or stretched to 16:9. A wider *view* needs the game's projection changed: not done |
+| Window: windowed / borderless / fullscreen, Alt+Enter, F11 | from the runtime, settings wired; **never run with a visible window** (test runs must stay hidden) |
+| VSync, frame limit | limiter works (steady 60.0 with 16.67 ms frames); VSync **not checked** (needs a visible window) |
+| Frame dumps (`BTVS_SHOT_AT`, `BTVS_SHOT_EVERY`) | work (PNG; a 4K dump is 18 MB and costs a visible hitch) |
+| Logo and intro movies (WMV) | play through the game's own decoder; sound not checked (Audio's) |
+| `btvs_screenshot`, `btvs_gpu_info`, `btvs_fps`, `btvs_quit`, `btvs_on_quit` | in `btvs.h` |
+| Overlay text / rectangles for Menu and Logs | `btvs_overlay_rect`, `btvs_overlay_text`, `btvs_overlay_text_width` (`btvs_native_overlay.c`); seen in a dump with `BTVS_OVERLAY_TEST=1` |
+| The game restarting itself | works: the exe the player starts is a supervisor that runs the game as a child and starts it again with the launch data (`btvs_boot_restart.c`) |
+
+Known faults and things not done:
+
+- The highlighted menu item has a dark copy behind it, offset down. It may be the game's own drop shadow;
+  not compared with a console picture.
+- Fixed-function draws (the level geometry) get no lighting and no texture transforms: right for light-mapped
+  walls, unknown elsewhere.
+- `CopyRects` (the game's screen captures: `Buffer_DrawImage`, `Buffer_Capture`) is not drawn.
+- Only the first level's opening minutes have been seen. Nothing beyond, no fights, no other level.
+- Loading is slow (about 25 s for the first level from the menu in a test run).
+- 2D text and HUD are drawn with nearest-pixel sampling: blocky at 4K.
 
 ## How it draws
 
@@ -157,9 +172,26 @@ All found and checked with muted, hidden test runs (`bash port/tools/run.sh boot
 12. **Music never arrived.** The game copies a track to `Z:` as `x.wma_` and renames it; the runtime had no
     rename (`NtSetInformationFile` class 10). Added (`kernel_file.c`).
 
-Reached so far: logos and the intro movie play (frame dumps in `port/runs/shots/`), the game starts, loads
-its first map, shows the title screen and the menus. Item 10 is not fixed yet: the four failed calls
-still appear after the second regen (the lifter still does not reach those cases).
+13. **Everything after a skipped particle template failed to load; a new game faded to black.** The real
+    cause of item 10: the lifter read at most 256 entries of a jump table, the switch has 535. The game reads
+    its pak strictly in order, so one skipped template put every later request out of step: the mission
+    list was "not found", no map sequencer was made, and the difficulty menu had nothing to launch.
+    `lifter.py` now reads up to 4096 entries (third regen).
+14. **The game exits to load a level.** It launches its own image again with a command line in the launch
+    data (`root:Z:\ ... controller:0 ...`). The exe is now a supervisor: the game runs as a child, the
+    runtime saves the launch data page and ends the child with a special exit code, the supervisor starts
+    the next child with the page (`btvs_boot_restart.c`, `kernel_bridge.c`). `BTVS_EXIT_AFTER` counts for
+    the whole session; the children die with the supervisor (job object).
+15. **"Only 10 saved games allowed" after a few test runs.** The hard disk's partition fell into the game
+    folder, so every test run left a saved game in `game_files\UDATA`. The hard disk is now
+    `<save folder>\HardDisk` (`xbox_path_set_hdd_dir`), with the disk images kept for the bare devices
+    (XAPI reads the disk's configuration sectors at start).
+16. **The level's world was black.** Its geometry is drawn with the fixed pipeline (position + two texture
+    coordinates), which the backend did not have. A vertex shader for it now takes world * view * projection
+    (from the game's `SetTransform`) in constant slots 188..191 (`btvs_native.c: ff_begin`).
+
+Reached so far: logos and intro movie, title, menus, a new game, the first level's opening cutscene and
+the first steps of play under scripted input.
 
 Debugging tools that found these (all in `btvs_boot.c`, off unless asked for):
 
@@ -170,7 +202,13 @@ Debugging tools that found these (all in `btvs_boot.c`, off unless asked for):
 | `BTVS_BREAK_HEAP=<hex size>`, `BTVS_BREAK_BADFREE=1` | with `RtlAllocateHeap` / `RtlFreeHeap` as the first function: the game heap at an allocation of that size; a free of something not in the heap |
 | `BTVS_BREAK_CODE=<bytes>` | the compiled machine code of the named functions (to disassemble) |
 | `BTVS_STACK_AT=<seconds>[,...]` | every thread's call stack at those times |
-| `BTVS_SKIP_MOVIES=1` | the game's movies are not played (the logos and intro take 100 s) |
+| `BTVS_SKIP_MOVIES=1` / `=2` | the start-up movies (logos and intro, 100 s) / every movie are not played |
+| `BTVS_STACK_GAME=1`, `BTVS_STACK_RUN=<n>` | with `BTVS_STACK_AT`: only the thread that shows the frames; only in the game's n-th restart. 150 samples of the game thread make a usable profile |
+| `BTVS_PAD_SCRIPT_<n>` | the pad script for the game's n-th restart (a script is for one run of the game; the level is restart 1) |
+| `BTVS_NO_FIXED_FUNCTION=1` | the level geometry is not drawn |
+| `BTVS_OVERLAY_TEST=1` | a sample panel through the overlay API |
+| `BTVS_NO_SUPERVISOR=1` | the game runs in the process that was started; a restart ends it |
+| `BTVS_GAME_CPUS=all` / `=<mask>` | the game's own threads on all CPUs / on those (default: one) |
 | `RECOMP_KERNEL_LOG_BUDGET=<n>` | the runtime's kernel-call log beyond its first calls |
 
 ## Not verified / not done
