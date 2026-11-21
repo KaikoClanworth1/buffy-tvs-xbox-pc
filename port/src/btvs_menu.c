@@ -152,7 +152,7 @@ void Z_YAPAXI_op2_002BC1A0(void);                     /* operator new(size) */
 #define V_MGR_SETMENU   0x38    /* TManager::SetMenu(id, bool rememberAsBack) */
 
 enum { CMD_LEFT = 0x23, CMD_RIGHT = 0x24, CMD_UP = 0x25, CMD_DOWN = 0x26,
-       CMD_SELECT = 0x27, CMD_DELETE = 0x28, CMD_BACK = 0x29 };
+       CMD_SELECT = 0x27, CMD_DELETE = 0x28 /* the Y button */, CMD_BACK = 0x29 };
 enum { MSG_FOCUS = 2, MSG_PRESSED = 5 };
 enum { MENU_MAIN = 1, MENU_OPTIONS = 4, MENU_PAUSE = 9 };
 
@@ -506,7 +506,7 @@ static void build_bindings(void)
     }
     s_bind_slot = wrap(s_bind_slot, 3);
     s_bind_top = clampi(s_bind_top, 0, n > BIND_VIS ? n - BIND_VIS : 0);
-    notef("%s  -  Left/Right: other bindings   A: change   X: clear", k_slot[s_bind_slot]);
+    notef("%s  -  Left/Right: other bindings   A: change   Y: clear", k_slot[s_bind_slot]);
     for (i = s_bind_top; i < n && i < s_bind_top + BIND_VIS; i++) {
         char raw[40];
         if (s_bind_capture == i) {
@@ -575,7 +575,7 @@ static void build_rows(void)
         else if (n)           rowf(1, "Details: %s%s", n > 16 ? ".." : "", tail);
         else                  rowf(1, "Details: None");
         rowf(2, "Send Report");
-        notef(s_rep_edit ? "Left/Right: letter   A: add   X: delete   B: done"
+        notef(s_rep_edit ? "Left/Right: letter   A: add   Y: delete   B: done"
                          : "A on Details to write with the controller, or type on the keyboard.");
         notef("The report is saved on this PC. Nothing is sent.");
         break;
@@ -586,7 +586,7 @@ static void build_rows(void)
             rowf(-1, "Saving Report...");
         } else if (p && p[0]) {
             rowf(-1, "Report Saved");
-            notef("In the game's folder:  %.80s  (and a .zip beside it)", report_short(p));
+            notef("In the game's folder:  %.60s", report_short(p));
             notef("Nothing was sent anywhere.");
             rowf(1, "Open Folder");
         } else {
@@ -889,11 +889,14 @@ static void hook_options_oncommand(void)
         GUI_TMenuOptions_OnCommand_002233F0();
         return;
     }
+    { static int dbg = -1;
+      if (dbg < 0) dbg = getenv("BTVS_MENU_DEBUG") != NULL;
+      if (dbg) btvs_log("menu", "page %s command 0x%X", k_page_name[s_page], cmd); }
     /* a binding is being captured: the next press belongs to Controls */
     if (s_bind_capture >= 0) { g_esp += 8; return; }
 
     if (s_page == PG_REPORT && s_rep_edit) {
-        /* writing the details: Left/Right pick a letter, A adds it, X deletes, B ends */
+        /* writing the details: Left/Right pick a letter, A adds it, Y deletes (the game's "delete" command, 0x28), B ends */
         if (cmd == CMD_LEFT || cmd == CMD_RIGHT) act(1, cmd == CMD_LEFT ? -1 : 1);
         else if (cmd == CMD_SELECT) act(1, 0);
         else if (cmd == CMD_DELETE) { size_t l = strlen(s_rep_text); if (l) s_rep_text[l - 1] = '\0'; refresh(); }
@@ -1162,13 +1165,13 @@ static void hook_pause_onload(void)
     if (!like) { btvs_log("menu", "pause menu: no line to copy, Report a Problem not added"); return; }
     if (!find_control(menu, ID_PAUSE_REPORT)) {
         add_button(menu, like, ID_PAUSE_REPORT, (int)MEM32(like + C_X), 190,
-                   (int)MEM32(like + C_W), (int)MEM32(like + C_H), 0, 0, "Report a Problem");
+                   (int)MEM32(like + C_W), 22, 0, 0, "Report a Problem");     /* a new line sits low in a tall box */
         btvs_log("menu", "pause menu: Report a Problem added");
     }
     pause_layout(menu);
 }
 
-/* "Are you sure you want to QUIT?" hides the game's three lines: ours goes with them. */
+/* "Are you sure you want to QUIT?" is drawn over the list where our line is: it goes while that is up. */
 static void hook_pause_onupdate(void)
 {
     uint32_t menu = g_ecx, eax0, ours, resume;
@@ -1177,7 +1180,8 @@ static void hook_pause_onupdate(void)
     ours = find_control(menu, ID_PAUSE_REPORT);
     resume = find_control(menu, ID_PAUSE_RESUME);
     if (ours && resume) {
-        int hidden = MEM32(resume + C_STATE) == 3;
+        uint32_t yes = find_control(menu, 91);      /* the "Yes" of the question, shown only then */
+        int hidden = MEM32(resume + C_STATE) == 3 || (yes && MEM32(yes + C_STATE) != 3);
         if (hidden && MEM32(ours + C_STATE) != 3) show(ours, 0, 0);
         else if (!hidden && MEM32(ours + C_STATE) == 3) show(ours, 1, 1);
     }

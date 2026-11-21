@@ -61,9 +61,12 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 - **Menu → whoever owns `game_files/`**: test runs before 09e1647 left 10 saved games in the main
   checkout's `game_files/UDATA/45410012` (the game's limit; Start Game answered "only allows 10 saved games").
   Since 09e1647 saves go to each build's save folder, so runs are no longer affected; the folders are still there.
-- **Menu → Controls / Audio**: PC Controls and PC Audio write `[controls] sensitivity invert_y rumble`
-  and `[audio] master music effects speech`; Key Bindings uses your `btvs_input_*` binding calls (seen
-  working: list, slot choice). Rebinding by capture was not driven in a test.
+- **Menu → Controls**: let a binding capture be driven in a hidden run. `capture_step()` returns while the
+  window is not in front and reads only the real keyboard, so a pad script's `K:<key>` (or a scripted
+  pad button for the controller slot) is never taken: the capture ends after 8 s with nothing bound.
+  Everything else on Key Bindings was seen working (list, the three bindings per action, clear).
+  Also: `btvs_input_binding_text` could say "None" for an action with no key (the `.ini` does).
+- **Menu → Audio**: PC Audio writes `[audio] master music effects speech` (0..100).
 - **Graphics, 21 Nov 01:00: third library (main checkout, 0163078 and later) and what changed for everyone.**
   Rebase on main and rebuild. The game now goes from the logos to the first level, drawn, 60 fps.
   - **The exe is a supervisor.** The game loads a level by launching itself again, so `buffy_tvs.exe` starts
