@@ -194,13 +194,75 @@ static NTSTATUS xbox_wait_result_to_ntstatus(DWORD result, ULONG count)
     }
 }
 
+/* Waits that a reboot inside the process can break (kernel_bridge.c,
+ * g_xbox_reboot_inplace): the reboot event is waited for as well, and a
+ * thread of the title's woken by it ends in xbox_reboot_check. */
+extern volatile LONG g_xbox_rebooting;
+HANDLE xbox_reboot_event(void);
+void xbox_reboot_check(void);
+
+static DWORD reboot_wait_one(HANDLE h, DWORD ms, BOOL alertable)
+{
+    HANDLE hs[2];
+    DWORD r;
+    hs[0] = h;
+    hs[1] = xbox_reboot_event();
+    if (!hs[1])
+        return WaitForSingleObjectEx(h, ms, alertable);
+    r = WaitForMultipleObjectsEx(2, hs, FALSE, ms, alertable);
+    if (r == WAIT_OBJECT_0 + 1) {
+        xbox_reboot_check();
+        return WAIT_TIMEOUT;
+    }
+    if (r == WAIT_FAILED)                       /* not a handle the system knows: as before */
+        return WaitForSingleObjectEx(h, ms, alertable);
+    return r;
+}
+
+static DWORD reboot_wait_many(DWORD count, const HANDLE *handles, BOOL all, DWORD ms, BOOL alertable)
+{
+    HANDLE hs[MAXIMUM_WAIT_OBJECTS];
+    HANDLE ev = xbox_reboot_event();
+    DWORD r, i;
+    if (!ev || count == 0 || count >= MAXIMUM_WAIT_OBJECTS)
+        return WaitForMultipleObjectsEx(count, handles, all, ms, alertable);
+    if (all) {
+        /* All of them: the reboot event cannot be one of the set, so wait in slices. */
+        DWORD left = ms;
+        for (;;) {
+            DWORD slice = left > 100 ? 100 : left;
+            r = WaitForMultipleObjectsEx(count, handles, TRUE, slice, alertable);
+            if (r != WAIT_TIMEOUT)
+                return r;
+            if (g_xbox_rebooting)
+                xbox_reboot_check();
+            if (ms != INFINITE) {
+                left -= slice;
+                if (!left)
+                    return WAIT_TIMEOUT;
+            }
+        }
+    }
+    for (i = 0; i < count; i++)
+        hs[i] = handles[i];
+    hs[count] = ev;
+    r = WaitForMultipleObjectsEx(count + 1, hs, FALSE, ms, alertable);
+    if (r == WAIT_OBJECT_0 + count) {
+        xbox_reboot_check();
+        return WAIT_TIMEOUT;
+    }
+    if (r == WAIT_FAILED)
+        return WaitForMultipleObjectsEx(count, handles, FALSE, ms, alertable);
+    return r;
+}
+
 NTSTATUS __stdcall xbox_NtWaitForSingleObject(
     HANDLE Handle,
     BOOLEAN Alertable,
     PLARGE_INTEGER Timeout)
 {
     DWORD ms = xbox_nt_timeout_to_ms(Timeout);
-    DWORD result = WaitForSingleObjectEx(Handle, ms, Alertable);
+    DWORD result = reboot_wait_one(Handle, ms, Alertable);
     return xbox_wait_result_to_ntstatus(result, 1);
 }
 
@@ -220,7 +282,7 @@ NTSTATUS __stdcall xbox_NtWaitForSingleObjectEx(
      */
     (void)WaitMode;
 
-    result = WaitForSingleObjectEx(Handle, ms, Alertable);
+    result = reboot_wait_one(Handle, ms, Alertable);
     return xbox_wait_result_to_ntstatus(result, 1);
 }
 
@@ -238,7 +300,7 @@ NTSTATUS __stdcall xbox_NtWaitForMultipleObjectsEx(
     /* WaitType: 0 = WaitAll, 1 = WaitAny (matches NT definitions) */
     bWaitAll = (WaitType == 0) ? TRUE : FALSE;
 
-    result = WaitForMultipleObjectsEx(Count, Handles, bWaitAll, ms, Alertable);
+    result = reboot_wait_many(Count, Handles, bWaitAll, ms, Alertable);
     return xbox_wait_result_to_ntstatus(result, Count);
 }
 
@@ -259,7 +321,7 @@ NTSTATUS __stdcall xbox_KeWaitForSingleObject(
 
     HANDLE hObject = (HANDLE)Object;
     DWORD ms = xbox_nt_timeout_to_ms(Timeout);
-    DWORD result = WaitForSingleObjectEx(hObject, ms, Alertable);
+    DWORD result = reboot_wait_one(hObject, ms, Alertable);
     return xbox_wait_result_to_ntstatus(result, 1);
 }
 
@@ -281,8 +343,8 @@ NTSTATUS __stdcall xbox_KeWaitForMultipleObjects(
     DWORD ms = xbox_nt_timeout_to_ms(Timeout);
 
     /* Objects[] is an array of PVOID which we treat as HANDLE[] */
-    DWORD result = WaitForMultipleObjectsEx(Count, (HANDLE*)Objects,
-                                            bWaitAll, ms, Alertable);
+    DWORD result = reboot_wait_many(Count, (HANDLE*)Objects,
+                                    bWaitAll, ms, Alertable);
     return xbox_wait_result_to_ntstatus(result, Count);
 }
 

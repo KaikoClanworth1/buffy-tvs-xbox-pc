@@ -305,14 +305,15 @@ static void native_attrs(NativeDraw *d, uint32_t dev, uint32_t up_data, uint32_t
  * its own D3DDevice_GetViewportOffsetAndScale(pOffset, pScale). */
 void D3DDevice_GetViewportOffsetAndScale_005914C0(void);
 static int s_vp_dirty = 1;
+static uint32_t s_vp_buf;
 
 static void native_viewport_consts(void)
 {
-    static uint32_t buf;
+    uint32_t buf = s_vp_buf;           /* 32 bytes of the game's heap for the call's two results */
     uint32_t esp0 = g_esp, eax = g_eax, ecx = g_ecx, edx = g_edx;
     if (!s_vp_dirty)
         return;
-    if (!buf && !(buf = xbox_HeapAlloc(32, 16)))
+    if (!buf && !(buf = s_vp_buf = xbox_HeapAlloc(32, 16)))
         return;
     s_vp_dirty = 0;
     g_esp -= 4; MEM32(g_esp) = buf + 16;               /* pScale */
@@ -1032,4 +1033,25 @@ void btvs_native_present(void)
         s_detail_frame = (long)s_frame;
         s_detail_time = 0.0;
     }
+}
+
+/* The game restarts inside the process (btvs_boot_restart.c): what is kept
+ * here by the game's addresses means something else in the next run. The
+ * device, the frame, the shaders and the texture and vertex caches (which
+ * check contents, not addresses) stay. */
+void btvs_native_reboot(void)
+{
+    int i, n = 0;
+    for (i = 0; i < NATIVE_RTS; i++) {
+        if (s_rts[i].tex) { gpu_texture_release(s_rts[i].tex); n++; }
+        if (s_rts[i].z) gpu_texture_release(s_rts[i].z);
+    }
+    memset(s_rts, 0, sizeof s_rts);
+    s_backbuffer = 0;
+    s_ramp_on = 0;                  /* the game sets its brightness again */
+    s_vp_dirty = 1;
+    s_vp_buf = 0;                   /* it was in the game's heap, which is new */
+    memset(s_tm_set, 0, sizeof s_tm_set);
+    btvs_native_ui_view(0);
+    btvs_log("gfx", "restart: %d render targets released; device, shaders and caches kept", n);
 }

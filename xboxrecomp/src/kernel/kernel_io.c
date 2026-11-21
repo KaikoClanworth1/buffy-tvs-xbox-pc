@@ -334,6 +334,12 @@ typedef struct _XBOX_SYMLINK {
 
 static XBOX_SYMLINK g_symlinks[XBOX_MAX_SYMLINKS];
 
+/* A reboot inside the process: the title makes its drive letters again. */
+void xbox_io_reboot_reset(void)
+{
+    memset(g_symlinks, 0, sizeof g_symlinks);
+}
+
 /* Copy a counted, non-NUL-terminated ANSI_STRING into a C buffer. */
 static void xbox_copy_ansi(char* dst, size_t dst_size, PXBOX_ANSI_STRING src)
 {

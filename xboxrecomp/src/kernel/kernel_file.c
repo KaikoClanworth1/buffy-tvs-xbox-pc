@@ -790,6 +790,23 @@ static DIR_CONTEXT s_dir_contexts[MAX_DIR_CONTEXTS];
 static CRITICAL_SECTION s_dir_cs;
 static BOOL s_dir_cs_init = FALSE;
 
+/* A reboot inside the process (kernel_bridge.c): directory listings under
+ * way are dropped. The pool of disc files stays: its handles were given back
+ * as the title's handle table was closed. */
+void xbox_file_reboot_reset(void)
+{
+    int i;
+    if (!s_dir_cs_init)
+        return;
+    EnterCriticalSection(&s_dir_cs);
+    for (i = 0; i < MAX_DIR_CONTEXTS; i++) {
+        if (s_dir_contexts[i].find_handle && s_dir_contexts[i].find_handle != INVALID_HANDLE_VALUE)
+            FindClose(s_dir_contexts[i].find_handle);
+        memset(&s_dir_contexts[i], 0, sizeof s_dir_contexts[i]);
+    }
+    LeaveCriticalSection(&s_dir_cs);
+}
+
 static DIR_CONTEXT* find_or_create_dir_context(HANDLE FileHandle, BOOL create)
 {
     if (!s_dir_cs_init) { InitializeCriticalSection(&s_dir_cs); s_dir_cs_init = TRUE; }
@@ -1327,6 +1344,10 @@ typedef struct {
 static DIR_CONTEXT s_dir_contexts[MAX_DIR_CONTEXTS];
 static CRITICAL_SECTION s_dir_cs;
 static BOOL s_dir_cs_init = FALSE;
+
+void xbox_file_reboot_reset(void)
+{
+}
 
 NTSTATUS __stdcall xbox_NtQueryDirectoryFile(
     HANDLE FileHandle, HANDLE Event, PIO_APC_ROUTINE ApcRoutine, PVOID ApcContext,

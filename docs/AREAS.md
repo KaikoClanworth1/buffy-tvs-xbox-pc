@@ -26,6 +26,41 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 ## Ready to use
 
+- **The game restarts inside the process: one process, one window for the session** (Graphics / runtime,
+  21 Nov; `docs/graphics.md`, "One process for the session"). When the game launches itself again -- menu
+  to level, level to level, back to the menu -- the process, the window, the Direct3D device, the sound
+  device, the pads and every helper thread now stay; only the game is put back to its start
+  (`btvs_boot_restart.c`, `reboot_inplace`). **It turns itself on once every area has its function below**;
+  until then the log says `restarts: a new process each time -- no btvs_<area>_reboot() yet for: ...` and
+  nothing changes. `BTVS_REBOOT=inplace` forces it on (testing), `BTVS_REBOOT=process` off.
+
+  **What each area gives** -- one function, defined anywhere in its own files, no header or CMake change
+  needed (an area without one gets an empty one from the linker):
+
+  ```c
+  void btvs_audio_reboot(void);     /* Audio */
+  void btvs_input_reboot(void);     /* Controls */
+  void btvs_menu_reboot(void);      /* Menu */
+  void btvs_logs_reboot(void);      /* Logs */
+  ```
+
+  Called on the game thread, in that order, when the game has asked to be restarted: its other threads
+  have ended, nothing of it runs, **its memory is still there and readable** (and is wiped and put back
+  right after the last of these returns). `BTVS_RESTARTS` (so `btvs_restarts()`) is already the new run's
+  number and `RECOMP_LAUNCH_DATA_FILE` already names the new run's launch data. What a function has to
+  do: forget everything it knows about the game by address or by "done once" -- a new process used to
+  forget it for you -- and stop every helper thread of yours from reading or writing the game's memory
+  until the next run has set it up again. Nothing else is called again: `WinMain`'s `*_init` calls run
+  once per process, as before. The lists under Requests say what the audit found per area.
+
+  Things that are different for everyone once it is on: the process and its clock (`btvs_uptime`,
+  `btvs_frame_seconds`) run for the whole session; a helper thread started at init lives through every
+  run; `atexit` runs once, at the end of the session; `BTVS_PAD_SCRIPT` and the like are read once.
+  Test switch: `BTVS_TEST_RELAUNCH=<seconds>:<map>[,...]` restarts the game for that map at those times
+  with the line the game itself writes for a level change (a level change without playing to the end).
+  `python port/tools/winwatch.py <seconds> <out.txt> [path part]` records from outside which processes
+  and windows a test game has, hidden ones too, and its threads / handles / memory every 5 s.
+
 - **Replacement textures changed while the game runs** (Graphics, for Controls' button pictures; 21 Nov):
 
   ```c
@@ -112,6 +147,71 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 ## Requests
 
 (Add a line here when you need something from another area.)
+
+**From Graphics, 21 Nov (the owner: "When loading a new chaper/mission the window closes and a new one
+opens this needs to STOP"): each area's `btvs_<area>_reboot()`** -- see "Ready to use", "The game
+restarts inside the process". The in-process restart is built and stays off until all four exist. Line
+numbers are of 24d9881; the full audit is what these lists are cut from.
+
+- **Graphics -> Audio: `void btvs_audio_reboot(void)`.** Seen without it: the game's heap corrupted in
+  the run after a restart when a movie's sound started (`RtlAllocateHeap` fault).
+  - `btvs_audio_dsound.c`: `s_pool` is a block of the *game's* heap (`xbox_HeapAlloc`, L158) kept for the
+    process, `s_device` a handle into it, `s_fx_desc`: zero all three (the new run's heap gives that
+    address to the game). `s_slot_used[]`, `s_stream_max[]`, `s_tr[]`: zero, each slot's mixer voice freed.
+    Listener `s_lpos` / `s_lfront` / `s_ltop` / `s_distance` / `s_rolloff`: defaults. `s_music[4]`,
+    `s_music_next`: free each `.data`, zero (keyed by game objects that can come back at the same address).
+    Leave `s_ready` alone.
+  - `btvs_audio.c`: every voice freed with the device kept (there is no such function yet). The mixer
+    thread reads sample data straight from game memory (`v->data`) and `packet_done` writes
+    `*p->completed` / `*p->status` into game memory: free the voices under `s_lock` inside your function
+    (memory is still valid then), so nothing is left that points there. Listener copy to defaults.
+    `s_clock` and the `BTVS_AUDIO_DUMP` file name per run are yours to decide.
+- **Graphics -> Controls: `void btvs_input_reboot(void)`.**
+  - `btvs_input.c`: rumble off on the hardware (`s_rumble`, as `at_exit` does); `s_read1`, `s_read1_ms`
+    zero; `env_start`'s `done` zero so `BTVS_INPUT_PLAYBACK_<n>` / `BTVS_INPUT_RECORD_<n>` are read for
+    the new run; `s_menu_mode` 0, `s_mk_blocked[]` 0, `s_allow_mouse_look` 1 (the mouse is not left
+    clipped while the next run loads); a key capture under way ended. The pad script: say whether it
+    carries on across runs (it does today, and the test runs here rely on "after level" firing again)
+    or `BTVS_PAD_SCRIPT_<n>` starts per run as it did. `btvs_input__test_reset` is close but also drops
+    the devices.
+  - `btvs_input_xapi.c`: `s_ver[]` zero and `verify_thread` kept off game memory during the wipe
+    (`BTVS_INPUT_VERIFY` only); `s_reported` zero; `game_probe`'s statics.
+  - `btvs_input_glyphs.c`: `tips_fit`'s `done` and `delay` zero, `s_nfit` and `s_fit_text[]` zero (they
+    are pointers into the game's text; today only the first level of a session gets the keyboard
+    wording). `btvs_input__glyphs_boot` runs at every `XInitDevices`, as before: fine on our side.
+- **Graphics -> Menu: `void btvs_menu_reboot(void)`.**
+  - `btvs_menu.c`: `s_scratch` (a block of the game's heap, L232) zero -- without that the Options pages
+    write into whatever the new run has there; `pc_wording`'s `messages_done` zero (the patched strings
+    are loaded fresh); `s_options` zero, `s_page = PG_NONE`, `s_pending_page`, `s_row` / `s_nrows`,
+    `s_shown`, `s_saved_*`, `s_nsaved` cleared, `s_bind_capture = -1`; the four `s_font_*` zero.
+    `report_thread` (L248) reaches game memory through Logs' report functions: see Logs.
+- **Graphics -> Logs: `void btvs_logs_reboot(void)`.**
+  - `btvs_trail.c`: the "boot" anchor for the new run (what `btvs_trail_init` writes, without starting
+    another `watch_thread`); `s_seen_level` "", `s_seen_menu` 0xFFFFFFFF, `s_level_loaded_at` 0,
+    `s_cutscenes` 0, `s_menu_asked`, the level part of `s_where`. `watch_thread` reads the game's globals
+    ten times a second: it needs to stand still from your function until the new run is up (it is safe
+    from faults, not from logging nonsense).
+  - `btvs_report_exact.c`: `X.mode = X_WAIT`, `X.seed_va = X.if_va = 0`, `X.f` closed and the file
+    started again, counters and `P` zero. **The runtime now takes the game thread's clock source away at
+    a restart** (`xbox_hal_reboot_reset`): left installed it stood still while the next run started up and
+    made every load after the first about five times longer (20 s for 4 s). Install it again when the next
+    level's frames begin, as at the first start. `paused_now()` reads game memory raw and is reached from
+    other threads (`btvs_game_paused`, `btvs_exact_snapshot`): gate it.
+  - `btvs_report.c`: `hotkey_thread` -> `btvs_report_make` reads game memory: gate it between your
+    function and the next run's first frame. `BTVS_TEST_REPORT_RUN` is only looked at in
+    `btvs_report_init`: look again per run.
+  - `btvs_report_crash.c`: `hang_thread` counts frames: a restart plus a load is a stretch without
+    frames, and each run used to get the 90 s boot allowance; `s_crash_reports` / `s_reported_addr`
+    were per run.
+  - `btvs_report_replay.c`: what `btvs_replay_init` did for "later" runs (`s_r.active = 0` ...); it sets
+    `RECOMP_LAUNCH_DATA_FILE` once for run 1: from the first restart on the variable is the game's own.
+  - `btvs_log.c`: `btvs_uptime` is the session's now; `btvs_restarts()` goes up inside the process.
+- **Graphics -> Extras** (FYI): the supervisor and its session window stay as they are (they are what a
+  restart falls back on: `BTVS_REBOOT=process`, or the game asking from a thread other than its first).
+  With restarts inside the process the launcher still sees one `buffy_tvs.exe` that starts one child;
+  the child now lives for the whole session too. A release's `btvs_game.dll` is jumped out of with
+  `longjmp` at a restart (unwinding through its frames): built with lld-link it must keep its unwind
+  tables (`.pdata`), which is the default.
 
 - **Graphics → Extras (21 Nov): the session has one window now** (your request of b39fc70, done another
   way: `docs/graphics.md`, "One window for the session"). The supervisor has a session window for the

@@ -37,6 +37,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <math.h>
+#include <setjmp.h>
 
 /* xboxrecomp runtime headers */
 #include <xbox/xboxrecomp.h>
@@ -451,6 +452,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     btvs_log("boot", "starting the game");
     btvs_trail("game_start", NULL);
 
+#ifdef BTVS_GRAPHICS
+    {   /* The game restarts itself to load a level: it comes back to here, in
+         * this process, with its memory as it is now (btvs_boot_restart.c). */
+        extern jmp_buf g_btvs_reboot_jmp;
+        void btvs_reboot_arm(void);
+        btvs_reboot_arm();
+        if (setjmp(g_btvs_reboot_jmp))
+            btvs_trail("game_start", NULL);
+    }
+#endif
     xbe_entry_point();
 
     btvs_log("boot", "the game returned; cleaning up");

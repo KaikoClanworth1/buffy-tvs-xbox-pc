@@ -356,3 +356,201 @@ int btvs_supervise(int *exit_code)
     *exit_code = (int)code;
     return 1;
 }
+
+/* ── The game restarting inside the process ──────────────────────────────
+ *
+ * The other way to give the game the reboot it asks for: not a new process,
+ * but this one put back to where the game's entry point is about to be
+ * called -- its other threads ended, its memory and the runtime's tables as
+ * at the first start, the launch data kept (xboxrecomp: kernel_bridge.c,
+ * g_xbox_reboot_inplace; xbox_memory_layout.c, xbox_RebootSnapshot). The
+ * window, the Direct3D device, the sound device, the pads and every helper
+ * thread of the port live on: to the player a level load is the game's own
+ * loading screen in the same window, nothing else.
+ *
+ * Each area of the port keeps things about the game that a new process used
+ * to forget for it. It forgets them here, in a function of its own, called on
+ * the game thread after the game's other threads have ended and before its
+ * memory is put back (so guest memory may still be read, and nothing of the
+ * game runs):
+ *
+ *     void btvs_audio_reboot(void);     sounds stopped, DirectSound objects forgotten
+ *     void btvs_input_reboot(void);     rumble off, per-run input state
+ *     void btvs_menu_reboot(void);      cached game menu objects, one-time text patches
+ *     void btvs_logs_reboot(void);      trail / recorder / replay state; the "boot" anchor
+ *
+ * An area that has none yet gets an empty one (the /alternatename lines).
+ * BTVS_RESTARTS and RECOMP_LAUNCH_DATA_FILE are already the new run's when
+ * they are called.
+ *
+ * BTVS_REBOOT=process: the old way (a new process per run, started by the
+ * supervisor above). BTVS_REBOOT=inplace: this way.
+ */
+#include <setjmp.h>
+
+jmp_buf g_btvs_reboot_jmp;                  /* WinMain's, set just before the entry point is called */
+static int s_reboots;
+static LARGE_INTEGER s_reboot_asked;
+
+void btvs_reboot_none(void) { }
+#pragma comment(linker, "/alternatename:btvs_audio_reboot=btvs_reboot_none")
+#pragma comment(linker, "/alternatename:btvs_input_reboot=btvs_reboot_none")
+#pragma comment(linker, "/alternatename:btvs_menu_reboot=btvs_reboot_none")
+#pragma comment(linker, "/alternatename:btvs_logs_reboot=btvs_reboot_none")
+void btvs_audio_reboot(void);
+void btvs_input_reboot(void);
+void btvs_menu_reboot(void);
+void btvs_logs_reboot(void);
+
+void btvs_log(const char *area, const char *fmt, ...);
+void btvs_native_reboot(void);              /* btvs_native.c */
+void xbox_RebootReset(const void *launch_page);
+void xbox_RebootSnapshot(void);
+extern void (*g_xbox_reboot_inplace)(const void *launch_page);
+
+static double reboot_ms_since(LARGE_INTEGER t0)
+{
+    LARGE_INTEGER f, t;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&t);
+    return (double)(t.QuadPart - t0.QuadPart) * 1000.0 / (double)f.QuadPart;
+}
+
+/* How many restarts this process has made of the game, and how long ago the
+ * last one was asked for (ms; for "level load took ..." lines). */
+int btvs_reboot_count(void) { return s_reboots; }
+double btvs_reboot_ms(void) { return s_reboots ? reboot_ms_since(s_reboot_asked) : 0.0; }
+
+static void reboot_inplace(const void *launch_page)
+{
+    char n[16];
+    const char *file = getenv("RECOMP_RELAUNCH_FILE");
+    const char *base = getenv("BTVS_RESTARTS");
+    LARGE_INTEGER t0;
+    double areas_ms, reset_ms;
+
+    QueryPerformanceCounter(&t0);
+    s_reboot_asked = t0;
+    s_reboots++;
+    /* The run's number and launch data, where the other areas look for them. */
+    sprintf_s(n, sizeof n, "%d", (base ? atoi(base) : 0) + 1);
+    _putenv_s("BTVS_RESTARTS", n);
+    if (file && *file)
+        _putenv_s("RECOMP_LAUNCH_DATA_FILE", file);
+    btvs_log("boot", "the game restarts itself (run %s of the session, \"%.80s\"): in this process %lu, same window",
+             n, (const char *)launch_page + 0x400, GetCurrentProcessId());
+
+    btvs_audio_reboot();
+    btvs_input_reboot();
+    btvs_menu_reboot();
+    btvs_logs_reboot();
+    btvs_native_reboot();
+    areas_ms = reboot_ms_since(t0);
+
+    xbox_RebootReset(launch_page);
+    reset_ms = reboot_ms_since(t0) - areas_ms;
+    btvs_log("boot", "restart %d ready in %.0f ms (the port's areas %.0f ms, memory and runtime %.0f ms); starting the game",
+             s_reboots, areas_ms + reset_ms, areas_ms, reset_ms);
+    longjmp(g_btvs_reboot_jmp, 1);
+}
+
+/* WinMain, when everything is ready and the entry point has not run.
+ * Inside the process once every area has its function (above): until then an
+ * area would carry what it knew of the last run into the next. */
+void btvs_reboot_arm(void)
+{
+    const char *e = getenv("BTVS_REBOOT");
+    char missing[64] = "";
+    if ((void (*)(void))btvs_audio_reboot == btvs_reboot_none) strcat_s(missing, sizeof missing, " audio");
+    if ((void (*)(void))btvs_input_reboot == btvs_reboot_none) strcat_s(missing, sizeof missing, " input");
+    if ((void (*)(void))btvs_menu_reboot == btvs_reboot_none)  strcat_s(missing, sizeof missing, " menu");
+    if ((void (*)(void))btvs_logs_reboot == btvs_reboot_none)  strcat_s(missing, sizeof missing, " logs");
+    if (e && !_stricmp(e, "process")) {
+        btvs_log("boot", "restarts: a new process each time (BTVS_REBOOT=process)");
+        return;
+    }
+    if (missing[0] && !(e && !_stricmp(e, "inplace"))) {
+        btvs_log("boot", "restarts: a new process each time -- no btvs_<area>_reboot() yet for:%s (BTVS_REBOOT=inplace to try without)", missing);
+        return;
+    }
+    xbox_RebootSnapshot();
+    g_xbox_reboot_inplace = reboot_inplace;
+    btvs_log("boot", "restarts: inside this process, same window%s%s", missing[0] ? "; areas with nothing to forget yet:" : "", missing);
+}
+
+/* (testing) BTVS_TEST_RELAUNCH=<seconds>:<map>[,<seconds>:<map>...]: at those
+ * times after the start the game is restarted for that map, as if it had
+ * asked for it itself -- a level change without playing to a level's end,
+ * and at a moment the game did not choose. Called once a frame from the
+ * game's Swap. */
+void btvs_reboot_test_frame(double seconds)
+{
+    static const char *next;
+    static int asked;
+    void xbox_RebootNow(const void *launch_page);
+    if (!asked) {
+        asked = 1;
+        next = getenv("BTVS_TEST_RELAUNCH");
+    }
+    if (!next || !*next)
+        return;
+    if (!g_xbox_reboot_inplace) {
+        /* A new process per run (the comparison): run n of the session takes
+         * the list's entry n-1, 25 s after its own start. */
+        static int skipped;
+        const char *r = getenv("BTVS_RESTARTS");
+        int k = (r ? atoi(r) : 0) - 1;
+        if (!skipped) {
+            skipped = 1;
+            while (k-- > 0 && next) {
+                next = strchr(next, ',');
+                if (next) next++;
+            }
+            if (k >= 0 || !r || !atoi(r))
+                next = NULL;
+        }
+        if (!next || seconds < 25.0)
+            return;
+    } else if (seconds < atof(next)) {
+        return;
+    }
+    {
+        static unsigned char page[0x1000];
+        char map[64];
+        const char *c = strchr(next, ':'), *end;
+        size_t n;
+        if (!c) { next = NULL; return; }
+        end = strchr(c, ',');
+        n = end ? (size_t)(end - c - 1) : strlen(c + 1);
+        if (n >= sizeof map) n = sizeof map - 1;
+        memcpy(map, c + 1, n);
+        map[n] = 0;
+        next = end ? end + 1 : NULL;
+        memset(page, 0, sizeof page);
+        *(unsigned *)(page + 4) = 0x45410012u;
+        strcpy_s((char *)page + 8, 520, "\\Device\\CdRom0;default.xbe");
+        {
+            /* The line the game itself writes for a change of level (its
+             * format string is in the XBE), so the next run goes straight to
+             * the map: no logos, no title. */
+            static char prev[64] = "none";
+            sprintf_s((char *)page + 0x400, 0xC00,
+                      "root:Z:\\ rpecopy:d:\\ controller:0 memoryunit:0 pack:2 session:Buffy_1 sessionload:0 "
+                      "preservebackbuffer:1 preservelogfile:1 spawn:0 map:%s title:0 previousmap:%s cheats:0 "
+                      "resurrected:0 e3attract:0", map, prev);
+            strcpy_s(prev, sizeof prev, map);
+        }
+        btvs_log("boot", "BTVS_TEST_RELAUNCH: asking for %s at %.1f s", map, seconds);
+        if (g_xbox_reboot_inplace) {
+            xbox_RebootNow(page);
+        } else {
+            const char *file = getenv("RECOMP_RELAUNCH_FILE");
+            FILE *f = NULL;
+            if (file && !fopen_s(&f, file, "wb") && f) {
+                fwrite(page, 1, sizeof page, f);
+                fclose(f);
+                ExitProcess(XBOX_EXIT_RELAUNCH);
+            }
+        }
+    }
+}

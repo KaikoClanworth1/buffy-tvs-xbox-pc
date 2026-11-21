@@ -312,6 +312,80 @@ waits for its new timer thread on an event; the two threads met that event for t
 same moment and each made its own stand-in for it (`ke_event_shadow`), so the wait was on one and the
 set on the other. Looking up and making is one step now.
 
+## One process for the session
+
+The owner, after playing the build with the session window: "When loading a new chaper/mission the
+window closes and a new one opens this needs to STOP. and it should be able to load it dirrectly".
+
+**Why the session window was not enough.** The owner's log (`GAME\btvs_log.txt`, 21 Nov 20:28) has four
+runs of the game in one session, each with a window of its own -- `1F10E4C`, `D9053E`, `32906E4`,
+`2080260` -- all owned by one session window `2330E5C`. So the code did what it was written to do, and
+that is the fault: the window the player looks at still closed and a new one opened at every restart,
+with Windows' own closing and opening of a top-level window in between; the session window only kept
+the taskbar entry and put black behind it. The hidden test runs could not show that this is not good
+enough, and I said so at the time without knowing how it looked.
+
+**Now the game restarts inside the process.** The game asks for a reboot (`XLaunchNewImage` ->
+`HalReturnToFirmware`) to get all its memory back; it gets exactly that, without a new process:
+
+1. `reboot_stop_threads` (`kernel_bridge.c`): the game's other threads end. Each exits by itself at its
+   next kernel call, or when its wait or sleep is broken by the reboot event (`kernel_sync.c`,
+   `kernel_thread.c`); one parked on a game lock whose owner is gone, or still there after 3 s, is
+   terminated and logged. Seen: 3 to 5 threads, 0 to 16 ms, none terminated.
+2. The port's areas forget what they know of the run (`btvs_<area>_reboot`, `docs/AREAS.md`); Graphics
+   releases its render targets and its little block of the game's heap (`btvs_native_reboot`). Device,
+   swap chain, window, shaders, texture and vertex caches stay.
+3. `xbox_RebootReset`: the game's handles closed; timers, deferred calls, event and lock shadows,
+   drive letters, directory listings dropped; guest memory zeroed and put back as
+   `xbox_RebootSnapshot` found it before the first start (1,907 pages kept, 7.4 MB), with the page
+   protections and the heap, stack and contiguous allocators; the launch data page written back; the
+   first thread's registers, FPU state, TIB, interrupt level and clock source as a new process has them.
+4. `longjmp` to `WinMain`, which calls the game's entry point again on the same thread.
+
+All of that takes 8 to 17 ms. From then on it is the game's own start: straight into its loading screen
+when the launch data names a map.
+
+**Checked in hidden runs, 21 Nov** (`BTVS_REBOOT=inplace`; the areas' functions do not exist yet):
+
+- `rb7`: main menu -> Start Game -> level 1 -> the cemetery (a level change) -> pause -> Quit -> main
+  menu -> Start Game -> level 1: four restarts in process 432. From outside (`port/tools/winwatch.py`,
+  which asks Windows, not the game): two processes for the whole session -- the supervisor and the game --
+  and one game window, `000D0250`, made 0.8 s after the start and gone at the end;
+  `port/runs/shots/2125_one_process_one_window_watch.txt`.
+- `rb5`: seven level changes in a row (level 1, cemetery, high school, round again): eight restarts in
+  one process, every level drawn right (`2125_seven_level_changes_one_process.png`); threads 71 to 78,
+  handles 776 to 792, private memory 380 to 480 MB with no trend.
+- `rb4`: level -> pause -> Quit -> menu -> Start Game, three times: seven restarts.
+- The level changes were asked for with `BTVS_TEST_RELAUNCH` -- the launch line the game writes itself
+  for a level change, but at a time the test chose, not by playing a level to its end. Quit and Start
+  Game were the game's own.
+
+**Time for a level load** (Start Game -> level 1 up, same PC, nothing else running): 3.3 s inside the
+process (2.9 to 3.4 over the runs) against 3.9 s after the new process's log began plus that process's
+start. The load is the game's work either way; what is saved is the process, its window, the device and
+reading the shaders back -- about half a second -- and the window never goes.
+
+**Found on the way** (all three made the run after a restart go wrong, and none could happen with a
+process per run): the runtime kept a block of the game's heap per thread for `GetExitCodeThread`'s
+answer and zeroed 512 bytes of it at each call -- after a restart that address was the game's;
+`btvs_native.c` kept 32 bytes of the game's heap for the viewport constants the same way; and the frame
+recorder's clock stayed on the game thread, standing still through the next run's start-up, which made
+every load after the first take 20 s. A fault in the game's own allocator in the fourth level went away
+with the first two.
+
+**Not done / not known:**
+
+- It is **off until Audio, Controls, Menu and Logs have their functions**: each keeps things by the
+  game's addresses (the list is in `docs/AREAS.md`), and at least Audio's corrupts the next run's heap
+  (seen, with a movie's sound). The log's first lines say which way a session runs.
+- A level change by playing a level to its end was not made.
+- The game asking for a restart from a thread other than its first falls back to a new process (not
+  seen: every restart so far came from the first thread).
+- A release's `btvs_game.dll` (built by the launcher with clang) is jumped out of at a restart: not run
+  here, only the MSVC build.
+- Sound across a restart was not listened to or dumped: Audio's.
+- Nothing was seen on a real screen. What to look at is point 14 below.
+
 ## By hand: what only a visible run can show
 
 Test runs are hidden and muted, so none of this has been seen. Each line is one thing to try and what
@@ -346,6 +420,11 @@ should happen.
     back from the taskbar; Alt+Tab away and back: the game comes back, not a black window.
 13. Close the game with the window's X during a level, and once more while "Loading..." is up: the game
     ends both times and nothing stays in the taskbar or in Task Manager.
+14. Once the log's first lines say `restarts: inside this process, same window`: Start Game, play into a
+    level, finish it or Quit to the menu, Start Game again. The window never closes, moves, flashes or
+    loses the keyboard; borderless and fullscreen stay as they are; the picture goes from the last frame
+    to the game's loading screen with at most a short stand-still; Task Manager shows the same two
+    `buffy_tvs.exe` all the time. Then Alt+Tab away and back during a load.
 
 ## How it draws
 

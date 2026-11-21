@@ -223,12 +223,24 @@ NTSTATUS __stdcall xbox_KeDelayExecutionThread(
         ms = (DWORD)(diff / 10000);
     }
 
-    if (Alertable) {
-        DWORD result = SleepEx(ms, TRUE);
-        if (result == WAIT_IO_COMPLETION)
-            return STATUS_ALERTED;
-    } else {
-        Sleep(ms);
+    {
+        /* A sleep a reboot inside the process can break (kernel_bridge.c). */
+        extern HANDLE xbox_reboot_event(void);
+        extern void xbox_reboot_check(void);
+        HANDLE ev = xbox_reboot_event();
+        if (ev) {
+            DWORD result = WaitForSingleObjectEx(ev, ms, Alertable ? TRUE : FALSE);
+            if (result == WAIT_OBJECT_0)
+                xbox_reboot_check();
+            else if (result == WAIT_IO_COMPLETION)
+                return STATUS_ALERTED;
+        } else if (Alertable) {
+            DWORD result = SleepEx(ms, TRUE);
+            if (result == WAIT_IO_COMPLETION)
+                return STATUS_ALERTED;
+        } else {
+            Sleep(ms);
+        }
     }
 
     return STATUS_SUCCESS;
@@ -463,6 +475,15 @@ int xbox_worker_stack_alloc(void)
             return i;
     }
     return -1;  /* all slices in use */
+}
+
+/* A reboot inside the process: every slice is free again. */
+void xbox_thread_reboot_reset(void)
+{
+    int i;
+    for (i = 0; i < XBOX_WORKER_STACK_COUNT; i++)
+        InterlockedExchange(&g_worker_stack_used[i], 0);
+    g_game_thread = NULL;
 }
 
 void xbox_worker_stack_free(int slot)

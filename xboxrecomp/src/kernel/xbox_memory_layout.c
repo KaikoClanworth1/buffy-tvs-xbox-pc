@@ -3365,3 +3365,175 @@ HANDLE xbox_GetMappingHandle(void)
 {
     return g_mapping_handle;
 }
+
+/* ── A title that reboots inside the process ─────────────────────────────
+ *
+ * xbox_RebootSnapshot(), called once when everything is ready and the entry
+ * point has not run yet, keeps what guest memory holds then (the pages that
+ * are not all zero: the image's sections, the TIB and TLS, the kernel's
+ * data, the thunk table as the bridge resolved it), the protection of the
+ * pages that are not plain read-write, and where the allocators stand.
+ * xbox_MemoryLayoutRestore() puts all of that back: the reboot a console
+ * does, without a new process (kernel_bridge.c, g_xbox_reboot_inplace). On
+ * the thread that runs the title, with the title's other threads gone.
+ */
+#define RB_PAGE 4096u
+typedef struct { uint8_t *at; size_t size; DWORD prot; } RbProt;
+typedef struct {
+    uint8_t  *base;
+    size_t    size;
+    uint32_t *page;             /* index of each kept page */
+    uint8_t  *data;             /* their contents, RB_PAGE each */
+    uint32_t  npages;
+    RbProt    prot[64];
+    int       nprot;
+} RbRegion;
+
+static struct {
+    int       taken;
+    RbRegion  ram, contig;
+    uint32_t  heap_next, contig_next, reserve_next;
+    int       heap_alloc_count, heap_block_count, thread_stacks_used, contig_pinned_n;
+    void     *heap_blocks;
+    uint32_t  fs_base;
+    uint16_t  fp_control_word, fp_cc;
+} s_rb;
+
+static int rb_zero_page(const uint8_t *p)
+{
+    const uint64_t *q = (const uint64_t *)p;
+    size_t i;
+    for (i = 0; i < RB_PAGE / 8; i++)
+        if (q[i])
+            return 0;
+    return 1;
+}
+
+static void rb_take(RbRegion *r, void *base, size_t size)
+{
+    uint8_t *p = (uint8_t *)base, *end = p + size;
+    uint32_t n = 0, cap = 0;
+    memset(r, 0, sizeof *r);
+    if (!base || !size)
+        return;
+    r->base = p;
+    r->size = size;
+    while (p < end) {
+        MEMORY_BASIC_INFORMATION mbi;
+        uint8_t *re;
+        if (!VirtualQuery(p, &mbi, sizeof mbi))
+            break;
+        re = (uint8_t *)mbi.BaseAddress + mbi.RegionSize;
+        if (re > end)
+            re = end;
+        if (mbi.State == MEM_COMMIT && mbi.Protect != PAGE_READWRITE && r->nprot < 64) {
+            r->prot[r->nprot].at = p;
+            r->prot[r->nprot].size = (size_t)(re - p);
+            r->prot[r->nprot].prot = mbi.Protect;
+            r->nprot++;
+        }
+        if (mbi.State == MEM_COMMIT && !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD))) {
+            for (; p < re; p += RB_PAGE) {
+                if (rb_zero_page(p))
+                    continue;
+                if (n == cap) {
+                    cap = cap ? cap * 2 : 1024;
+                    r->page = (uint32_t *)realloc(r->page, cap * sizeof(uint32_t));
+                    r->data = (uint8_t *)realloc(r->data, (size_t)cap * RB_PAGE);
+                }
+                r->page[n] = (uint32_t)((size_t)(p - r->base) / RB_PAGE);
+                memcpy(r->data + (size_t)n * RB_PAGE, p, RB_PAGE);
+                n++;
+            }
+        }
+        p = re;
+    }
+    r->npages = n;
+}
+
+static void rb_put(const RbRegion *r)
+{
+    uint8_t *p = r->base, *end = p + r->size;
+    uint32_t i;
+    int k;
+    DWORD old;
+    if (!r->base)
+        return;
+    /* Everything writable and zero, whatever the title made of it ... */
+    while (p < end) {
+        MEMORY_BASIC_INFORMATION mbi;
+        uint8_t *re;
+        if (!VirtualQuery(p, &mbi, sizeof mbi))
+            break;
+        re = (uint8_t *)mbi.BaseAddress + mbi.RegionSize;
+        if (re > end)
+            re = end;
+        if (mbi.State == MEM_COMMIT) {
+            if (mbi.Protect != PAGE_READWRITE)
+                VirtualProtect(p, (size_t)(re - p), PAGE_READWRITE, &old);
+            memset(p, 0, (size_t)(re - p));
+        }
+        p = re;
+    }
+    /* ... then what it held, and the protections it had. */
+    for (i = 0; i < r->npages; i++)
+        memcpy(r->base + (size_t)r->page[i] * RB_PAGE, r->data + (size_t)i * RB_PAGE, RB_PAGE);
+    for (k = 0; k < r->nprot; k++)
+        VirtualProtect(r->prot[k].at, r->prot[k].size, r->prot[k].prot, &old);
+}
+
+void xbox_RebootSnapshot(void)
+{
+    if (s_rb.taken)
+        return;
+    rb_take(&s_rb.ram, g_memory_base, g_memory_size);
+    rb_take(&s_rb.contig, g_contig_memory, g_contig_memory ? XBOX_CONTIG_SIZE : 0);
+    s_rb.heap_next = g_heap_next;
+    s_rb.heap_alloc_count = g_heap_alloc_count;
+    s_rb.heap_block_count = g_heap_block_count;
+    s_rb.heap_blocks = malloc(sizeof g_heap_blocks[0] * (size_t)(g_heap_block_count ? g_heap_block_count : 1));
+    if (s_rb.heap_blocks)
+        memcpy(s_rb.heap_blocks, g_heap_blocks, sizeof g_heap_blocks[0] * (size_t)g_heap_block_count);
+    s_rb.thread_stacks_used = g_thread_stacks_used;
+    s_rb.contig_next = g_contig_next;
+    s_rb.contig_pinned_n = g_contig_pinned_n;
+    s_rb.reserve_next = g_reserve_next;
+    s_rb.fs_base = g_fs_base;
+    s_rb.fp_control_word = g_fp_control_word;
+    s_rb.fp_cc = g_fp_cc;
+    s_rb.taken = 1;
+    fprintf(stderr, "  Reboot snapshot: %u + %u pages kept of guest memory (%.1f MB), heap at 0x%08X with %d blocks\n",
+            s_rb.ram.npages, s_rb.contig.npages,
+            (double)(s_rb.ram.npages + s_rb.contig.npages) * RB_PAGE / 1048576.0, g_heap_next, g_heap_block_count);
+}
+
+void xbox_MemoryLayoutRestore(void)
+{
+    if (!s_rb.taken)
+        return;
+    rb_put(&s_rb.ram);
+    rb_put(&s_rb.contig);
+    g_heap_next = s_rb.heap_next;
+    g_heap_alloc_count = s_rb.heap_alloc_count;
+    memset(g_heap_blocks, 0, sizeof g_heap_blocks[0] * (size_t)g_heap_block_count);
+    g_heap_block_count = s_rb.heap_block_count;
+    if (s_rb.heap_blocks)
+        memcpy(g_heap_blocks, s_rb.heap_blocks, sizeof g_heap_blocks[0] * (size_t)g_heap_block_count);
+    g_thread_stacks_used = s_rb.thread_stacks_used;
+    g_contig_next = s_rb.contig_next;
+    g_contig_pinned_n = s_rb.contig_pinned_n;
+    g_reserve_next = s_rb.reserve_next;
+
+    /* This thread's registers as a new process's first thread has them. */
+    g_eax = g_ecx = g_edx = g_ebx = g_esi = g_edi = g_ebp = 0;
+    g_esp = XBOX_STACK_TOP;
+    g_seh_ebp = 0;
+    g_fs_base = s_rb.fs_base;
+    memset(g_fp_stack, 0, sizeof g_fp_stack);
+    g_fp_top = 0;
+    g_fp_control_word = s_rb.fp_control_word;
+    g_fp_cmp = 0;
+    g_fp_cc = s_rb.fp_cc;
+    g_df = 0;
+    s_jmp_used = 0;
+}

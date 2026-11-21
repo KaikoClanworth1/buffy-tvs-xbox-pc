@@ -345,6 +345,10 @@ void D3DDevice_Swap_00595DB0(void)
             nv2a_gpu_texture_pack_reload();
         }
     }
+    {
+        extern void btvs_reboot_test_frame(double seconds);    /* btvs_boot_restart.c (testing) */
+        btvs_reboot_test_frame(t0);
+    }
     btvs_native_overlay();         /* Menu's and Logs' text and rectangles: part of the frame */
     btvs_shot_frame();
     tp = now_s();

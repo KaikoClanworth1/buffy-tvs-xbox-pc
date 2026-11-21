@@ -426,6 +426,151 @@ struct bridge_thread_start {
  * launching its own image): a port's last word to whoever restarts it. */
 void (*g_xbox_before_relaunch)(void);
 
+/* ── The title rebooting inside the process ──────────────────────────────
+ *
+ * A title that launches its own image again (XLaunchNewImage: how some load
+ * a level with all memory free) expects what a console reboot gives it: every
+ * thread gone, memory as the loader left it, the launch data page kept. That
+ * used to need a new process. With g_xbox_reboot_inplace set by the port it
+ * happens here instead:
+ *
+ *   1. the title's other threads end (reboot_stop_threads). Each exits by
+ *      itself at its next kernel call or when its wait or sleep is broken by
+ *      the reboot event; one that is parked on a guest critical section, or
+ *      has not moved after three seconds, is terminated;
+ *   2. the port's hook runs on the rebooting thread. It quiets its own side,
+ *      calls xbox_RebootReset() -- handles closed, timers, deferred calls,
+ *      lock and event shadows forgotten, guest memory and the allocators
+ *      back to xbox_RebootSnapshot()'s state, the launch data page put back
+ *      -- and jumps to where it calls the entry point. It does not return.
+ *
+ * Only the thread that started the title may reboot it (it is the one that
+ * can jump back to the start); from any other thread the old way is taken.
+ */
+volatile LONG g_xbox_rebooting;
+void (*g_xbox_reboot_inplace)(const void *launch_page);
+static DWORD  s_reboot_tid, s_boot_tid;
+static uint32_t s_reboot_gen;                 /* counts them: a guest address the bridge keeps is of one run */
+static HANDLE s_reboot_event;                 /* manual reset: set while a reboot stops the threads */
+
+typedef struct { HANDLE h; DWORD tid; volatile LONG cs_wait; } GuestThread;
+#define GUEST_THREADS 64
+static GuestThread s_gthread[GUEST_THREADS];
+static SRWLOCK s_gthread_lock = SRWLOCK_INIT;
+static RECOMP_TLS int t_guest_thread;         /* this is one of them */
+static RECOMP_TLS volatile LONG *t_cs_wait;
+
+HANDLE xbox_reboot_event(void) { return s_reboot_event; }
+
+/* By the creator, so a thread that has not run yet is already known. */
+static void guest_thread_add(HANDLE th, DWORD tid)
+{
+    HANDLE h = NULL;
+    int i;
+    if (!th || !DuplicateHandle(GetCurrentProcess(), th, GetCurrentProcess(), &h, 0, FALSE, DUPLICATE_SAME_ACCESS))
+        return;
+    AcquireSRWLockExclusive(&s_gthread_lock);
+    for (i = 0; i < GUEST_THREADS; i++)           /* ended ones make room */
+        if (s_gthread[i].h && WaitForSingleObject(s_gthread[i].h, 0) == WAIT_OBJECT_0) {
+            CloseHandle(s_gthread[i].h);
+            s_gthread[i].h = NULL;
+        }
+    for (i = 0; i < GUEST_THREADS; i++)
+        if (!s_gthread[i].h) {
+            s_gthread[i].h = h;
+            s_gthread[i].tid = tid;
+            s_gthread[i].cs_wait = 0;
+            h = NULL;
+            break;
+        }
+    ReleaseSRWLockExclusive(&s_gthread_lock);
+    if (h) {
+        fprintf(stderr, "  [KERNEL] more than %d guest threads: one will not be stopped by a reboot\n", GUEST_THREADS);
+        CloseHandle(h);
+    }
+}
+
+/* On the new thread, first thing. */
+static void guest_thread_self(void)
+{
+    DWORD tid = GetCurrentThreadId();
+    int i;
+    t_guest_thread = 1;
+    AcquireSRWLockShared(&s_gthread_lock);
+    for (i = 0; i < GUEST_THREADS; i++)
+        if (s_gthread[i].h && s_gthread[i].tid == tid)
+            t_cs_wait = &s_gthread[i].cs_wait;
+    ReleaseSRWLockShared(&s_gthread_lock);
+}
+
+/* A reboot is under way and this is one of the title's other threads: it
+ * ends here. Called where no host lock is held: on the way into and out of a
+ * kernel call, after a wait or a sleep. */
+void xbox_reboot_check(void)
+{
+    if (g_xbox_rebooting && t_guest_thread && GetCurrentThreadId() != s_reboot_tid)
+        ExitThread(0);
+}
+
+/* Around a blocking wait for a guest critical section: its owner may have
+ * ended holding it, so a reboot terminates a thread parked there. */
+void xbox_guest_cs_wait(int on)
+{
+    if (t_cs_wait)
+        InterlockedExchange(t_cs_wait, on);
+}
+
+static void kernel_timer_kick(void);
+
+static void reboot_stop_threads(void)
+{
+    DWORD t0 = GetTickCount();
+    int i, alive, ended = 0, killed = 0;
+    s_reboot_tid = GetCurrentThreadId();
+    InterlockedExchange(&g_xbox_rebooting, 1);
+    if (s_reboot_event)
+        SetEvent(s_reboot_event);
+    kernel_timer_kick();
+    for (;;) {
+        DWORD el = GetTickCount() - t0;
+        alive = 0;
+        for (i = 0; i < GUEST_THREADS; i++) {
+            GuestThread *g = &s_gthread[i];
+            if (!g->h)
+                continue;
+            if (WaitForSingleObject(g->h, 0) == WAIT_OBJECT_0) {
+                CloseHandle(g->h);
+                g->h = NULL;
+                ended++;
+                continue;
+            }
+            alive++;
+            if ((g->cs_wait && el > 100) || el > 3000) {
+                void *at = NULL;
+                SuspendThread(g->h);
+#if defined(_M_X64)
+                {
+                    CONTEXT c;
+                    memset(&c, 0, sizeof c);
+                    c.ContextFlags = CONTEXT_CONTROL;
+                    if (GetThreadContext(g->h, &c))
+                        at = (void *)(uintptr_t)c.Rip;
+                }
+#endif
+                fprintf(stderr, "  [KERNEL] reboot: thread %lu did not end by itself (%s), terminated at host %p\n",
+                        g->tid, g->cs_wait ? "waiting for a guest lock" : "3 s", at);
+                TerminateThread(g->h, 0);
+                killed++;
+            }
+        }
+        if (!alive)
+            break;
+        Sleep(1);
+    }
+    fprintf(stderr, "  [KERNEL] reboot: the title's other threads are gone in %lu ms (%d ended, %d of them terminated)\n",
+            GetTickCount() - t0, ended, killed);
+}
+
 static void bridge_write_handle(uint32_t handle_va, HANDLE h);
 
 static void bridge_run_thread_inline(recomp_func_t fn, uint32_t ctx1,
@@ -452,6 +597,7 @@ static DWORD WINAPI bridge_thread_main(LPVOID param)
      * for every thread, which is how two of them ended up inside _lock() each
      * holding the lock the other wanted. */
     g_is_spawned_thread = 1;
+    guest_thread_self();
     /* The console has one CPU, and titles lean on it: a home-made lock that
      * is a plain counter, state shared between threads with no lock at all.
      * A title that needs that asks for all its threads on one host CPU
@@ -491,7 +637,14 @@ static HANDLE bridge_spawn_thread(recomp_func_t fn, uint32_t ctx1,
     if (!s) return NULL;
     s->fn = fn; s->ctx1 = ctx1; s->ctx2 = ctx2; s->stack_top = stack_top;
 
-    th = CreateThread(NULL, 0, bridge_thread_main, s, 0, NULL);
+    {
+        DWORD tid = 0;
+        th = CreateThread(NULL, 0, bridge_thread_main, s, CREATE_SUSPENDED, &tid);
+        if (th) {
+            guest_thread_add(th, tid);        /* known before it runs: a reboot can stop it */
+            ResumeThread(th);
+        }
+    }
     if (!th) free(s);
     /* Record the game thread so a host-tick-driven title's watchdog can sample
      * it via xbox_thread_debug_handle. Harmless for default-model titles: they
@@ -1200,6 +1353,24 @@ static void bridge_HalReturnToFirmware(void)
     {
         uint32_t page = BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_LAUNCH_DATA_PAGE);
         const char *file = getenv("RECOMP_RELAUNCH_FILE");
+        if (page && BRIDGE_MEM32(page) == 0 /* LDT_TITLE */ && g_xbox_reboot_inplace
+                && GetCurrentThreadId() == s_boot_tid) {
+            /* The title launching its own image again, inside this process. */
+            static uint8_t launch[0x1000];
+            memcpy(launch, (const void *)((uintptr_t)page + g_xbox_mem_offset), sizeof launch);
+            if (file && *file) {       /* (the file as well: reports name the launch that led here) */
+                FILE *lf = fopen(file, "wb");
+                if (lf) {
+                    fwrite(launch, 1, sizeof launch, lf);
+                    fclose(lf);
+                }
+            }
+            fprintf(stderr, "  [KERNEL] the title launches itself again: rebooting inside the process\n");
+            fflush(stderr);
+            RECOMP_ICALL_FEEDBACK_DUMP();
+            reboot_stop_threads();
+            g_xbox_reboot_inplace(launch);             /* does not return */
+        }
         if (page && file && *file && BRIDGE_MEM32(page) == 0 /* LDT_TITLE */) {
             FILE *lf = fopen(file, "wb");
             if (lf) {
@@ -2569,6 +2740,7 @@ typedef struct {
 static XboxTimer g_timers[XBOX_MAX_TIMERS];
 static CRITICAL_SECTION g_timer_lock;
 static int g_timer_started;
+static int s_timer_thread_on;          /* 0 again after a reboot inside the process ended it */
 
 static DWORD WINAPI kernel_timer_thread(LPVOID unused)
 {
@@ -2576,6 +2748,7 @@ static DWORD WINAPI kernel_timer_thread(LPVOID unused)
     int gpu_tick;
 
     (void)unused;
+    guest_thread_self();               /* it runs the title's timer routines */
     if (slot < 0) {
         fprintf(stderr, "  [KERNEL] timer thread has no worker stack; "
                         "timer DPCs will not run\n");
@@ -2620,6 +2793,8 @@ static DWORD WINAPI kernel_timer_thread(LPVOID unused)
         if (gpu_tick && wait > 1)
             wait = 1;
         WaitForSingleObject(s_timer_wake, wait);
+        if (g_xbox_rebooting)
+            return 0;                  /* the title reboots inside the process: started again by the next timer */
 #ifndef XBOXRECOMP_NO_GPU_EMULATION
         kernel_gr_service();  /* PGRAPH software methods (fences, flips) */
         kernel_vblank_tick();  /* the GPU's frame clock */
@@ -2677,7 +2852,16 @@ static void kernel_set_timer(uint32_t timer_va, long long due_100ns,
         InitializeCriticalSection(&g_timer_lock);
         s_timer_wake = CreateEventA(NULL, FALSE, FALSE, NULL);
         g_timer_started = 1;
-        CloseHandle(CreateThread(NULL, 0, kernel_timer_thread, NULL, 0, NULL));
+    }
+    if (!s_timer_thread_on) {
+        DWORD tid = 0;
+        HANDLE th = CreateThread(NULL, 0, kernel_timer_thread, NULL, CREATE_SUSPENDED, &tid);
+        s_timer_thread_on = 1;
+        if (th) {
+            guest_thread_add(th, tid);
+            ResumeThread(th);
+            CloseHandle(th);
+        }
     }
 
     EnterCriticalSection(&g_timer_lock);
@@ -3921,8 +4105,12 @@ static void bridge_ObReferenceObjectByHandle(void)
      * small object of its own with those two fields filled in from the host
      * thread; it is read at once and never written. */
     {
-        static RECOMP_TLS uint32_t scratch;
+        static RECOMP_TLS uint32_t scratch, scratch_gen;
         DWORD code = 0;
+        if (scratch_gen != s_reboot_gen) {      /* the heap it came from is gone (a reboot inside the process) */
+            scratch = 0;
+            scratch_gen = s_reboot_gen;
+        }
         if (handle && handle != 0xFFFFFFFFu && handle != 0xFFFFFFFEu
                 && GetExitCodeThread(bridge_resolve_handle(handle), &code)) {
             if (!scratch)
@@ -6026,8 +6214,12 @@ static void bridge_RtlWalkFrameChain(void)
  * the caller a guest-addressable 16-byte key.  Carved from the guest heap once. */
 static void bridge_XboxEEPROMKey(void)
 {
-    static uint32_t eeprom_va = 0;
+    static uint32_t eeprom_va = 0, eeprom_gen;
 
+    if (eeprom_gen != s_reboot_gen) {
+        eeprom_va = 0;
+        eeprom_gen = s_reboot_gen;
+    }
     if (!eeprom_va) {
         eeprom_va = xbox_HeapAlloc(16, 16);
         if (eeprom_va)
@@ -9255,6 +9447,9 @@ static void kernel_thunk_dispatch(void)
     ordinal = g_slot_ordinals[slot];
     bridge = g_slot_bridges[slot];
 
+    if (g_xbox_rebooting)
+        xbox_reboot_check();           /* one of the title's other threads ends here */
+
     g_kernel_call_count++;
     if (ordinal < XBOX_KERNEL_THUNK_TABLE_SIZE)
         g_ordinal_calls[ordinal]++;
@@ -9499,6 +9694,123 @@ void xbox_kernel_set_thunk_address(uint32_t xbox_va, uint32_t count)
  */
 /* Per-title ordinal remap; NULL = identity (the kernel's own XDK). Set by
  * xbox_kernel_set_ordinal_remap before init. See kernel.h. */
+/* A reboot the port asks for (testing: a level change at a time of its
+ * choosing). On the thread that started the title, from inside a call the
+ * title made; does not return when the reboot is taken. */
+void xbox_RebootNow(const void *launch_page)
+{
+    static uint8_t launch[0x1000];
+    const char *file = getenv("RECOMP_RELAUNCH_FILE");
+    if (!g_xbox_reboot_inplace || GetCurrentThreadId() != s_boot_tid || !launch_page)
+        return;
+    memcpy(launch, launch_page, sizeof launch);
+    if (file && *file) {
+        FILE *lf = fopen(file, "wb");
+        if (lf) {
+            fwrite(launch, 1, sizeof launch, lf);
+            fclose(lf);
+        }
+    }
+    reboot_stop_threads();
+    g_xbox_reboot_inplace(launch);
+}
+
+/* The runtime back to where the title's entry point is about to be called:
+ * the second half of a reboot inside the process (see g_xbox_reboot_inplace
+ * above). The title's other threads are gone; this is the rebooting thread.
+ * launch_page: the 4096 bytes of the launch data page the title left. */
+void xbox_RebootReset(const void *launch_page)
+{
+    extern void xbox_rtl_reboot_reset(void);        /* kernel_rtl.c: guest critical sections */
+    extern void xbox_file_reboot_reset(void);       /* kernel_file.c: directory listings, pooled disc files */
+    extern void xbox_io_reboot_reset(void);         /* kernel_io.c: symbolic links */
+    extern void xbox_thread_reboot_reset(void);     /* kernel_thread.c: worker stacks */
+    extern void xbox_MemoryLayoutRestore(void);     /* xbox_memory_layout.c */
+    int xbox_file_pool_release(HANDLE h);
+    int i, closed = 0, shadows = 0;
+
+    /* Whatever the title had open. (Thread handles, events, files; a disc
+     * file's handle goes back to the pool.) */
+    for (i = 1; i < BRIDGE_HANDLE_MAX; i++)
+        if (s_handle_table[i]) {
+            HANDLE h = s_handle_table[i];
+            s_handle_table[i] = NULL;
+            if (h != INVALID_HANDLE_VALUE && !xbox_file_pool_release(h))
+                CloseHandle(h);
+            closed++;
+        }
+
+    /* Timers and deferred calls: the timer thread ended with the others and
+     * is started again by the first timer set. */
+    if (g_timer_started) {
+        EnterCriticalSection(&g_timer_lock);
+        memset(g_timers, 0, sizeof g_timers);
+        LeaveCriticalSection(&g_timer_lock);
+    }
+    s_timer_thread_on = 0;
+    AcquireSRWLockExclusive(&g_dpc_lock);
+    g_dpc_head = g_dpc_tail = 0;
+    ReleaseSRWLockExclusive(&g_dpc_lock);
+    memset(g_connected_isr, 0, sizeof g_connected_isr);
+
+    /* Host events standing in for the title's dispatcher objects, host locks
+     * standing in for its critical sections: all named by guest addresses
+     * that mean something else from here on. */
+    if (g_ke_shadow_init) {
+        EnterCriticalSection(&g_ke_shadow_cs);
+        for (i = 0; i < KE_SHADOW_SIZE; i++)
+            if (g_ke_shadow[i].in_use) {
+                if (g_ke_shadow[i].host_handle)
+                    CloseHandle(g_ke_shadow[i].host_handle);
+                shadows++;
+            }
+        memset(g_ke_shadow, 0, sizeof g_ke_shadow);
+        LeaveCriticalSection(&g_ke_shadow_cs);
+    }
+    if (g_try_cs_guard_ready) {
+        EnterCriticalSection(&g_try_cs_guard);
+        for (i = 0; i < BRIDGE_TRY_CS_SLOTS; i++)
+            if (g_try_cs[i].ready) {
+                DeleteCriticalSection(&g_try_cs[i].cs);
+                g_try_cs[i].ready = 0;
+                g_try_cs[i].key = 0;
+            }
+        LeaveCriticalSection(&g_try_cs_guard);
+    }
+    xbox_rtl_reboot_reset();
+    xbox_file_reboot_reset();
+    xbox_io_reboot_reset();
+    xbox_thread_reboot_reset();
+    {
+        extern void xbox_hal_reboot_reset(void);    /* kernel_hal.c: this thread's IRQL and clock source */
+        xbox_hal_reboot_reset();
+    }
+
+    /* The first PsCreateSystemThreadEx is the title starting, again. */
+    g_thread_call_count = 0;
+    s_reboot_gen++;
+
+    /* Memory as it was before the entry point ran, and the allocators with
+     * it; then this run's launch data, as a rebooted console keeps the page. */
+    xbox_MemoryLayoutRestore();
+    if (launch_page) {
+        uint32_t page = BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_LAUNCH_DATA_PAGE);
+        if (!page)
+            page = xbox_HeapAlloc(0x1000, 4096);
+        if (page) {
+            memcpy((void *)((uintptr_t)page + g_xbox_mem_offset), launch_page, 0x1000);
+            BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_LAUNCH_DATA_PAGE) = page;
+        }
+    }
+    BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_TICK_COUNT) = GetTickCount();
+
+    fprintf(stderr, "  [KERNEL] reboot: %d handles closed, %d event shadows dropped, memory and allocators as at the first start\n",
+            closed, shadows);
+    if (s_reboot_event)
+        ResetEvent(s_reboot_event);
+    InterlockedExchange(&g_xbox_rebooting, 0);
+}
+
 static const unsigned short *g_ordinal_remap = NULL;
 static int g_ordinal_remap_count = 0;
 
@@ -9518,6 +9830,9 @@ void xbox_kernel_bridge_init(void)
 
     fprintf(stderr, "  Kernel thunk bridge: resolving %d entries at 0x%08X\n",
             g_thunk_table_count, g_thunk_table_base);
+    s_boot_tid = GetCurrentThreadId();
+    if (!s_reboot_event)
+        s_reboot_event = CreateEventA(NULL, TRUE, FALSE, NULL);
 
     /* The thunk table lives in .rdata which is marked PAGE_READONLY.
      * Temporarily make it writable so we can patch the ordinals. */

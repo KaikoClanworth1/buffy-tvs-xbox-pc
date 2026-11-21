@@ -470,6 +470,23 @@ static void xbox_cs_clear_owner(CRITICAL_SECTION* cs)
     }
 }
 
+/* A reboot inside the process: the title's locks are gone with its memory.
+ * Some were held by threads that ended, some by the rebooting thread itself,
+ * so each host lock is thrown away, not released. */
+void xbox_rtl_reboot_reset(void)
+{
+    size_t i;
+    AcquireSRWLockExclusive(&g_cs_table_lock);
+    for (i = 0; i < XBOX_CS_TABLE_SIZE; i++)
+        if (g_cs_table[i].key) {
+            DeleteCriticalSection(&g_cs_table[i].cs);
+            memset(&g_cs_table[i], 0, sizeof g_cs_table[i]);
+        }
+    g_cs_table_full = 0;
+    ReleaseSRWLockExclusive(&g_cs_table_lock);
+    g_cs_enters = g_cs_leaves = 0;
+}
+
 VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSection)
 {
     CRITICAL_SECTION* cs = xbox_cs_shadow(CriticalSection);
@@ -510,7 +527,12 @@ VOID __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSectio
         xbox_guest_backtrace(10);
         fflush(stderr);
     }
-    EnterCriticalSection(cs);
+    {
+        extern void xbox_guest_cs_wait(int on);     /* kernel_bridge.c: a reboot ends a thread parked here */
+        xbox_guest_cs_wait(1);
+        EnterCriticalSection(cs);
+        xbox_guest_cs_wait(0);
+    }
     xbox_cs_note_owner(cs);
     if (g_cs_contention_reports <= 16) {
         fprintf(stderr, "  [CS] thread %lu acquired 0x%08X\n",

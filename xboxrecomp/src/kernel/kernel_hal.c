@@ -762,6 +762,17 @@ void xbox_SetThreadTimeStampSource(uint64_t (*source)(void))
     t_tsc_source = source;
 }
 
+/* A reboot inside the process (kernel_bridge.c), on the rebooting thread: it
+ * is the new run's first thread, at passive level, reading the real counter
+ * until its port gives it another again. (A counter that stands still between
+ * frames made the next run's start-up -- which has no frames -- several times
+ * slower.) */
+void xbox_hal_reboot_reset(void)
+{
+    g_current_irql = PASSIVE_LEVEL;
+    t_tsc_source = NULL;
+}
+
 uint64_t xbox_ReadTimeStampCounterReal(void);
 
 uint64_t xbox_ReadTimeStampCounter(void)
