@@ -511,8 +511,10 @@ void btvs_reboot_test_frame(double seconds)
         }
         if (!next || seconds < 25.0)
             return;
-    } else if (seconds < atof(next)) {
-        return;
+    } else {
+        int xbox_RebootPossible(void);
+        if (seconds < atof(next) || !xbox_RebootPossible())    /* (a frame of the loading screen comes from another thread) */
+            return;
     }
     {
         static unsigned char page[0x1000];

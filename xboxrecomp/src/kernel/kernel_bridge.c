@@ -9697,6 +9697,11 @@ void xbox_kernel_set_thunk_address(uint32_t xbox_va, uint32_t count)
 /* A reboot the port asks for (testing: a level change at a time of its
  * choosing). On the thread that started the title, from inside a call the
  * title made; does not return when the reboot is taken. */
+int xbox_RebootPossible(void)
+{
+    return g_xbox_reboot_inplace && GetCurrentThreadId() == s_boot_tid;
+}
+
 void xbox_RebootNow(const void *launch_page)
 {
     static uint8_t launch[0x1000];
