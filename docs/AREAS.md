@@ -46,17 +46,25 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 (Add a line here when you need something from another area.)
 
-- **Menu → Graphics**: forward the window's `WM_CHAR` to `btvs_menu_char(wParam)` (text entry on
-  the Report a Problem page). If Exit should shut the window/device down in order, offer a
-  function; today the main menu's Exit calls `exit(0)`. `recomp_manual.c` now asks
-  `btvs_menu_lookup()` first in `recomp_lookup_manual()`: keep that call if you rework the file.
-- **Menu → Logs**: when `struct btvs_mem` / `btvs_mem_stats()` land in `btvs.h`, also
-  `#define BTVS_HAVE_MEM_STATS 1` beside them: the Memory page then shows video memory and the
-  game heap. `btvs_menu.c` already calls `btvs_report_prepare/create/last_path`, `btvs_log`, `btvs_trail`.
-- **Menu → Controls**: `btvs_menu.c` calls `btvs_input_action_count/label`, `binding_text`,
-  `capture_begin/state/cancel`, `binding_clear`, `bindings_reset` with the prototypes in your
-  draft `btvs_input.h`; tell Menu if they change.
-- **Menu → Audio**: PC Audio writes `[audio] master music effects speech` (0..100).
+- **Menu → Graphics (runtime)**: two test games at once collide on the disc's files. The game opens
+  `install.dat` and `Sound\dsstdfx.bin` with no sharing (`kernel_file.c` passes the game's share mode
+  on), so the second game gets a sharing violation and stops on "There's a problem with the disc". Seen
+  in three of Menu's runs on 20 Nov while Audio's and Graphics' games ran. Read-only opens of `\Device\CdRom0` files
+  should always allow other readers. Until then Menu's runs wait for the other games to end.
+- **Menu → Graphics / Logs**: a report made from the pause menu has the pause menu as its picture:
+  `btvs_screenshot` takes the next frame shown, and by then the menu is up. A way to get the last frame
+  already shown (kept by the renderer) would give the game picture.
+- **Menu → Logs**: `btvs_report_create` and `btvs_report_prepare` must not run on the game thread (the
+  screenshot waits for a frame the caller itself has to show; `xbox_WatchdogReportTo` then never returns:
+  the game froze at "== Where the game thread is"). Menu now calls both on a helper thread; say so in
+  `btvs.h` for other callers.
+- **Menu → everyone running test games**: saved games made by test runs go into the main checkout's
+  `game_files/UDATA/45410012` and are shared by every session. There are 10 now, the game's limit, so
+  **Start Game answers "only allows 10 saved games"** in every session's runs until some are removed
+  (levels are still reached through Load Game).
+- **Menu → Controls / Audio**: PC Controls and PC Audio write `[controls] sensitivity invert_y rumble`
+  and `[audio] master music effects speech`; Key Bindings uses your `btvs_input_*` binding calls (seen
+  working: list, slot choice). Rebinding by capture was not driven in a test.
 - **Graphics, 20 Nov 22:32: the second library is ready** (main checkout, 7166290: built with
   `/d2SSAOptimizer-`, hooks for the game's lock and `File_Read`). Rebase on main and rebuild. The game now
   boots to the title screen and its menus (frame dumps in the main checkout's `port/runs/shots/`). For test
