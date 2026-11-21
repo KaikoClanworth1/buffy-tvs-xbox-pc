@@ -26,6 +26,42 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 ## Ready to use
 
+- **Replacement textures changed while the game runs** (Graphics, for Controls' button pictures; 21 Nov):
+
+  ```c
+  void nv2a_gpu_texture_pack_reload(void);     /* xboxrecomp/src/kernel/nv2a_texpack.inc */
+  ```
+
+  Reads the texture pack's `load\` folder again: files with new contents under the same names, new files,
+  files gone. Declare it beside your `nv2a_gpu_set_texture_pack` and call it **on the game thread, after
+  the files are written and closed**. If the folder or Load itself changes (to or from "Original"), call
+  `nv2a_gpu_set_texture_pack` first, then this.
+  - **It returns at once.** The folder is read and every picture decoded and uploaded on a background
+    thread (16 button pictures: 28 to 41 ms there); the pictures on screen stay until all are ready, then
+    in one frame every texture the game has in use takes its new replacement -- or its own picture back
+    where the file is gone. Nothing is decoded on the game thread: that frame only looks the textures up
+    again. Mid-level, in menus, anywhere; no level load needed.
+  - **Calling it again** before the last call's pictures are shown is fine (a rebind right after a device
+    change): the folder is read once more and only the last reading is shown. No need to wait or debounce
+    for correctness, but each call reads all files, so not every frame.
+  - **Files being written while it reads**: a picture that cannot be read is logged
+    (`[TEXPACK] reload: could not load ...`) and the game's own art shows for it until the next call. So
+    write first, call after -- or write under other names and rename.
+  - **Before the first texture** of a run it does nothing (the folder is read at the first texture anyway).
+  - **Log**: `[TEXPACK] reload: <n> replacements read in <ms> ms on the loading thread (<n> failed)` and
+    `[TEXPACK] reload: <n> replacements in use from frame <n>, <n> of the title's textures look theirs up
+    again`.
+  - **Pack turned on mid-run** (a run started with "Original", then switched to a set): every texture made
+    before that is looked up again once, which decodes the game's own textures again in that frame -- a
+    long frame, once. Keeping the pack on from the start with an empty folder avoids it.
+  - **Checked** (hidden, level 1, 21 Nov): started with the keyboard set, the 16 files replaced by the Xbox
+    set 30 s in, a reload every 3 s: the tip on screen went from mouse / Ctrl pictures to RS / LT pictures
+    with no level load (`port/runs/shots/2030_tip_before_reload_keyboard_pictures.png`,
+    `2030_tip_after_reload_pad_pictures.png`); 14 reloads in the level, none with a frame over 22 ms in the
+    nine frames around it. Not checked: the title screen, the pause menu and the Controls page (the same
+    lookup), and a real device change, which is yours to trigger.
+  - Test switch: `BTVS_TEXPACK_RELOAD_EVERY=<seconds>` calls it that often.
+
 - **Shaders at install time** (Graphics, for Extras' launcher): run the installed game once as
 
   ```
@@ -516,6 +552,9 @@ the disc-file sharing are as they were.*
   the game thread, that drops the loaded replacement textures (same file names, new contents) and makes
   textures already in the runtime's texture cache look their replacement up again. Controls would then
   redraw its 16 files (0.2 s) and call it when player 1 moves from pad to keyboard or back, or rebinds.
+  **Done, 21 Nov (Graphics):** `nv2a_gpu_texture_pack_reload()` as asked -- "Ready to use" above says
+  how it behaves. The files are read on a background thread, so call it right after writing them; the
+  0.2 s of drawing the 16 files is still yours to keep off the game thread (or to accept: it is 12 frames).
 - **Extras -> Logs** (21 Nov, for releases; nothing to do for the prebuilt `GAME\`): in a release the
   game's code is not in `buffy_tvs.exe` but in `btvs_game.dll`, built on the player's PC with its own
   `btvs_game.pdb` beside it (`docs/install-build.md`). Seen in such a build's log:

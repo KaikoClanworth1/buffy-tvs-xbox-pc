@@ -70,6 +70,8 @@ typedef struct {
     int      replaced;                     /* a texture pack's image (nv2a_texpack.inc) */
     int      genmips;                      /* mip chain built here (gpu_texture) */
     int      churn;                        /* times its contents changed under it (an animated texture) */
+    uint64_t tp_hash;                      /* its name in a texture pack ... */
+    int      tp_known;                     /* ... when one was on as it was made */
 } TexEntry;
 
 #define GPU_MAX_SURF 16
@@ -1790,6 +1792,21 @@ static GpuTexture *gpu_texture(int st, float norm[2], int *mips, int *cube)
     norm[0] = norm[1] = 1.0f;
     *mips = 0;
     *cube = 0;
+    if (s_tp.pending && tp_apply_begin()) {
+        /* A texture pack was read again (nv2a_gpu_texture_pack_reload): textures with a new, another or
+         * no replacement now are dropped here and found again -- a lookup, no decoding -- at their next use. */
+        int k, dropped = 0;
+        for (k = 0; k < GPU_MAX_TEX; k++) {
+            TexEntry *c = &s_texc[k];
+            if (c->gt && tp_stale(c->tp_hash, c->tp_known, c->replaced)) {
+                gpu_texture_release(c->gt);
+                c->gt = NULL;
+                dropped++;
+            }
+        }
+        fprintf(stderr, "  [TEXPACK] reload: %u replacements in use from frame %u, %d of the title's textures look theirs up again\n",
+                s_tp.n, s_frame_no, dropped);
+    }
     if (st == 0) { s_tx_last_ctl0 = ctl0; s_tx_last_fmt = fmtreg; s_tx_last_off = off; }
     if (!(ctl0 & 0x40000000u)) { s_tx_why[0]++; return NULL; }
     if (!off) { s_tx_why[1]++; return NULL; }
@@ -1892,6 +1909,7 @@ reupload:
     if (t->gt) { gpu_texture_release(t->gt); t->gt = NULL; }   /* (draws recorded for interpolation hold their own) */
     t->replaced = 0;
     t->genmips = 0;
+    t->tp_known = 0;
 
     /* Texture packs: a replacement from load\, or this one dumped below. */
     if (!s_tp.inited)
@@ -1899,6 +1917,8 @@ reupload:
     if (tp_active() && !is_cube) {
         tp_hash = tp_texture_hash(mem + va, fmt, block, w, h, linear, pitch, pal,
                                   fmt == 0x0B ? 256u >> ((palreg >> 2) & 3) : 0);
+        t->tp_hash = tp_hash;
+        t->tp_known = 1;
         if (tp_replacement(tp_hash, &t->gt)) {
             s_tx_why[5]++;
             t->offset = off; t->fmt = fmt; t->w = w; t->h = h; t->pitch = pitch;

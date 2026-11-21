@@ -331,7 +331,21 @@ void D3DDevice_Swap_00595DB0(void)
     double t0 = now_s(), t1, t2, t3, tp;
     { extern volatile DWORD g_btvs_game_tid; g_btvs_game_tid = GetCurrentThreadId(); }
     fs_frame(t0);
-    btvs_native_overlay();          /* Menu's and Logs' text and rectangles: part of the frame */
+    {   /* (testing) BTVS_TEXPACK_RELOAD_EVERY=<seconds>: the texture pack's folder read again while the
+         * game runs, as Controls does when the device in use changes. */
+        static double every = -1.0, next;
+        if (every < 0.0) {
+            const char *e = getenv("BTVS_TEXPACK_RELOAD_EVERY");
+            every = e ? atof(e) : 0.0;
+            next = t0 + every;
+        }
+        if (every > 0.0 && t0 >= next) {
+            extern void nv2a_gpu_texture_pack_reload(void);
+            next = t0 + every;
+            nv2a_gpu_texture_pack_reload();
+        }
+    }
+    btvs_native_overlay();         /* Menu's and Logs' text and rectangles: part of the frame */
     btvs_shot_frame();
     tp = now_s();
     /* The limiter waits before the frame is shown, not after: frames then

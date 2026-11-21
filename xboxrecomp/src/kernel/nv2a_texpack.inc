@@ -11,6 +11,7 @@
  * that 16-digit hash replaces the texture, whatever else the name says.
  * Replacements get a full mip chain (box filter) and are kept for the rest of
  * the run; Prefetch loads them all on a background thread at start-up.
+ * nv2a_gpu_texture_pack_reload() reads load\ again while the title runs.
  * PNGs are written on a background thread, so dumping does not stall a frame.
  *
  * Cube maps are left alone.
@@ -54,8 +55,19 @@ static struct {
     WCHAR    root[MAX_PATH];
     int      dump, load, prefetch;
     int      inited;
-    TpEntry *ent;                /* open addressing by hash; built once at init */
+    TpEntry *ent;                /* open addressing by hash; built at init and by a reload */
     uint32_t cap, n;
+    int      lock_made;
+    HANDLE   prefetch_thread;    /* start-up's, while a reload may have to wait for it */
+    /* nv2a_gpu_texture_pack_reload: */
+    WCHAR    r_root[MAX_PATH];   /* what the reload under way reads (under lock) */
+    int      r_load;
+    uint32_t r_gen;              /* counts the calls */
+    int      r_running;          /* the reload thread is alive */
+    TpEntry *next;               /* the table it made, textures loaded, waiting for the render thread */
+    uint32_t next_cap, next_n;
+    volatile LONG pending;       /* ... is there */
+    double   r_ms;
     uint64_t *dumped;            /* hashes already in dump\ (render thread only) */
     uint32_t dcap, dn;
     CRITICAL_SECTION lock;       /* entry textures, the dump queue */
@@ -491,43 +503,51 @@ static uint64_t tp_name_hash(const WCHAR *name)
     return 0;
 }
 
-static TpEntry *tp_find(uint64_t hash)
+/* A table of replacements: the one in use (s_tp.ent) or the one a reload is making. */
+typedef struct { TpEntry *ent; uint32_t cap, n; } TpTable;
+
+static TpEntry *tp_find_in(TpEntry *ent, uint32_t cap, uint64_t hash)
 {
     uint32_t i;
-    if (!s_tp.cap)
+    if (!cap)
         return NULL;
-    for (i = (uint32_t)hash & (s_tp.cap - 1); s_tp.ent[i].path; i = (i + 1) & (s_tp.cap - 1))
-        if (s_tp.ent[i].hash == hash)
-            return &s_tp.ent[i];
+    for (i = (uint32_t)hash & (cap - 1); ent[i].path; i = (i + 1) & (cap - 1))
+        if (ent[i].hash == hash)
+            return &ent[i];
     return NULL;
 }
 
-static void tp_add(uint64_t hash, const WCHAR *path)
+static TpEntry *tp_find(uint64_t hash)
+{
+    return tp_find_in(s_tp.ent, s_tp.cap, hash);
+}
+
+static void tp_add(TpTable *tb, uint64_t hash, const WCHAR *path)
 {
     uint32_t i;
-    if (s_tp.n * 2 >= s_tp.cap) {
-        TpEntry *old = s_tp.ent;
-        uint32_t oc = s_tp.cap, k;
-        s_tp.cap = oc ? oc * 2 : 1024;
-        s_tp.ent = (TpEntry *)calloc(s_tp.cap, sizeof(TpEntry));
-        s_tp.n = 0;
+    if (tb->n * 2 >= tb->cap) {
+        TpEntry *old = tb->ent;
+        uint32_t oc = tb->cap, k;
+        tb->cap = oc ? oc * 2 : 1024;
+        tb->ent = (TpEntry *)calloc(tb->cap, sizeof(TpEntry));
+        tb->n = 0;
         for (k = 0; k < oc; k++)
             if (old[k].path) {
-                for (i = (uint32_t)old[k].hash & (s_tp.cap - 1); s_tp.ent[i].path; i = (i + 1) & (s_tp.cap - 1)) ;
-                s_tp.ent[i] = old[k];
-                s_tp.n++;
+                for (i = (uint32_t)old[k].hash & (tb->cap - 1); tb->ent[i].path; i = (i + 1) & (tb->cap - 1)) ;
+                tb->ent[i] = old[k];
+                tb->n++;
             }
         free(old);
     }
-    if (tp_find(hash))
+    if (tp_find_in(tb->ent, tb->cap, hash))
         return;                                /* first one found wins */
-    for (i = (uint32_t)hash & (s_tp.cap - 1); s_tp.ent[i].path; i = (i + 1) & (s_tp.cap - 1)) ;
-    s_tp.ent[i].hash = hash;
-    s_tp.ent[i].path = _wcsdup(path);
-    s_tp.n++;
+    for (i = (uint32_t)hash & (tb->cap - 1); tb->ent[i].path; i = (i + 1) & (tb->cap - 1)) ;
+    tb->ent[i].hash = hash;
+    tb->ent[i].path = _wcsdup(path);
+    tb->n++;
 }
 
-static void tp_scan(const WCHAR *dir, int depth)
+static void tp_scan(TpTable *tb, const WCHAR *dir, int depth)
 {
     WCHAR pat[MAX_PATH], p[MAX_PATH];
     WIN32_FIND_DATAW fd;
@@ -544,14 +564,14 @@ static void tp_scan(const WCHAR *dir, int depth)
         swprintf_s(p, MAX_PATH, L"%s\\%s", dir, fd.cFileName);
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             if (depth < 8)
-                tp_scan(p, depth + 1);
+                tp_scan(tb, p, depth + 1);
             continue;
         }
         ext = wcsrchr(fd.cFileName, L'.');
         if (!ext || (_wcsicmp(ext, L".png") && _wcsicmp(ext, L".dds")))
             continue;
         if ((hash = tp_name_hash(fd.cFileName)) != 0)
-            tp_add(hash, p);
+            tp_add(tb, hash, p);
     } while (FindNextFileW(h, &fd));
     FindClose(h);
 }
@@ -740,22 +760,32 @@ static void tp_dump(uint64_t hash, uint32_t fmt, uint32_t w, uint32_t h, const u
 
 /* ── start-up, lookup ── */
 
+static void tp_lock_make(void)
+{
+    if (!s_tp.lock_made) {
+        InitializeCriticalSection(&s_tp.lock);
+        s_tp.lock_made = 1;
+    }
+}
+
 static void tp_init(void)
 {
     WCHAR d[MAX_PATH];
     s_tp.inited = 1;
     if (!tp_active())
         return;
-    InitializeCriticalSection(&s_tp.lock);
+    tp_lock_make();
     CreateDirectoryW(s_tp.root, NULL);
     if (s_tp.load) {
+        TpTable tb = { NULL, 0, 0 };
         swprintf_s(d, MAX_PATH, L"%s\\load", s_tp.root);
         CreateDirectoryW(d, NULL);
-        tp_scan(d, 0);
+        tp_scan(&tb, d, 0);
+        s_tp.ent = tb.ent; s_tp.cap = tb.cap; s_tp.n = tb.n;
         fwprintf(stderr, L"  [TEXPACK] %u replacement textures in %s%s\n", s_tp.n, d,
                  s_tp.prefetch && s_tp.n ? L" (prefetching)" : L"");
         if (s_tp.prefetch && s_tp.n)
-            CloseHandle(CreateThread(NULL, 0, tp_prefetch_thread, NULL, 0, NULL));
+            s_tp.prefetch_thread = CreateThread(NULL, 0, tp_prefetch_thread, NULL, 0, NULL);
     }
     if (s_tp.dump) {
         swprintf_s(d, MAX_PATH, L"%s\\dump", s_tp.root);
@@ -791,4 +821,146 @@ static int tp_replacement(uint64_t hash, GpuTexture **tex)
     if (s_tp.replaced++ < 20 || getenv("BUFFY_TEX_LOG"))
         fwprintf(stderr, L"  [TEXPACK] replaced %016llx\n", (unsigned long long)hash);
     return 1;
+}
+
+/* ── reading load\ again while the title runs ── */
+
+static void tp_free_table(TpEntry *ent, uint32_t cap)
+{
+    uint32_t i;
+    for (i = 0; i < cap; i++) {
+        if (ent[i].tex) gpu_texture_release(ent[i].tex);
+        free(ent[i].path);
+    }
+    free(ent);
+}
+
+/* Makes a whole new table beside the one in use: the folder read, every
+ * picture decoded and uploaded. Nothing the render thread uses is touched
+ * until it takes the table over (tp_apply), so no frame waits for a file. */
+static DWORD WINAPI tp_reload_thread(LPVOID arg)
+{
+    IWICImagingFactory *f = tp_wic();
+    (void)arg;
+    if (s_tp.prefetch_thread)                       /* start-up's loading still under way: let it end */
+        WaitForSingleObject(s_tp.prefetch_thread, INFINITE);
+    for (;;) {
+        TpTable tb = { NULL, 0, 0 };
+        WCHAR d[MAX_PATH];
+        uint32_t gen, i, made = 0, failed = 0;
+        int load, done;
+        LARGE_INTEGER t0, t1, fq;
+        QueryPerformanceFrequency(&fq);
+        QueryPerformanceCounter(&t0);
+        EnterCriticalSection(&s_tp.lock);
+        gen = s_tp.r_gen;
+        load = s_tp.r_load;
+        swprintf_s(d, MAX_PATH, L"%s\\load", s_tp.r_root);
+        LeaveCriticalSection(&s_tp.lock);
+        if (load)
+            tp_scan(&tb, d, 0);
+        for (i = 0; i < tb.cap; i++) {
+            TpEntry *e = &tb.ent[i];
+            uint32_t w = 0, h = 0, *px;
+            if (!e->path)
+                continue;
+            px = f ? tp_read_image(f, e->path, &w, &h) : NULL;
+            if (px && tp_make_texture(px, w, h, &e->tex))
+                made++;
+            else {
+                e->tex = NULL;
+                e->failed = 1;
+                failed++;
+                fwprintf(stderr, L"  [TEXPACK] reload: could not load %s\n", e->path);
+            }
+            free(px);
+        }
+        QueryPerformanceCounter(&t1);
+        EnterCriticalSection(&s_tp.lock);
+        done = gen == s_tp.r_gen;
+        if (done) {
+            if (s_tp.next || s_tp.pending)          /* an earlier one the render thread never took */
+                tp_free_table(s_tp.next, s_tp.next_cap);
+            s_tp.next = tb.ent; s_tp.next_cap = tb.cap; s_tp.next_n = tb.n;
+            s_tp.r_ms = (double)(t1.QuadPart - t0.QuadPart) * 1000.0 / (double)fq.QuadPart;
+            s_tp.r_running = 0;
+            InterlockedExchange(&s_tp.pending, 1);
+        }
+        LeaveCriticalSection(&s_tp.lock);
+        if (done) {
+            fprintf(stderr, "  [TEXPACK] reload: %u replacements read in %.0f ms on the loading thread (%u failed)\n",
+                    made, s_tp.r_ms, failed);
+            break;
+        }
+        tp_free_table(tb.ent, tb.cap);              /* asked again meanwhile: the files may have changed under us */
+    }
+    if (f) IWICImagingFactory_Release(f);
+    return 0;
+}
+
+/* Read the pack's load\ folder again: files with new contents, new files,
+ * files gone. Call it on the thread that draws (the title's), after the files
+ * are written -- and after nv2a_gpu_set_texture_pack if the folder or Load
+ * changed. It returns at once: the pictures are read and uploaded on a
+ * background thread, the old ones stay on screen meanwhile, and the frame
+ * after the last one is ready every texture the title has in use takes its new
+ * replacement (or its own picture back). Calling it again before that is fine:
+ * the folder is read once more and only the last reading is shown. */
+void nv2a_gpu_texture_pack_reload(void)
+{
+    int start;
+    if (!s_tp.inited)
+        return;                                     /* no texture yet: the first one reads the folder */
+    tp_lock_make();
+    EnterCriticalSection(&s_tp.lock);
+    wcscpy_s(s_tp.r_root, MAX_PATH, s_tp.root);
+    s_tp.r_load = s_tp.load;
+    s_tp.r_gen++;
+    start = !s_tp.r_running;
+    s_tp.r_running = 1;
+    LeaveCriticalSection(&s_tp.lock);
+    if (start) {
+        HANDLE th = CreateThread(NULL, 0, tp_reload_thread, NULL, 0, NULL);
+        if (th) {
+            SetThreadPriority(th, THREAD_PRIORITY_BELOW_NORMAL);
+            CloseHandle(th);
+        } else {
+            s_tp.r_running = 0;
+        }
+    }
+}
+
+/* Render thread, when a reload's table is ready (s_tp.pending): take it over
+ * and make the textures it changes look their replacement up again at their
+ * next use. `forget(hash, known, replaced)` is called per cached texture and
+ * says whether to drop it. */
+static int tp_apply_begin(void)
+{
+    TpEntry *old;
+    uint32_t oc;
+    if (!s_tp.lock_made)
+        return 0;
+    EnterCriticalSection(&s_tp.lock);
+    if (!s_tp.pending) {
+        LeaveCriticalSection(&s_tp.lock);
+        return 0;
+    }
+    old = s_tp.ent; oc = s_tp.cap;
+    s_tp.ent = s_tp.next; s_tp.cap = s_tp.next_cap; s_tp.n = s_tp.next_n;
+    s_tp.next = NULL; s_tp.next_cap = s_tp.next_n = 0;
+    InterlockedExchange(&s_tp.pending, 0);
+    LeaveCriticalSection(&s_tp.lock);
+    tp_free_table(old, oc);                         /* (textures still drawn with hold their own reference) */
+    return 1;
+}
+
+/* Does a cached texture have to be looked up again after a reload? */
+static int tp_stale(uint64_t hash, int known, int replaced)
+{
+    TpEntry *e;
+    if (replaced)
+        return 1;                                   /* its picture may be another one now, or gone */
+    if (!known)
+        return tp_active();                         /* made while no pack was on: it may have one now */
+    return s_tp.load && (e = tp_find(hash)) != NULL && e->tex != NULL;
 }

@@ -227,6 +227,24 @@ frame 2 (12 ms) and frame 382 (10 ms). Not covered: a texture-stage set-up or ve
 this PC has drawn yet is still compiled at its first use, once (it shows as `shaders` in the frame
 statistics), and the gamma shader is made when the brightness first changes.
 
+## Replacement textures read again while the game runs
+
+The runtime's texture pack (`nv2a_texpack.inc`: a folder of PNG files named by the hash of the texture
+they replace; Controls' button pictures use it) was read once per process, and a texture already in the
+texture cache kept its replacement. `nv2a_gpu_texture_pack_reload()` reads the folder again
+(`docs/AREAS.md`, "Ready to use"):
+
+- a background thread makes a whole new table -- folder read, every picture decoded and uploaded -- beside
+  the one in use; nothing the game thread uses is touched meanwhile;
+- when it is ready the game thread takes it over at its next texture lookup (`tp_apply_begin`), frees the
+  old one, and drops from the texture cache every texture that had a replacement or has one now
+  (`tp_stale`; each cache entry keeps its pack hash). Those are found again at their next use, the same
+  frame: a hash of the texture's memory and a table lookup, no decoding.
+
+`BTVS_TEXPACK_RELOAD_EVERY=<seconds>` (testing) calls it that often. Level 1 with a reload every 3 s and
+the files swapped mid-level: pictures changed in the tip on screen, no frame over 22 ms around any of the
+14 reloads.
+
 ## Frame limit and VSync
 
 `[display] fps_limit` (0: none) and `vsync`. The game steps its world by measured time
