@@ -178,6 +178,22 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
+## What was checked on 21 Nov 2026, 11:00 build (main at 2e73139)
+
+`GAME/buffy_tvs.exe`: **commit `2e73139d93`, built Nov 21 2026 11:00:10** (`btvs_log.txt` line 1). No regen
+was needed (same 90 hooks as the library; recompiler unchanged since it was generated). No game was running
+from `GAME/` at deploy time; `btvs_settings.ini` is byte-identical before and after, and there were no saves.
+Hidden, muted, CPUs 8-15, self-exit after 120 s, scripted Start button, no `BTVS_GAME_DIR`:
+
+- **Through the launcher's Play path** (`--play` from another folder): title 9.3 s, **main menu 10.4 s**,
+  Start Game, difficulty, restart, **`m00_spanishmission_1` loaded at 25.7 s** of the second process,
+  positions logged in play, exit code 0.
+- **Started with no console** (`BTVS_LAUNCHER_NO_CONSOLE=1`): the game made its own `btvs_console.txt`
+  (191 KB), title 4.6 s, **main menu 5.7 s**, **level loaded at 32.1 s** of the second process, exit code 0.
+
+The runs' saves and logs were removed from `GAME/` afterwards. New in this build: the game leaves
+`btvs_frames.rec` and its own `Bug_<level>.Log` beside the exe.
+
 ## What was checked on 21 Nov 2026, 03:25 build (main at 6840c83 plus this change; direct start)
 
 Same rules: hidden, muted, CPUs 8-15, self-exit, no `BTVS_GAME_DIR`, from `GAME/` in the main checkout.
