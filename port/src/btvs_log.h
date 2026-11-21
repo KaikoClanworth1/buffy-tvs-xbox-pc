@@ -73,4 +73,15 @@ int btvs_copy_tree(const char *from, const char *to, unsigned long long max_byte
 }
 #endif
 
+/* btvs_trail.c, GAME HOOKS: the exact spot (player and camera world matrices,
+ * 12 floats each) and putting the player back there (game thread only). */
+int btvs_game_state(float player[12], float camera[12], float *health);
+int btvs_game_place(const float m[12], float health);
+int btvs_game_in_level(char *name, size_t n);
+int btvs_trail_in_cutscene(void);
+int btvs_replay_wants_skip(void);         /* a replay is on its way to the spot: skip cutscenes */
+double btvs_trail_level_loaded_at(void);  /* uptime when the level became playable, 0 before */
+void btvs_report_game_snap(void);         /* game thread: keep the next frame as the report's picture */
+void btvs_report_game_snap_clear(void);
+
 #endif /* BTVS_LOG_H */

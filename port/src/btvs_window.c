@@ -112,10 +112,14 @@ static void apply(void)
         if (w43 < w) w = w43; else h = w * 3 / 4;
         nv2a_gpu_set_frame_aspect(0.0f);
         nv2a_gpu_set_frame_widescreen(0);
+        btvs_native_set_wide(1.0f);
     } else if (wide == 1) {
+        /* a wider view in the levels, 4:3 in the middle for the rest (btvs_native.c) */
         nv2a_gpu_set_frame_aspect((float)w / (float)h);
+        btvs_native_set_wide(((float)w / (float)h) / (4.0f / 3.0f));
     } else {
         nv2a_gpu_set_frame_aspect(-1.0f);
+        btvs_native_set_wide(1.0f);
     }
     nv2a_gpu_set_display(w, h, vsync, mode);
     s_applied_mode = mode;
@@ -152,27 +156,33 @@ void btvs_window_boot(void)
         const char *e = getenv("BTVS_NO_DISC_INSTALL");
         xbox_path_set_cache_from_disc(e && e[0] == '1');
     }
-    {   /* The game's threads share one CPU, as on the console. Its own lock
-         * (CLocker: a counter, incremented and looked at in separate steps) is
-         * only a lock there: on two CPUs the loader thread and the game both
-         * take it, both give up, and both wait for ever -- the first level
-         * load stopped that way. Rendering and audio run on the port's own
-         * threads and use the other CPUs. BTVS_GAME_CPUS=all turns it off;
-         * BTVS_GAME_CPUS=<hex mask> picks the CPUs. */
+    {   /* Which CPUs the game's own threads run on. All of the process's by
+         * default. The game's lock (CLocker: a counter looked at and changed
+         * in separate steps) only worked on the console's one CPU -- the
+         * loader thread and the game both took it and both waited for ever --
+         * and for a while all the game's threads were kept on one CPU for
+         * that. The lock is now taken in one step (btvs_boot_hooks.c), and
+         * one CPU cost a lot: a level loaded in 46 s instead of 9, and the
+         * movie's decoder shared the CPU with the game. BTVS_GAME_CPUS=1 puts
+         * them back on one CPU (a different one per process, so two games do
+         * not pick the same); BTVS_GAME_CPUS=<hex mask> names the CPUs. */
         extern void xbox_set_guest_thread_affinity(uintptr_t mask);
         const char *e = getenv("BTVS_GAME_CPUS");
         DWORD_PTR proc = 0, sys = 0, mask = 0;
         GetProcessAffinityMask(GetCurrentProcess(), &proc, &sys);
-        if (e && *e && _stricmp(e, "all"))
+        if (e && !strcmp(e, "1")) {
+            int n = 0, k, pick;
+            for (k = 0; k < 64; k++)
+                n += (int)((proc >> k) & 1);
+            pick = n ? (int)(GetCurrentProcessId() / 4 % (DWORD)n) : 0;
+            for (k = 0; k < 64; k++)
+                if (((proc >> k) & 1) && pick-- == 0)
+                    mask = (DWORD_PTR)1 << k;
+        } else if (e && *e && _stricmp(e, "all"))
             mask = (DWORD_PTR)strtoull(e, NULL, 16) & proc;
-        else if (!(e && *e)) {
-            if (proc & 4)
-                mask = 4;                            /* the second core: the first is the busiest on most PCs */
-            else
-                mask = proc & (~proc + 1);           /* the lowest CPU this process may use */
-        }
         xbox_set_guest_thread_affinity(mask);
-        btvs_log("boot", "the game's threads run on CPU mask %llX (process %llX)", (unsigned long long)mask, (unsigned long long)proc);
+        btvs_log("boot", "the game's threads run on CPU mask %llX (0: all of the process's, %llX)",
+                 (unsigned long long)mask, (unsigned long long)proc);
     }
     apply();
     InterlockedExchange(&s_dirty, 0);

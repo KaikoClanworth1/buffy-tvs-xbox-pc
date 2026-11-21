@@ -1,0 +1,13 @@
+# In the first level (BTVS_PAD_SCRIPT_1, after boot_to_level.txt): a short walk with turns,
+# for recording and playing back (BTVS_INPUT_RECORD_1 / BTVS_INPUT_PLAYBACK_1) and comparing
+# where the player ends up (BTVS_INPUT_POS_LOG).
+after level
+8.0 START                 # skips the opening cutscene
+14.0 LSU for 1.5
++2.5 LSL for 1.0
++2.0 RSL for 0.7
++1.5 LSU for 1.2
++2.0 LS=0.7,0.7 for 1.0
++2.0 RSR for 0.4
++1.5 LSD for 0.8
++2.0 LSR for 0.6

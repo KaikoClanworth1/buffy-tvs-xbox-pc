@@ -168,13 +168,17 @@ static void over(uint32_t *px, uint32_t argb, uint32_t cov)
 static void paint(const OvItem *items, int n)
 {
     float s = (float)s_ch / 480.0f;
+    /* a frame wider than 4:3: the 640x480 screen is its middle (x below 0 and
+     * above 640 are the sides) */
+    float ox = ((float)s_cw / s - 640.0f) * 0.5f;
     int i, x, y;
+    if (ox < 0.0f) ox = 0.0f;
     memset(s_canvas, 0, (size_t)s_cw * s_ch * 4);
     for (i = 0; i < n; i++) {
         const OvItem *it = &items[i];
         if (it->kind == 0) {
-            int x0 = (int)(it->x * s + 0.5f), y0 = (int)(it->y * s + 0.5f);
-            int x1 = (int)((it->x + it->w) * s + 0.5f), y1 = (int)((it->y + it->h) * s + 0.5f);
+            int x0 = (int)((it->x + ox) * s + 0.5f), y0 = (int)(it->y * s + 0.5f);
+            int x1 = (int)((it->x + ox + it->w) * s + 0.5f), y1 = (int)((it->y + it->h) * s + 0.5f);
             if (x0 < 0) x0 = 0;
             if (y0 < 0) y0 = 0;
             if (x1 > s_cw) x1 = s_cw;
@@ -188,7 +192,7 @@ static void paint(const OvItem *items, int n)
             int px = (int)(it->h * s + 0.5f), len = (int)strlen(it->text);
             SelectObject(s_dc, font_for(px));
             GetTextExtentPoint32A(s_dc, it->text, len, &sz);
-            r.left = (LONG)(it->x * s + 0.5f);
+            r.left = (LONG)((it->x + ox) * s + 0.5f);
             r.top = (LONG)(it->y * s + 0.5f);
             r.right = r.left + sz.cx + 2;
             r.bottom = r.top + sz.cy + 2;
@@ -200,7 +204,7 @@ static void paint(const OvItem *items, int n)
                 continue;
             for (y = r.top; y < r.bottom; y++)
                 memset(&s_scratch[y * s_cw + r.left], 0, (size_t)(r.right - r.left) * 4);
-            TextOutA(s_dc, (int)(it->x * s + 0.5f), (int)(it->y * s + 0.5f), it->text, len);
+            TextOutA(s_dc, (int)((it->x + ox) * s + 0.5f), (int)(it->y * s + 0.5f), it->text, len);
             GdiFlush();
             for (y = r.top; y < r.bottom; y++)
                 for (x = r.left; x < r.right; x++) {

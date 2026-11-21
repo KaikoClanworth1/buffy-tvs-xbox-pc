@@ -26,6 +26,7 @@
  */
 #include <windows.h>
 #include <psapi.h>
+#include <shellapi.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,6 +90,7 @@ void btvs_menu_no_quit(void) { btvs_settings_save(); exit(0); }
 #pragma comment(linker, "/alternatename:btvs_input_bindings_reset=btvs_menu_no_void")
 #pragma comment(linker, "/alternatename:btvs_gpu_info=btvs_menu_no_gpu_info")
 #pragma comment(linker, "/alternatename:btvs_quit=btvs_menu_no_quit")
+#pragma comment(lib, "shell32.lib")
 
 /* ── the game (guest addresses, XDK 4432 retail; names from final.map) ──── */
 
@@ -101,6 +103,7 @@ void GUI_TMenuPause_OnLoad_00223760(void);
 void GUI_TMenuPause_OnMessage_00223A60(void);
 void GUI_TBuffyMenu_OnUpdate_00219480(void);
 void GUI_TMenuNameSession_OnUpdate_00222F00(void);
+void GUI_TMenuPause_OnUpdate_00223D70(void);
 void GUI_TBuffyMenu_OnBuffyCommand_00218C20(void);
 void GUI_TCanvas_GotoControl_001EA460(void);
 void GUI_TTextButton_SetText_001EE0A0(void);          /* SetText(char *) */
@@ -117,6 +120,7 @@ void Z_YAPAXI_op2_002BC1A0(void);                     /* operator new(size) */
 #define VA_PAUSE_ONMESSAGE    0x00223A60u
 #define VA_BUFFYMENU_ONUPDATE 0x00219480u
 #define VA_NAMESESSION_ONUPDATE 0x00222F00u
+#define VA_PAUSE_ONUPDATE     0x00223D70u
 
 #define G_MANAGER        0x007E6BD0u    /* GUI::g_lpManager */
 #define G_FADE_MODE      0x007F041Cu    /* TBuffyMenu::s_fadeMode: commands are ignored while it is set */
@@ -148,7 +152,7 @@ void Z_YAPAXI_op2_002BC1A0(void);                     /* operator new(size) */
 #define V_MGR_SETMENU   0x38    /* TManager::SetMenu(id, bool rememberAsBack) */
 
 enum { CMD_LEFT = 0x23, CMD_RIGHT = 0x24, CMD_UP = 0x25, CMD_DOWN = 0x26,
-       CMD_SELECT = 0x27, CMD_DELETE = 0x28, CMD_BACK = 0x29 };
+       CMD_SELECT = 0x27, CMD_DELETE = 0x28 /* the Y button */, CMD_BACK = 0x29 };
 enum { MSG_FOCUS = 2, MSG_PRESSED = 5 };
 enum { MENU_MAIN = 1, MENU_OPTIONS = 4, MENU_PAUSE = 9 };
 
@@ -156,6 +160,8 @@ enum { MENU_MAIN = 1, MENU_OPTIONS = 4, MENU_PAUSE = 9 };
 #define ID_MAIN_STARTGAME      1
 #define ID_OPTIONS_CONTROLLER  41
 #define ID_PAUSE_RESUME        85
+#define ID_PAUSE_OPTIONS       86
+#define ID_PAUSE_QUIT          87
 
 /* our control ids (the game's stop at 215) */
 #define ID_EXIT         0x7001
@@ -206,10 +212,12 @@ static const char *const k_page_name[PG_COUNT] = {
     "options", "pc_graphics", "pc_audio", "pc_controls", "pc_memory", "pc_report",
     "pc_bindings", "pc_report_done" };
 static const char *const k_page_title[PG_COUNT] = {
-    "", "GRAPHICS", "PC AUDIO", "PC CONTROLS", "MEMORY", "REPORT A PROBLEM",
-    "KEY BINDINGS", "REPORT A PROBLEM" };
+    "", "Graphics", "PC Audio", "PC Controls", "Memory", "Report a Problem",
+    "Key Bindings", "Report a Problem" };
 
-typedef struct { char text[128]; int item; } row_t;    /* item < 0: not selectable */
+/* A line of a page. item < 0: not selectable. small: the game's small text
+ * font (what it uses for descriptions); otherwise its menu font. */
+typedef struct { char text[128]; int item, small; } row_t;
 
 static uint32_t s_options;          /* the TMenuOptions the pool lives in */
 static int      s_page;
@@ -221,6 +229,7 @@ static uint32_t s_saved_id[32], s_saved_state[32];
 static int      s_nsaved;
 static uint32_t s_scratch;          /* guest buffer for strings and out-pointers */
 static DWORD    s_next_refresh;
+static uint32_t s_font_menu, s_font_menu_on, s_font_text, s_font_text_on;   /* font resources */
 
 /* bindings page */
 static int s_bind_top, s_bind_slot, s_bind_capture = -1;
@@ -394,12 +403,27 @@ static void rowf(int item, const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(s_row[s_nrows].text, sizeof s_row[0].text, fmt, ap);
     va_end(ap);
+    s_row[s_nrows].small = 0;
     s_row[s_nrows++].item = item;
+}
+
+/* A line of description, in the small text font. */
+static void notef(const char *fmt, ...)
+{
+    va_list ap;
+    if (s_nrows >= NROWS) return;
+    va_start(ap, fmt);
+    vsnprintf(s_row[s_nrows].text, sizeof s_row[0].text, fmt, ap);
+    va_end(ap);
+    s_row[s_nrows].small = 1;
+    s_row[s_nrows++].item = -1;
 }
 
 static void mb(char *out, size_t n, uint64_t bytes)
 {
-    if (bytes >= (1ull << 30)) snprintf(out, n, "%.1f GB", (double)bytes / (double)(1ull << 30));
+    double gb = (double)bytes / (double)(1ull << 30);
+    if (gb >= 10.0)     snprintf(out, n, "%.0f GB", gb);
+    else if (gb >= 1.0) snprintf(out, n, "%.1f GB", gb);
     else                       snprintf(out, n, "%u MB", (unsigned)(bytes >> 20));
 }
 
@@ -408,13 +432,19 @@ static void build_memory(void)
     MEMORYSTATUSEX ms;
     PROCESS_MEMORY_COUNTERS_EX pm;
     char a[32], b[32];
-    uint64_t ram_total = 0, ram_used = 0, proc = 0;
+    uint64_t ram_total = 0, ram_used = 0, proc = 0, vram_total = 0, vram_used = 0, vram_game = 0;
 
     memset(&ms, 0, sizeof ms); ms.dwLength = sizeof ms;
     if (GlobalMemoryStatusEx(&ms)) { ram_total = ms.ullTotalPhys; ram_used = ms.ullTotalPhys - ms.ullAvailPhys; }
     memset(&pm, 0, sizeof pm); pm.cb = sizeof pm;
     if (K32GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&pm, sizeof pm))
         proc = pm.WorkingSetSize;
+    {
+        struct btvs_gpu_info g;
+        memset(&g, 0, sizeof g);
+        btvs_gpu_info(&g);
+        vram_total = g.vram_total; vram_game = g.vram_used_by_game;
+    }
 #ifdef BTVS_HAVE_MEM_STATS      /* Logs: struct btvs_mem / btvs_mem_stats() in btvs.h */
     {
         struct btvs_mem m;
@@ -422,73 +452,82 @@ static void build_memory(void)
         btvs_mem_stats(&m);
         if (m.ram_total) { ram_total = m.ram_total; ram_used = m.ram_total - m.ram_available; }
         if (m.proc_working_set) proc = m.proc_working_set;
+        if (m.vram_total) { vram_total = m.vram_total; vram_used = m.vram_used_system; vram_game = m.vram_used; }
         mb(a, sizeof a, ram_used); mb(b, sizeof b, ram_total);
-        rowf(-1, "System memory:  %s of %s in use", a, b);
+        rowf(-1, "PC Memory: %s of %s", a, b);
         mb(a, sizeof a, proc);
-        rowf(-1, "This game:  %s", a);
-        if (m.vram_total) {
-            mb(a, sizeof a, m.vram_used_system); mb(b, sizeof b, m.vram_total);
-            if (m.vram_used_system) rowf(-1, "Video memory:  %s of %s in use", a, b);
-            else                    rowf(-1, "Video memory:  %s", b);
-            mb(a, sizeof a, m.vram_used);
-            rowf(-1, "This game:  %s", a);
+        rowf(-1, "Game's PC Memory: %s", a);
+        if (vram_total) {
+            mb(a, sizeof a, vram_used); mb(b, sizeof b, vram_total);
+            if (vram_used) rowf(-1, "Video Memory: %s of %s", a, b);
+            else           rowf(-1, "Video Memory: %s", b);
+            mb(a, sizeof a, vram_game);
+            rowf(-1, "Game's Video Memory: %s", a);
         } else {
-            rowf(-1, "Video memory:  not known");
+            rowf(-1, "Video Memory: Not Known");
         }
         if (m.game_heap_valid) {
             mb(a, sizeof a, m.game_heap_used); mb(b, sizeof b, m.guest_ram_total);
-            rowf(-1, "Game heap:  %s of %s", a, b);
+            rowf(-1, "Game Heap: %s of %s", a, b);
             mb(a, sizeof a, m.game_heap_peak);
-            rowf(-1, "Peak %s,  %u blocks", a, (unsigned)m.game_heap_allocs);
+            rowf(-1, "Heap Peak: %s, %u Blocks", a, (unsigned)m.game_heap_allocs);
         } else {
-            rowf(-1, "Game heap:  not known");
+            rowf(-1, "Game Heap: Not Known");
         }
     }
 #else
     mb(a, sizeof a, ram_used); mb(b, sizeof b, ram_total);
-    rowf(-1, "System memory:  %s of %s in use", a, b);
+    rowf(-1, "PC Memory: %s of %s", a, b);
     mb(a, sizeof a, proc);
-    rowf(-1, "This game:  %s", a);
-    {
-        struct btvs_gpu_info g;
-        memset(&g, 0, sizeof g);
-        btvs_gpu_info(&g);
-        if (g.vram_total) {
-            mb(a, sizeof a, g.vram_used_by_game); mb(b, sizeof b, g.vram_total);
-            rowf(-1, "Video memory:  %s", b);
-            rowf(-1, "This game:  %s", a);
-        } else {
-            rowf(-1, "Video memory:  not known");
-        }
+    rowf(-1, "Game's PC Memory: %s", a);
+    if (vram_total) {
+        mb(b, sizeof b, vram_total); mb(a, sizeof a, vram_game);
+        rowf(-1, "Video Memory: %s", b);
+        rowf(-1, "Game's Video Memory: %s", a);
+    } else {
+        rowf(-1, "Video Memory: Not Known");
     }
-    rowf(-1, "Game heap:  not known");
+    (void)vram_used;
+    rowf(-1, "Game Heap: Not Known");
 #endif
     rowf(0, "Back");
 }
 
+#define BIND_VIS 7      /* actions on screen at once (below one line of description) */
+
 static void build_bindings(void)
 {
-    int n = btvs_input_action_count(), i, s;
-    char t[3][40];
+    static const char *const k_slot[3] = { "Keyboard 1", "Keyboard 2", "Controller" };
+    int n = btvs_input_action_count(), i;
     if (n <= 0) {
-        rowf(-1, "No bindings to show");
+        rowf(-1, "No Bindings");
         rowf(1000, "Back");
         return;
     }
-    s_bind_top = clampi(s_bind_top, 0, n > NROWS ? n - NROWS : 0);
-    for (i = s_bind_top; i < n && s_nrows < NROWS; i++) {
+    s_bind_slot = wrap(s_bind_slot, 3);
+    s_bind_top = clampi(s_bind_top, 0, n > BIND_VIS ? n - BIND_VIS : 0);
+    notef("%s  -  Left/Right: other bindings   A: change   Y: clear", k_slot[s_bind_slot]);
+    for (i = s_bind_top; i < n && i < s_bind_top + BIND_VIS; i++) {
+        char raw[40];
         if (s_bind_capture == i) {
-            rowf(i, "%s:  press a key or button...", btvs_input_action_label(i));
+            rowf(i, "%s: Press a Key...", btvs_input_action_label(i));
             continue;
         }
-        for (s = 0; s < 3; s++) {
-            char raw[32];
-            btvs_input_binding_text(i, s, raw, sizeof raw);
-            if (!raw[0]) strcpy(raw, "-");
-            snprintf(t[s], sizeof t[s], s == s_bind_slot ? "[%s]" : "%s", raw);
-        }
-        rowf(i, "%s:  %s  %s  %s", btvs_input_action_label(i), t[0], t[1], t[2]);
+        btvs_input_binding_text(i, s_bind_slot, raw, sizeof raw);
+        rowf(i, "%s: %s", btvs_input_action_label(i), raw[0] ? raw : "-");
     }
+}
+
+/* The folder a report went to, as the player would say it: "reports\<name>". */
+static const char *report_short(const char *path)
+{
+    const char *p = path + strlen(path), *cut = path;
+    int seps = 0;
+    while (p > path) {
+        p--;
+        if ((*p == '\\' || *p == '/') && ++seps == 2) { cut = p + 1; break; }
+    }
+    return cut;
 }
 
 static void build_rows(void)
@@ -497,27 +536,27 @@ static void build_rows(void)
     s_nrows = 0;
     switch (s_page) {
     case PG_GRAPHICS:
-        rowf(0, "Display Mode:  %s", k_mode[wrap(btvs_setting_int("display", "mode", 1), 3)]);
+        rowf(0, "Display Mode: %s", k_mode[wrap(btvs_setting_int("display", "mode", 1), 3)]);
         i = res_index();
-        if (i == 0)      rowf(1, "Resolution:  Desktop");
-        else             rowf(1, "Resolution:  %d x %d", btvs_setting_int("display", "width", 0),
+        if (i == 0)      rowf(1, "Resolution: Desktop");
+        else             rowf(1, "Resolution: %d x %d", btvs_setting_int("display", "width", 0),
                               btvs_setting_int("display", "height", 0));
-        rowf(2, "VSync:  %s", onoff("display", "vsync", 1));
+        rowf(2, "VSync: %s", onoff("display", "vsync", 1));
         i = k_fps[fps_index()];
-        if (i) rowf(3, "FPS Limit:  %d", i); else rowf(3, "FPS Limit:  Uncapped");
-        rowf(4, "Picture:  %s", k_wide[wrap(btvs_setting_int("display", "widescreen", 0), 3)]);
-        rowf(5, "Overlay:  %s", k_overlay[wrap(btvs_setting_int("display", "show_fps", 0), 3)]);
+        if (i) rowf(3, "FPS Limit: %d", i); else rowf(3, "FPS Limit: Uncapped");
+        rowf(4, "Picture: %s", k_wide[wrap(btvs_setting_int("display", "widescreen", 0), 3)]);
+        rowf(5, "Overlay: %s", k_overlay[wrap(btvs_setting_int("display", "show_fps", 0), 3)]);
         break;
     case PG_AUDIO:
-        rowf(0, "Master Volume:  %d%%", btvs_setting_int("audio", "master", 100));
-        rowf(1, "Music:  %d%%", btvs_setting_int("audio", "music", 100));
-        rowf(2, "Effects:  %d%%", btvs_setting_int("audio", "effects", 100));
-        rowf(3, "Speech:  %d%%", btvs_setting_int("audio", "speech", 100));
+        rowf(0, "Master Volume: %d", btvs_setting_int("audio", "master", 100));
+        rowf(1, "Music: %d", btvs_setting_int("audio", "music", 100));
+        rowf(2, "Effects: %d", btvs_setting_int("audio", "effects", 100));
+        rowf(3, "Speech: %d", btvs_setting_int("audio", "speech", 100));
         break;
     case PG_CONTROLS:
-        rowf(0, "Sensitivity:  %d", btvs_setting_int("controls", "sensitivity", 5));
-        rowf(1, "Invert Look:  %s", onoff("controls", "invert_y", 0));
-        rowf(2, "Rumble:  %s", onoff("controls", "rumble", 1));
+        rowf(0, "Sensitivity: %d", btvs_setting_int("controls", "sensitivity", 5));
+        rowf(1, "Invert Look: %s", onoff("controls", "invert_y", 0));
+        rowf(2, "Rumble: %s", onoff("controls", "rumble", 1));
         rowf(3, "Key Bindings");
         rowf(4, "Reset Bindings");
         break;
@@ -527,25 +566,31 @@ static void build_rows(void)
     case PG_MEMORY:
         build_memory();
         break;
-    case PG_REPORT:
-        rowf(0, "Problem:  %s", k_category[wrap(s_rep_cat, 6)]);
-        if (s_rep_edit) rowf(1, "Details:  %s[%c]", s_rep_text, k_charset[s_rep_char]);
-        else            rowf(1, "Details:  %s", s_rep_text[0] ? s_rep_text : "(none)");
+    case PG_REPORT: {
+        /* the menu font is wide: the end of a long text is what is shown */
+        size_t n = strlen(s_rep_text);
+        const char *tail = n > 16 ? s_rep_text + n - 14 : s_rep_text;
+        rowf(0, "Problem: %s", k_category[wrap(s_rep_cat, 6)]);
+        if (s_rep_edit)       rowf(1, "Details: %s%s[%c]", n > 16 ? ".." : "", tail, k_charset[s_rep_char]);
+        else if (n)           rowf(1, "Details: %s%s", n > 16 ? ".." : "", tail);
+        else                  rowf(1, "Details: None");
         rowf(2, "Send Report");
-        rowf(-1, s_rep_edit ? "Left/Right letter, A add, X delete, B done"
-                            : "A on Details to write, or type on the keyboard");
+        notef(s_rep_edit ? "Left/Right: letter   A: add   Y: delete   B: done"
+                         : "A on Details to write with the controller, or type on the keyboard.");
+        notef("The report is saved on this PC. Nothing is sent.");
         break;
+    }
     case PG_REPORT_DONE: {
         const char *p = btvs_report_last_path();
-        size_t n = p ? strlen(p) : 0, o;
         if (s_rep_busy) {
-            rowf(-1, "Saving the report...");
-        } else if (n) {
-            rowf(-1, "Report saved in:");
-            for (o = 0; o < n && s_nrows < 5; o += 46) rowf(-1, "%.46s", p + o);
-            rowf(-1, "Nothing was sent anywhere.");
+            rowf(-1, "Saving Report...");
+        } else if (p && p[0]) {
+            rowf(-1, "Report Saved");
+            notef("In the game's folder:  %.60s", report_short(p));
+            notef("Nothing was sent anywhere.");
+            rowf(1, "Open Folder");
         } else {
-            rowf(-1, "The report could not be saved.");
+            rowf(-1, "Report Not Saved");
         }
         rowf(0, "Back");
         break;
@@ -555,11 +600,19 @@ static void build_rows(void)
     }
 }
 
+/* Where a page's lines go (640x480): the heading where the game's own
+ * Options list starts, lines in the menu font 38 apart, description lines 24. */
+#define PAGE_X        121
+#define PAGE_HEAD_Y   70
+#define PAGE_ROWS_Y   112
+#define PAGE_STEP     38
+#define PAGE_STEP_TXT 27
+
 /* Put the page's lines on screen (only the ones whose text changed). */
 static void refresh(void)
 {
     uint32_t menu = s_options, b;
-    int i;
+    int i, y = PAGE_ROWS_Y;
     if (!menu || s_page == PG_NONE) return;
     build_rows();
     b = find_control(menu, ID_HEADING);
@@ -572,11 +625,20 @@ static void refresh(void)
         b = find_control(menu, ID_ROW0 + (uint32_t)i);
         if (!b) continue;
         if (i < s_nrows) {
+            uint32_t off = s_row[i].small ? s_font_text : s_font_menu;
+            uint32_t on  = s_row[i].small ? s_font_text_on : s_font_menu_on;
             if (strcmp(s_shown[i], s_row[i].text) != 0) {
                 strcpy(s_shown[i], s_row[i].text);
                 set_text(b, s_row[i].text);
             }
             show(b, 1, s_row[i].item >= 0);
+            if (off && on) {
+                MEM32(b + B_FONT_OFF) = off;
+                MEM32(b + B_FONT_ON) = on;
+                MEM32(b + B_FONT) = MEM32(b + C_STATE) == 1 ? on : off;
+            }
+            MEM32(b + C_Y) = (uint32_t)(s_row[i].small ? y + 4 : y);
+            y += s_row[i].small ? PAGE_STEP_TXT : PAGE_STEP;
         } else {
             show(b, 0, 0);
         }
@@ -718,6 +780,15 @@ static int act(int item, int dir)
         }
         break;
     case PG_REPORT_DONE:
+        if (item == 1 && !dir) {
+            const char *p = btvs_report_last_path();
+            const char *hidden = getenv("BTVS_NO_WINDOW");
+            if (hidden && *hidden && *hidden != '0')
+                btvs_log("menu", "open folder: %s (not opened: test run)", p);
+            else if (p && p[0])
+                ShellExecuteA(NULL, "open", p, NULL, NULL, SW_SHOWNORMAL);
+            break;
+        }
         if (!dir) { set_page(PG_NONE); return 1; }
         break;
     }
@@ -769,10 +840,13 @@ static void options_setup(uint32_t menu)
         add_button(menu, like, ID_ENTRY0 + (uint32_t)k_entry[i].page,
                    k_entry[i].col ? 340 : (int)MEM32(like + C_X), k_line_y[k_entry[i].line],
                    (int)MEM32(like + C_W), (int)MEM32(like + C_H), 0, 0, k_entry[i].text);
-    show(add_button(menu, like, ID_HEADING, 121, 76, 400, 30, small_off, small_off, ""), 0, 0);
+    s_font_menu = MEM32(like + B_FONT_OFF);  s_font_menu_on = MEM32(like + B_FONT_ON);
+    s_font_text = small_off ? small_off : s_font_menu;
+    s_font_text_on = small_on ? small_on : s_font_menu_on;
+    show(add_button(menu, like, ID_HEADING, PAGE_X, PAGE_HEAD_Y, 400, 30, s_font_menu, s_font_menu, ""), 0, 0);
     for (i = 0; i < NROWS; i++)
-        show(add_button(menu, like, ID_ROW0 + (uint32_t)i, 121, 110 + i * 29, 400, 29,
-                        small_off, small_on, ""), 0, 0);
+        show(add_button(menu, like, ID_ROW0 + (uint32_t)i, PAGE_X, PAGE_ROWS_Y + i * PAGE_STEP, 400, 29,
+                        s_font_menu, s_font_menu_on, ""), 0, 0);
     btvs_log("menu", "options: PC entries added");
 }
 
@@ -815,11 +889,14 @@ static void hook_options_oncommand(void)
         GUI_TMenuOptions_OnCommand_002233F0();
         return;
     }
+    { static int dbg = -1;
+      if (dbg < 0) dbg = getenv("BTVS_MENU_DEBUG") != NULL;
+      if (dbg) btvs_log("menu", "page %s command 0x%X", k_page_name[s_page], cmd); }
     /* a binding is being captured: the next press belongs to Controls */
     if (s_bind_capture >= 0) { g_esp += 8; return; }
 
     if (s_page == PG_REPORT && s_rep_edit) {
-        /* writing the details: Left/Right pick a letter, A adds it, X deletes, B ends */
+        /* writing the details: Left/Right pick a letter, A adds it, Y deletes (the game's "delete" command, 0x28), B ends */
         if (cmd == CMD_LEFT || cmd == CMD_RIGHT) act(1, cmd == CMD_LEFT ? -1 : 1);
         else if (cmd == CMD_SELECT) act(1, 0);
         else if (cmd == CMD_DELETE) { size_t l = strlen(s_rep_text); if (l) s_rep_text[l - 1] = '\0'; refresh(); }
@@ -858,15 +935,15 @@ static void hook_options_oncommand(void)
     case CMD_UP:
     case CMD_DOWN:
         /* the bindings list is longer than the page: scroll at its ends */
-        if (s_page == PG_BINDINGS && (n = btvs_input_action_count()) > NROWS) {
+        if (s_page == PG_BINDINGS && (n = btvs_input_action_count()) > BIND_VIS) {
             uint32_t id = selected_id(menu);
-            if (cmd == CMD_DOWN && id == ID_ROW0 + NROWS - 1 && s_bind_top + NROWS < n) {
+            if (cmd == CMD_DOWN && id == ID_ROW0 + BIND_VIS && s_bind_top + BIND_VIS < n) {
                 s_bind_top++; refresh();
                 gcall(VFUNC(menu, V_MENU_FOCUSSND), menu, 0);
                 g_esp += 8;
                 return;
             }
-            if (cmd == CMD_UP && id == ID_ROW0 && s_bind_top > 0) {
+            if (cmd == CMD_UP && id == ID_ROW0 + 1 && s_bind_top > 0) {
                 s_bind_top--; refresh();
                 gcall(VFUNC(menu, V_MENU_FOCUSSND), menu, 0);
                 g_esp += 8;
@@ -1030,6 +1107,8 @@ static void hook_namesession_onupdate(void)
     for (i = 0; i < 4; i++)
         if ((c = find_control(menu, k_blocks[i])) != 0) MEM32(c + C_STATE) = 3;
     if ((c = find_control(menu, 115)) != 0 && MEM32(c + C_X) == 113) MEM32(c + C_X) = 165;
+    /* the picture of the Xbox console: kept (the page's A press goes through it) but drawn off screen */
+    if ((c = find_control(menu, 266)) != 0) MEM32(c + C_X) = 4000;
     g_eax = eax0;
 }
 
@@ -1063,19 +1142,50 @@ static void hook_main_onmessage(void)
 
 /* ── hooks: pause menu ───────────────────────────────────────────────── */
 
+/* The game's list is Resume 76, Options 128, Quit 180 at x 273, with the
+ * objective text from y 233. The three move up a little and close up so a
+ * fourth line fits above the objective. */
+static void pause_layout(uint32_t menu)
+{
+    static const uint32_t k_id[] = { ID_PAUSE_RESUME, ID_PAUSE_OPTIONS, ID_PAUSE_QUIT, ID_PAUSE_REPORT };
+    int i;
+    for (i = 0; i < 4; i++) {
+        uint32_t c = find_control(menu, k_id[i]);
+        if (c) MEM32(c + C_Y) = (uint32_t)(70 + i * 40);
+    }
+}
+
 static void hook_pause_onload(void)
 {
-    uint32_t menu = g_ecx, like, f_off, f_on;
+    uint32_t menu = g_ecx, like;
     report_start(NULL);         /* the screenshot, while the game picture is still up */
     GUI_TMenuPause_OnLoad_00223760();
     pc_wording();
-    if (find_control(menu, ID_PAUSE_REPORT)) return;
     like = find_control(menu, ID_PAUSE_RESUME);
     if (!like) { btvs_log("menu", "pause menu: no line to copy, Report a Problem not added"); return; }
-    f_off = font_resource(4); f_on = font_resource(3);
-    /* the game's lines: Resume 76, Options 128, Quit 180 at x 273; objective text from 233 */
-    add_button(menu, like, ID_PAUSE_REPORT, 64, 376, 220, 28, f_off, f_on, "Report a Problem");
-    btvs_log("menu", "pause menu: Report a Problem added");
+    if (!find_control(menu, ID_PAUSE_REPORT)) {
+        add_button(menu, like, ID_PAUSE_REPORT, (int)MEM32(like + C_X), 190,
+                   (int)MEM32(like + C_W), 22, 0, 0, "Report a Problem");     /* a new line sits low in a tall box */
+        btvs_log("menu", "pause menu: Report a Problem added");
+    }
+    pause_layout(menu);
+}
+
+/* "Are you sure you want to QUIT?" is drawn over the list where our line is: it goes while that is up. */
+static void hook_pause_onupdate(void)
+{
+    uint32_t menu = g_ecx, eax0, ours, resume;
+    GUI_TMenuPause_OnUpdate_00223D70();
+    eax0 = g_eax;
+    ours = find_control(menu, ID_PAUSE_REPORT);
+    resume = find_control(menu, ID_PAUSE_RESUME);
+    if (ours && resume) {
+        uint32_t yes = find_control(menu, 91);      /* the "Yes" of the question, shown only then */
+        int hidden = MEM32(resume + C_STATE) == 3 || (yes && MEM32(yes + C_STATE) != 3);
+        if (hidden && MEM32(ours + C_STATE) != 3) show(ours, 0, 0);
+        else if (!hidden && MEM32(ours + C_STATE) == 3) show(ours, 1, 1);
+    }
+    g_eax = eax0;
 }
 
 static void hook_pause_onmessage(void)
@@ -1096,7 +1206,7 @@ static void hook_pause_onmessage(void)
 recomp_func_t btvs_menu_lookup(uint32_t va)
 {
     static int off = -1;
-    if (va < VA_BUFFYMENU_ONUPDATE || va > VA_PAUSE_ONMESSAGE) return 0;
+    if (va < VA_BUFFYMENU_ONUPDATE || va > VA_PAUSE_ONUPDATE) return 0;
     if (off < 0) off = btvs_setting_int("menu", "pc_entries", 1) ? 0 : 1;   /* BTVS_MENU_PC_ENTRIES=0: untouched menus */
     if (off) return 0;
     switch (va) {
@@ -1109,6 +1219,7 @@ recomp_func_t btvs_menu_lookup(uint32_t va)
     case VA_MAIN_ONMESSAGE:     return hook_main_onmessage;
     case VA_PAUSE_ONLOAD:       return hook_pause_onload;
     case VA_PAUSE_ONMESSAGE:    return hook_pause_onmessage;
+    case VA_PAUSE_ONUPDATE:     return hook_pause_onupdate;
     }
     return 0;
 }

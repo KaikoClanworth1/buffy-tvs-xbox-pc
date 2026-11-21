@@ -61,6 +61,8 @@ void btvs_input__test_hooks(double (*clock_ms)(void), int (*focused)(void));
 void btvs_input__test_host_pad(const in_host_pad *pad);
 /* Drop every piece of state: script, recording, playback, devices. */
 void btvs_input__test_reset(void);
+/* The last rumble sent to a controller: which player's, and the motor values. */
+void btvs_input__test_last_rumble(int *port, int *left, int *right);
 /* Print a recording as text. Returns the number of records, -1 on error. */
 int  btvs_input_dump_recording(const char *path, FILE *out);
 

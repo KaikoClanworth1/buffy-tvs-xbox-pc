@@ -143,6 +143,18 @@ void nv2a_native_vp_load(uint32_t slot, const uint32_t *block, uint32_t dwords)
     }
 }
 
+/* The picture's shape when the target is wider than the title's 4:3 screen:
+ * y3d scales a 3D view's height (a title given a wider field of view shows
+ * more at the sides and the same above and below), x2d squeezes screen-space
+ * drawing (HUD, menus, movies) back to 4:3 in the middle, x3d does the same
+ * for 3D while the whole picture is to stay 4:3 (menus). 1, 1, 1: as drawn. */
+static float s_nview[3] = { 1.0f, 1.0f, 1.0f };
+
+void nv2a_native_view(float y3d, float x2d, float x3d)
+{
+    s_nview[0] = y3d; s_nview[1] = x2d; s_nview[2] = x3d;
+}
+
 void nv2a_native_const(uint32_t slot, const float *v, uint32_t vectors)
 {
     uint32_t i;
@@ -330,6 +342,7 @@ static GpuShader *nvs_passthrough(void)
             "  P p; float4 v = I.v[0];\n"
             "  float w = (v.w != 0.0) ? 1.0 / v.w : 1.0;\n"
             "  p.p = float4(v.x / (vpp[1].x * 0.5) - 1.0, 1.0 - v.y / (vpp[1].y * 0.5), saturate(v.z), 1.0) * w;\n"
+            "  p.p.x *= vpp[3].y;\n"
             "  p.c0 = saturate(I.v[3]); p.c1 = saturate(I.v[4]);\n"
             "  p.t0 = I.v[9]; p.t1 = I.v[10]; p.t2 = I.v[11]; p.t3 = I.v[12];\n"
             "  p.fog = float4(1, 0, 0, 1);\n"
@@ -353,6 +366,7 @@ static GpuShader *nvs_fixed(void)
             "P vs(VI I) {\n"
             "  P p; float4 v = float4(I.v[0].xyz, 1.0);\n"
             "  p.p = float4(dot(v, c[188]), dot(v, c[189]), dot(v, c[190]), dot(v, c[191]));\n"
+            "  p.p.x *= vpp[3].z; p.p.y *= vpp[3].x;\n"
             "  p.c0 = saturate(I.v[3]); p.c1 = saturate(I.v[4]);\n"
             "  p.t0 = I.v[9]; p.t1 = I.v[10]; p.t2 = I.v[11]; p.t3 = I.v[12];\n"
             "  p.fog = float4(1, 0, 0, 1);\n"
@@ -1924,6 +1938,7 @@ static int nv2a_native_draw_one(const NativeDraw *d, GpuTexture *rt, GpuTexture 
         memcpy(k, s_nconst, sizeof s_nconst);
         memset(k[192], 0, sizeof(float) * 16);
         k[192][0] = uses_viewport ? 1.0f : 0.0f;
+        k[195][0] = s_nview[0]; k[195][1] = s_nview[1]; k[195][2] = s_nview[2];
         {
             /* W-buffering (D3DZB_USEW, which the title's 3D uses): depth is W
              * mapped through the clip range, as on the NV2A (vsh_generate's

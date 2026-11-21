@@ -249,13 +249,17 @@ void XInputClose_006105E3(void)
 #define G_MENU_ID   0x007F0408u     /* GUI s_menuID: 1 main, 9 pause, 10 title, 15 resurrect (docs/menu.md) */
 #define G_GAME      0x007D0090u     /* gGame (TGame *) */
 #define GAME_PLAYER 0xF0u           /* TGO::GetPlayer() = [gGame + 0xF0] */
+#define G_PAUSE     0x007F08F0u     /* IPauseScreen::Get() */
+#define PAUSE_OPEN  0x274u          /* byte: the screen is open (IPauseScreen::SetOpen's first argument) */
 
 static void game_probe(void)
 {
     static int off = -1;
     static DWORD last;
     static uint32_t was_menu = 0xFFFFFFFFu, was_player;
-    uint32_t menu = 0, game = 0, player = 0;
+    static int was_paused;
+    uint32_t menu = 0, game = 0, player = 0, pause = 0;
+    int paused = 0;
     DWORD now = GetTickCount();
     char name[24];
 
@@ -270,13 +274,16 @@ static void game_probe(void)
         menu = MEM32(G_MENU_ID);
     if (guest_readable(G_GAME) && (game = MEM32(G_GAME)) != 0 && guest_readable(game + GAME_PLAYER))
         player = MEM32(game + GAME_PLAYER);
+    /* The menu id is the last menu asked for and stays 9 after the pause menu
+     * closes, so "paused" is read from the pause screen itself. */
+    if (guest_readable(G_PAUSE) && (pause = MEM32(G_PAUSE)) != 0 && guest_readable(pause + PAUSE_OPEN))
+        paused = *(const uint8_t *)XBOX_PTR(pause + PAUSE_OPEN) != 0;
     if (menu != was_menu) {
         IN_LOG("game: menu id %u", menu);
         if (menu && menu < 64) {
             sprintf_s(name, sizeof name, "menu%u", menu);
             btvs_input_script_mark(name);
             if (menu == 1)  btvs_input_script_mark("menu");
-            if (menu == 9)  btvs_input_script_mark("pause");
             if (menu == 10) btvs_input_script_mark("title");
         }
         was_menu = menu;
@@ -287,7 +294,34 @@ static void game_probe(void)
             btvs_input_script_mark("level");
         was_player = player;
     }
-    btvs_input_allow_mouse_look(player != 0 && menu != 9 && menu != 15);
+    if (paused != was_paused) {
+        IN_LOG("game: pause screen %s", paused ? "open" : "closed");
+        btvs_input_script_mark(paused ? "pause" : "resume");
+        was_paused = paused;
+    }
+    btvs_input_allow_mouse_look(player != 0 && !paused);
+}
+
+/* BTVS_INPUT_POS_LOG=<n>: every n reads of player 1's pad, where the player
+ * is and its health, with the read count. Two runs given the same input
+ * (a recording and its playback) can then be compared read for read. */
+static void pos_log(void)
+{
+    static int every = -1;
+    static uint32_t reads;
+    uint32_t game, player;
+    if (every < 0) {
+        const char *e = getenv("BTVS_INPUT_POS_LOG");
+        every = e ? atoi(e) : 0;
+    }
+    reads++;
+    if (every <= 0 || reads % (uint32_t)every)
+        return;
+    if (!guest_readable(G_GAME) || (game = MEM32(G_GAME)) == 0 || !guest_readable(game + GAME_PLAYER)
+        || (player = MEM32(game + GAME_PLAYER)) == 0 || !guest_readable(player + 0x248u))
+        return;
+    IN_LOG("pos r%u x %.2f y %.2f z %.2f health %.0f", reads, guest_float(player + 0x240u), guest_float(player + 0x244u),
+           guest_float(player + 0x248u), guest_float(player + 0x90u));
 }
 
 /* DWORD XInputGetState(HANDLE, PXINPUT_STATE): DWORD packet number, then the 18-byte pad. */
@@ -305,8 +339,10 @@ void XInputGetState_006105EF(void)
         s_ver[port].busy = 1;
         s_ver[port].self = g_edi;               /* TInputDeviceController::Poll's this */
     }
-    if (port == 0)
+    if (port == 0) {
         game_probe();
+        pos_log();
+    }
     if (port >= 0)
         have = btvs_input_poll(port, &g);
     if (out) {

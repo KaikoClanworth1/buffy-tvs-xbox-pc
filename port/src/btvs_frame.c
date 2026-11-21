@@ -54,9 +54,18 @@ static void pace(void)
         return;
     }
     step = 1.0 / (double)limit;
-    if (next == 0 || t - next > 0.1)
-        next = t;                                  /* first frame, or far behind: start again from now */
+    /* The next frame is due one step after the last one was. A frame that is
+     * already late is shown at once -- and if it is more than a step late the
+     * count starts again from now, so a slow frame is not followed by a burst
+     * of frames with no pause (it used to catch up for up to 100 ms). */
+    if (next == 0)
+        next = t;
     next += step;
+    if (t >= next) {
+        if (t - next > step)
+            next = t;
+        return;
+    }
     for (;;) {
         double left = next - now_s();
         if (left <= 0)
@@ -100,4 +109,23 @@ void D3DDevice_Swap_00595DB0(void)
     stats();
     s_frames++;
     D3DDevice_Swap_00595DB0_orig();
+    {   /* the frame that starts now (BTVS_HITCH_LOG, btvs_boot.c); the one that ended, if it was long */
+        extern volatile LONGLONG g_btvs_frame_start;
+        extern volatile LONG g_btvs_frame_no;
+        static int on = -1;
+        static double limit, last;
+        LARGE_INTEGER q;
+        double t = now_s();
+        if (on < 0) {
+            const char *e = getenv("BTVS_HITCH_LOG");
+            on = e != NULL;
+            limit = e && atof(e) > 0.0 ? atof(e) : 30.0;
+        }
+        if (on && last > 0.0 && (t - last) * 1000.0 >= limit)
+            fprintf(stderr, "[HITCH] frame %ld took %.1f ms (ended at %.2f s)\n", (long)g_btvs_frame_no, (t - last) * 1000.0, t);
+        last = t;
+        QueryPerformanceCounter(&q);
+        g_btvs_frame_start = q.QuadPart;
+        InterlockedIncrement(&g_btvs_frame_no);
+    }
 }

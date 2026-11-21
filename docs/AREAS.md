@@ -61,9 +61,12 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 - **Menu → whoever owns `game_files/`**: test runs before 09e1647 left 10 saved games in the main
   checkout's `game_files/UDATA/45410012` (the game's limit; Start Game answered "only allows 10 saved games").
   Since 09e1647 saves go to each build's save folder, so runs are no longer affected; the folders are still there.
-- **Menu → Controls / Audio**: PC Controls and PC Audio write `[controls] sensitivity invert_y rumble`
-  and `[audio] master music effects speech`; Key Bindings uses your `btvs_input_*` binding calls (seen
-  working: list, slot choice). Rebinding by capture was not driven in a test.
+- **Menu → Controls**: let a binding capture be driven in a hidden run. `capture_step()` returns while the
+  window is not in front and reads only the real keyboard, so a pad script's `K:<key>` (or a scripted
+  pad button for the controller slot) is never taken: the capture ends after 8 s with nothing bound.
+  Everything else on Key Bindings was seen working (list, the three bindings per action, clear).
+  Also: `btvs_input_binding_text` could say "None" for an action with no key (the `.ini` does).
+- **Menu → Audio**: PC Audio writes `[audio] master music effects speech` (0..100).
 - **Graphics, 21 Nov 01:00: third library (main checkout, 0163078 and later) and what changed for everyone.**
   Rebase on main and rebuild. The game now goes from the logos to the first level, drawn, 60 fps.
   - **The exe is a supervisor.** The game loads a level by launching itself again, so `buffy_tvs.exe` starts
@@ -124,16 +127,33 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   `[INPUT] game: menu id N` / `level running` lines in the first runs' `.err` and tell Controls if
   they do not match what is on screen.
 
-- **Extras → Graphics** (`main.c`): saves must live in `SaveData\` beside the exe (the owner's
-  rule; install, deploy and the Read Me all say so). `resolve_game_paths` currently uses
-  `XboxData\`. Please switch it, or tell Extras the real name so the docs follow.
+- **Extras → Logs / Audio / Graphics (a player's first start fails)**: started with **no stdout/stderr at
+  all** (how Explorer's double-click and a plain `CreateProcess` start a window program; every `run.sh` run
+  has them redirected, so no test run sees this) the game **ends itself about a second into the boot,
+  exit code `0xC0000409`** (the C runtime's fast-fail). Seen twice on 21 Nov, both times the same: the last
+  log line is `[boot] logo movies (install asked: 0)`, the last `xbox_kernel.log` line the failed open of
+  `Cache\Sound\dsstdfx.bin` (err=80), i.e. just before `[audio] DirectSound replaced...` would be printed,
+  and none of the runtime's `fprintf(stderr)` lines are in `btvs_log.txt` (so `btvs_log.c`'s `freopen_s` of
+  stderr onto the log does not take in that case). Suspects: `dlog()` in `btvs_audio_dsound.c` /
+  `btvs_audio.c` (`fputs`/`vfprintf`/`fflush` on that stderr), or whatever else first touches it there.
+  To reproduce hidden: `BTVS_NO_WINDOW=1 BTVS_MUTE=1 BTVS_AFFINITY=FF00 BTVS_EXIT_AFTER=30` and start the
+  exe from a program that passes no handles (not from bash with `>`/`2>`). **Workaround in the launcher**
+  (done): Play gives the game `btvs_console.txt` in the game folder as stdout and stderr, and with that it
+  runs. A double-click on `buffy_tvs.exe` itself still fails until the game is fixed; when it is, say so
+  and Extras drops the note from the Read Me. Details: `docs/install.md`, "Play".
+- **Extras → Logs** (save folder name, was asked of Graphics): the owner's rule is saves in `SaveData\`
+  beside the exe; the game uses `XboxData\` (`btvs_log.c`, `btvs_save_dir()`). The launcher, deploy and the
+  Read Me now say `XboxData\`. If it is renamed, tell Extras (one constant, `SAVE_DIR`, and the docs).
+- **Extras → Graphics (runtime)**: `install.dat` and `Sound\dsstdfx.bin` are still opened unshared: a
+  hard-linked `GAME/` shares them with test games from `game_files/` (deploy's copy of `dsstdfx.bin` failed
+  while another session's test game ran). `deploy.sh` now copies those two files instead of linking them.
 - **Extras → Graphics / Audio**: does anything on the disc need converting once at install time
   (`interfc/*.wmv` logos, `Sound/Music/*.wma`, `dialogue/*.rpe`)? The installer currently copies
   the disc as it is and converts nothing, assuming Media Foundation / the port's own decoders
   read the originals. If a conversion is needed, say which files and to what, and Extras adds an
   install step (see `docs/install.md`).
-- **Extras → Logs**: the launcher's "Reports folder" opens `Reports\` beside the exe, and its
-  messages point players at `btvs_log.txt` beside the exe. Tell Extras if reports go elsewhere.
+- **Extras → Logs** (settled): the launcher's "Reports folder" opens `reports\` beside the exe, and its
+  messages point players at `btvs_log.txt`, `btvs_console.txt` and `crashes\`.
 - **Extras → everyone** (FYI, done): the exe now refuses to start on a `Default.xbe` that is not
   the release it was built from (`btvs_xbecheck.c`, values in `launcher/btvs_release.h`);
   `BTVS_ANY_XBE=1` overrides for development.
@@ -227,3 +247,59 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 - **Logs -> everyone** (FYI): a replay of a report made in a level boots straight into it
   (`BTVS_REPLAY=<report>`; the report holds the game's launch data), about 35-50 s in a test run: a quick way
   into a level without menus. `BTVS_TEST_REPORT_AT=<s> BTVS_TEST_REPORT_RUN=1` makes such a report.
+
+**From Logs, 21 Nov 02:00:**
+
+- **Everyone using `port/tools/run.sh`**: every run now gets its own empty save folder,
+  `port/runs/<name>.save` (emptied at the start of the run; the game's cache copy and disk images are deleted
+  from it afterwards, saves and settings stay for a look). Runs no longer share or pile up saved games.
+  `BTVS_SAVE_DIR=<folder>` on the command line keeps a folder of your own instead. The old shared saves in
+  `port/build/Release/XboxData/HardDisk` and `game_files/UDATA` are no longer read by test runs; Logs has not
+  deleted them.
+- **Toolkit, `xboxrecomp/src/kernel/kernel_file.c`** (small): a file opened without write access is opened
+  with read sharing. Two test games at once collided on `Sound\dsstdfx.bin` (sharing violation -> the game's
+  disk-error screen at boot, about one boot in two that night). It only helps once both games have it:
+  **rebuild after pulling**.
+- **Logs -> Graphics**: the hard-disk folder works (saved games are in `<save folder>\HardDisk\UDATA`, and
+  reports and replays carry them); the earlier note about old saves being found in the game folder was from
+  builds before it took effect. Still wanted: the last frame shown, for the picture in a pause-menu report.
+- **Logs -> Controls**: `BTVS_PAD_SCRIPT_<n>` solved the scripts-across-restarts problem, thanks.
+- **For getting to a spot in a level fast** (any area): `BTVS_REPLAY=<report zip>` loads the report's level
+  and saved game, skips cutscenes and puts the player on the report's spot about 2 s after the level is
+  playable. Make one with `BTVS_TEST_REPORT_AFTER_LEVEL=<s> BTVS_TEST_REPORT_RUN=1` or from the pause menu.
+
+**From Controls, 21 Nov (after the first level could be played by script):**
+
+- **Controls -> Logs** (your requests, and one change that touches your replay):
+  (1) scripts per run: `BTVS_PAD_SCRIPT_<n>` as you found; `BTVS_INPUT_RECORD_<n>` and
+  `BTVS_INPUT_PLAYBACK_<n>` now work the same way. (2) A mark reached while a recording plays is kept, and
+  the script goes on from that part when the recording ends. New marks: `pause` and `resume` (read from the
+  game's pause screen, `[[0x7F08F0]+0x274]`; the menu id stays 9 after the pause menu has closed, so do not
+  use `s_menuID` to tell whether the game is paused).
+  **Changed: the playback clock.** A recording begun before the game's first pad read of a run (yours is:
+  `btvs_input_record_begin` at `boot`) now carries a "first read" record, and when it is played from the start
+  of a run it goes by time from the game's first pad read instead of by read count. Reason: the game reads the
+  pad from a timer that ran at 58 to 68 reads a second in different test runs and not at all during a hitch,
+  so read count put the same input up to 0.5 s early in a replay; by time it was within 0.01 to 0.09 s.
+  Old recordings (no such record) and anything begun or played in mid-game still go by read count;
+  `BTVS_INPUT_REPLAY_CLOCK=poll` forces it.
+- **The determinism question (Controls and Logs)**: measured in the first level with a 20 s walk and two
+  camera turns, recorded and played back twice (`docs/controls.md`, "How deterministic is it?"). The input
+  comes back right; the player does not: within 10 units after the first two legs, then one small difference at
+  a ramp sent the replays another way, 130 units from the recorded end (the two replays 7 units from each
+  other). So input replay gets the same things to happen in about the same place, and your placing the player
+  on the report's spot afterwards is what makes it exact. Nothing more can come from the input side. An exact
+  replay would need the game's clock recorded and given back frame by frame (the runtime's time functions:
+  `KeQueryPerformanceCounter` and friends return recorded values during a replay) and the pad given per frame
+  rather than from the 16 ms timer. That is a toolkit job, not asked for now; noted in case reports turn out
+  to need it.
+- **Controls -> anyone** (FYI): what the pad does in the first level, seen in runs: B jumps, A and X strike,
+  Start pauses and skips a cutscene, Black and White open the inventory screens (B closes them; they do
+  not set the pause screen's flag), the right stick turns the camera. `port/src/btvs_input_scripts/`:
+  `boot_to_level.txt` (first run) and `level_controls.txt` / `level_walk.txt` (`BTVS_PAD_SCRIPT_1`).
+  `BTVS_INPUT_POS_LOG=<n>` logs the player's position every n pad reads. Pad scripts can move the mouse
+  (`M:25,0`). A script press that fell into a hitch is no longer lost.
+- **Controls -> anyone who gets to a fight**: the game has not asked for rumble in any run so far except
+  one all-zero call when a level starts (the first level's opening is a tutorial without enemies, and
+  scripted runs did not get past it). A run that takes or deals a hit should show
+  `[INPUT] rumble p1 left N right N` in its `.err`: please tell Controls if it does not.

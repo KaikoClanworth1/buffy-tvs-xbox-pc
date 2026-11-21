@@ -564,6 +564,19 @@ int btvs_report_make(const char *player_text, const char *trigger)
                 save_files ? "save" : "", have_launch ? "launch.bin" : "");
         if (w.have_pos)
             fprintf(f, "pos=%.3f %.3f %.3f\nhealth=%.1f\n", w.pos[0], w.pos[1], w.pos[2], w.health);
+        {   /* the exact spot, read now: what a replay hands to the game's own Teleport */
+            float pm[12], cm[12], hp = 0.0f;
+            int k;
+            if (btvs_game_state(pm, cm, &hp)) {
+                fprintf(f, "player_matrix=");
+                for (k = 0; k < 12; k++)
+                    fprintf(f, "%.9g%s", pm[k], k < 11 ? " " : "\n");
+                fprintf(f, "camera_matrix=");
+                for (k = 0; k < 12; k++)
+                    fprintf(f, "%.9g%s", cm[k], k < 11 ? " " : "\n");
+                fprintf(f, "player_health=%.9g\n", hp);
+            }
+        }
         fclose(f);
     }
 
@@ -676,14 +689,49 @@ int btvs_report_make(const char *player_text, const char *trigger)
     return files > 0;
 }
 
-int btvs_report_create(const char *player_text) { return btvs_report_make(player_text, "menu"); }
+int btvs_report_create(const char *player_text)
+{
+    /* A replay of a report made from the pause menu plays the player's way to
+     * "Report a Problem" again: that must not make a report of its own. */
+    if (btvs_replay_active() && btvs_input_playback_active()) {
+        btvs_log("report", "not made: this is the replay arriving at the report it replays");
+        return 0;
+    }
+    return btvs_report_make(player_text, "menu");
+}
 
 const char *btvs_report_last_path(void) { return s_last; }
+
+/* The picture of the game itself for a report made from the pause menu: asked
+ * for on the game thread at the moment the game asks for its pause menu (the
+ * trail's SetMenu hook), so the next frame shown, still the game, is kept.
+ * Never waits. btvs_report_prepare() then leaves that picture alone until the
+ * game is left paused no more (btvs_report_game_snap_clear). */
+static volatile LONG s_game_shot;
+static DWORD s_game_shot_tick;
+
+void btvs_report_game_snap(void)
+{
+    char path[MAX_PATH];
+    sprintf_s(path, MAX_PATH, "%s\reports", btvs_exe_dir());
+    CreateDirectoryA(path, NULL);
+    strcat_s(path, MAX_PATH, "\pending.png");
+    DeleteFileA(path);
+    if (btvs_screenshot(path)) {
+        strcpy_s(s_pending, MAX_PATH, path);
+        s_pending_tick = s_game_shot_tick = GetTickCount();
+        s_game_shot = 1;
+    }
+}
+
+void btvs_report_game_snap_clear(void) { s_game_shot = 0; }
 
 void btvs_report_prepare(void)
 {
     char path[MAX_PATH];
     InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
+    if (s_game_shot && GetTickCount() - s_game_shot_tick < 600000)
+        return;                         /* the game's picture from before the pause menu is waiting */
     sprintf_s(path, MAX_PATH, "%s\\reports", btvs_exe_dir());
     CreateDirectoryA(path, NULL);
     strcat_s(path, MAX_PATH, "\\pending.png");
@@ -746,8 +794,14 @@ static DWORD WINAPI hotkey_thread(LPVOID arg)
 
 static DWORD WINAPI test_thread(LPVOID arg)
 {
-    const char *text = getenv("BTVS_TEST_REPORT_TEXT");
-    Sleep((DWORD)(uintptr_t)arg * 1000);
+    const char *text = getenv("BTVS_TEST_REPORT_TEXT"), *lv = getenv("BTVS_TEST_REPORT_AFTER_LEVEL");
+    if (lv && atof(lv) > 0.0) {
+        /* that long after the level became playable, however long it took to load */
+        while (btvs_trail_level_loaded_at() <= 0.0 || btvs_uptime() - btvs_trail_level_loaded_at() < atof(lv))
+            Sleep(100);
+    } else {
+        Sleep((DWORD)(uintptr_t)arg * 1000);
+    }
     btvs_report_prepare();
     btvs_report_make(text ? text : "Test report (BTVS_TEST_REPORT_AT).\nSecond line.", "test");
     return 0;
@@ -764,6 +818,8 @@ void btvs_report_init(void)
             CloseHandle(h);
     }
     /* (in a session where the game restarts itself: in run BTVS_TEST_REPORT_RUN, 0 = the first) */
+    if (!e && getenv("BTVS_TEST_REPORT_AFTER_LEVEL"))
+        e = "1";
     if (e && atoi(e) > 0 && btvs_restarts() == (getenv("BTVS_TEST_REPORT_RUN") ? atoi(getenv("BTVS_TEST_REPORT_RUN")) : 0)) {
         h = CreateThread(NULL, 0, test_thread, (LPVOID)(uintptr_t)atoi(e), 0, NULL);
         if (h)

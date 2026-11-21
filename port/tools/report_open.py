@@ -149,11 +149,16 @@ def main():
         print("  (no input recording: the replay stops at the anchor and the pads are yours)")
     print()
     print("TO GO BACK THERE")
-    print("  anchor: %s \"%s\", then %.1f s of recorded input" % (
-        replay.get("anchor", "?"), replay.get("anchor_name", ""),
-        float(replay.get("report_time", 0) or 0) - float(replay.get("anchor_time", 0) or 0)))
-    secs = int(float(replay.get("report_time", 0) or 0) - float(replay.get("anchor_time", 0) or 0)) + 60
-    print("  hidden test run (muted, no window; frame dumps with BTVS_SHOT_AT):")
+    played = float(replay.get("report_time", 0) or 0) - float(replay.get("anchor_time", 0) or 0)
+    spot = "player_matrix" in replay
+    if spot:
+        print("  made in level %s: the replay loads the level from the report's launch data and save, skips" % replay.get("level", "?"))
+        print("  cutscenes and puts the player on the exact spot (about the level's loading time).")
+        print("  BTVS_REPLAY_INPUT=1 plays the %.0f s of recorded input on the way instead (then places the player)." % played)
+    else:
+        print("  made in the menus: the replay plays the %.0f s of recorded input from the start of the game." % played)
+    secs = 150 if spot else int(played) + 60
+    print("  hidden test run (muted, no window; the replay writes replay_arrived.png beside the report's screenshot.png):")
     print('    bash port/tools/run.sh replay %d "BTVS_REPLAY=%s"' % (secs, src))
     print("  on screen (PowerShell):")
     print('    $env:BTVS_REPLAY="%s"; & "%s"' % (src, os.path.join(PORT, "build", "Release", "buffy_tvs.exe")))

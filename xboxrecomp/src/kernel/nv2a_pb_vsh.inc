@@ -38,7 +38,8 @@ static ID3DBlob          *s_vs_sig;           /* any compiled VS, for the layout
 
 static const char *s_vsh_head =
 "cbuffer K : register(b1) { float4 c[192]; float4 vpp[4]; };\n"
-"/* vpp[0]: uses_viewport, zpersp, clip min, clip max\n"
+"/* vpp[3]: the picture's shape: y scale of a 3D view, x scale of 2D, x scale of 3D (nv2a_native_view)\n"
+"   vpp[0]: uses_viewport, zpersp, clip min, clip max\n"
 "   vpp[1]: surface w, h, fog enable, fog mode\n"
 "   vpp[2]: fog p0, p1 */\n"
 "struct VI { float4 v[16] : ATTR; };\n"
@@ -182,10 +183,13 @@ static int vsh_generate(const NV2AVshProgram *pr, char *out, int cap)
         "  float zd = vpp[0].y > 0.5 ? w : o[0].z, zn;\n"
         "  if (vpp[0].w > vpp[0].z) zn = (zd - vpp[0].z) / (vpp[0].w - vpp[0].z);\n"
         "  else zn = c[58].z != 0.0 ? (o[0].z - c[59].z) / c[58].z : 0.5;\n"
-        "  if (vpp[0].x > 0.5 && c[58].x != 0.0 && c[58].y != 0.0)\n"
+        "  if (vpp[0].x > 0.5 && c[58].x != 0.0 && c[58].y != 0.0) {\n"
         "    p.p = float4((o[0].x - c[59].x) / c[58].x * w, (o[0].y - c[59].y) / c[58].y * w, zn * w, w);\n"
-        "  else\n"
+        "    p.p.x *= vpp[3].z; p.p.y *= vpp[3].x;\n"
+        "  } else {\n"
         "    p.p = float4(o[0].x / (vpp[1].x * 0.5) - 1.0, 1.0 - o[0].y / (vpp[1].y * 0.5), saturate(zn), 1.0);\n"
+        "    p.p.x *= vpp[3].y;\n"
+        "  }\n"
         "  p.c0 = saturate(o[3]); p.c1 = saturate(o[4]);\n"
         "  p.t0 = o[9]; p.t1 = o[10]; p.t2 = o[11]; p.t3 = o[12];\n"
         /* W-buffering: the depth is linear in W, which the rasteriser does not

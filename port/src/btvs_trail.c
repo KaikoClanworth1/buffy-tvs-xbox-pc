@@ -338,10 +338,68 @@ static int btvs_game_player(float pos[3], float *health)
     return 1;
 }
 
+/* The player's and the camera's world matrices as they are now (IObject keeps
+ * one at +0x21C: 3x3 rotation then position, 12 floats;
+ * IObject::Mtx_GetWorld is "lea eax,[ecx+0x21C]"), and the player's health.
+ * Any thread. 0 when there is no player. */
+int btvs_game_state(float player[12], float camera[12], float *health)
+{
+    uint32_t game = g32(G_GAME), pl = game ? g32(game + 0xF0) : 0, cam = game ? g32(game + 0xF4) : 0;
+    int i;
+    if (!pl || !g_read(pl + 0x21C, player, 48) || !g_read(pl + 0x90, health, 4))
+        return 0;
+    if (!cam || !g_read(cam + 0x21C, camera, 48))
+        memset(camera, 0, 48);
+    for (i = 0; i < 12; i++)
+        if (!(player[i] == player[i]) || fabsf(player[i]) > 1e7f)
+            return 0;
+    return 1;
+}
+
+/* BTVS_REPLAY: put the player where the report was made, with the game's own
+ * ICharacter::Teleport(const T_Matrix4&, bool rotation, bool camera, bool
+ * restart_script) (thiscall, 0x1305D0: stops the character, sets its matrix,
+ * puts the camera behind it). Game thread only (btvs_frame_tick).
+ * 1 = done, 0 = no player. */
+void ICharacter_Teleport_001305D0(void);
+int btvs_game_place(const float m[12], float health)
+{
+    uint32_t game = g32(G_GAME), pl = game ? g32(game + 0xF0) : 0, mva, r[7];
+    uint8_t *mem = (uint8_t *)(uintptr_t)g_xbox_mem_offset;
+    if (!pl || !mem)
+        return 0;
+    r[0] = g_eax; r[1] = g_ecx; r[2] = g_edx; r[3] = g_ebx; r[4] = g_esi; r[5] = g_edi; r[6] = g_esp;
+    mva = (g_esp - 1024) & ~15u;                 /* the matrix, below anything live on the guest stack */
+    memcpy(mem + mva, m, 48);
+    g_esp = mva - 16;
+    g_esp -= 4; *(uint32_t *)(mem + g_esp) = 1;      /* start the character's script state afresh */
+    g_esp -= 4; *(uint32_t *)(mem + g_esp) = 1;      /* camera behind the player */
+    g_esp -= 4; *(uint32_t *)(mem + g_esp) = 1;      /* rotation too */
+    g_esp -= 4; *(uint32_t *)(mem + g_esp) = mva;
+    g_esp -= 4; *(uint32_t *)(mem + g_esp) = 0;      /* return address */
+    g_ecx = pl;
+    ICharacter_Teleport_001305D0();
+    g_eax = r[0]; g_ecx = r[1]; g_edx = r[2]; g_ebx = r[3]; g_esi = r[4]; g_edi = r[5]; g_esp = r[6];
+    if (health > 0.0f)
+        memcpy(mem + pl + 0x90, &health, 4);
+    return 1;
+}
+
+/* 1 while a level is loaded and its player exists. */
+int btvs_game_in_level(char *name, size_t n)
+{
+    uint32_t game = g32(G_GAME);
+    return game_level(name, n) && game && g32(game + 0xF0) != 0;
+}
+
 /* Level and menu changes, from whichever notices first: the wrappers (exact,
  * on the game thread) or the watcher. */
 static char s_seen_level[96];
 static uint32_t s_seen_menu = 0xFFFFFFFFu;
+
+/* When the level became playable (Map_Loaded), 0 before. */
+static double s_level_loaded_at;
+double btvs_trail_level_loaded_at(void) { return s_level_loaded_at; }
 
 static void note_level(const char *how)
 {
@@ -474,6 +532,7 @@ static void hook_Map_Loaded(void)
     first_time(&seen, "TManager_Buffy::Map_Loaded");
     note_level("Map_Loaded");
     btvs_trail("level_loaded", "name=%s", s_seen_level);
+    s_level_loaded_at = btvs_uptime();
 }
 
 static void hook_Map_Completed(void)
@@ -501,6 +560,10 @@ static void hook_BuffySetMenu(void)
     static volatile LONG seen;
     uint32_t id = g32(g_esp + 4);
     first_time(&seen, "GUI::TBuffyManager::SetMenu");
+    if (id == 9 && s_seen_level[0])
+        btvs_report_game_snap();        /* pause: keep the game's picture for a report made from the menu */
+    else if (id == 10 || id <= 1)
+        btvs_report_game_snap_clear();
     GUI_TBuffyManager_SetMenu_00218130();
     note_menu(id, "SetMenu");
 }
@@ -515,9 +578,28 @@ static void hook_DieAsPlayer(void)
     ICharacterBtvS_DieAsPlayer_00206010();
 }
 
+/* Cutscenes running now (start/stop hooks), for the replay: it places the
+ * player once none is. */
+static volatile LONG s_cutscenes;
+int btvs_trail_in_cutscene(void) { return s_cutscenes > 0; }
+
+/* ICinematicsManager::DoesUserWantToSkip: a replay on its way to the report's
+ * spot answers yes, so the game skips its cutscenes the way it does for the
+ * player's button. */
+void ICinematicsManager_DoesUserWantToSkip_001D94B0(void);
+static void hook_UserWantsSkip(void)
+{
+    static volatile LONG seen;
+    ICinematicsManager_DoesUserWantToSkip_001D94B0();
+    first_time(&seen, "ICinematicsManager::DoesUserWantToSkip");
+    if (btvs_replay_wants_skip())
+        g_eax = (g_eax & ~0xFFu) | 1u;
+}
+
 static void hook_CutsceneStart(void)
 {
     static volatile LONG seen;
+    InterlockedIncrement(&s_cutscenes);
     first_time(&seen, "ICinematicsManager::Event_CutsceneStart");
     btvs_trail("cutscene", "state=start object=%08X", g32(g_esp + 4));
     ICinematicsManager_Event_CutsceneStart_001D9910();
@@ -525,6 +607,8 @@ static void hook_CutsceneStart(void)
 
 static void hook_CutsceneStop(void)
 {
+    if (InterlockedDecrement(&s_cutscenes) < 0)
+        s_cutscenes = 0;
     btvs_trail("cutscene", "state=stop object=%08X", g32(g_esp + 4));
     ICinematicsManager_Event_CutsceneStop_001D9A70();
 }
@@ -549,6 +633,7 @@ btvs_guest_fn btvs_trail_lookup(uint32_t va)
     case 0x00206010u: return hook_DieAsPlayer;
     case 0x001D9910u: return hook_CutsceneStart;
     case 0x001D9A70u: return hook_CutsceneStop;
+    case 0x001D94B0u: return hook_UserWantsSkip;
     case 0x000ED520u: return hook_AutoSave;
     default: return (btvs_guest_fn)0;
     }

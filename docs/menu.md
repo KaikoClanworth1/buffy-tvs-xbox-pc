@@ -11,19 +11,21 @@ pictures are in the main checkout's `port/runs/shots/` (`*_menu_*.png`).
 |---|---|
 | Settings store | Works in the game: values written by the pages are in the `.ini` after the run and are read back on the next start (a second run opened the Graphics page showing the 800 x 600, VSync off, Stretched of the first) |
 | Main menu **Exit** | Verified: Down reaches it, A ends the process in order (`btvs_quit`, exit code 0, 15 s into the run) |
-| **Options** list with the PC entries | Verified: drawn in the game's font, Up/Down reach every line, A opens each page, B on a page returns to the list, B again leaves Options |
+| **Options** list with the PC entries | Verified: drawn in the game's menu font, Up/Down reach every line, A opens each page, B on a page returns to the list, B again leaves Options |
 | **Graphics** page | Verified: every line changes with Left/Right; Display Mode, Resolution, VSync and Picture were seen applied by Graphics at once (`[gfx] display: 800x600 ...`, the frame dumps change size). FPS Limit and Overlay are written; whether they take effect was not looked at (Graphics) |
 | **PC Audio** page | Verified: values change and are saved. Their effect on the sound was not checked (runs are muted; Audio) |
-| **PC Controls** page | Verified: Sensitivity, Invert Look, Rumble change and are saved. **Key Bindings** lists Controls' real bindings in three slots, Left/Right pick the slot, B returns. Not driven: capturing a new key (A), clearing one (X), Reset Bindings, scrolling past nine lines |
-| **Memory** page | Verified: system memory, this game, video memory (total / in use / this game), the game heap and its peak, from Logs' `btvs_mem_stats` |
-| **Report a Problem** (Options) | Verified: category, writing details with the controller, Send Report, "Saving the report...", then the folder it was saved in; Back returns. The report held the picture, log, trail, settings, input recording |
-| **Report a Problem** (pause menu) | Verified in the first level: the line is in the pause menu, A opens the report page, Send saves a report, Back and B return to the pause menu and the game. Its picture is the pause menu, not the game (see Open points) |
-| PC wording | Verified: the Start Game page says "Launch a New Game on this PC called", centred, with no block count; the game's message "Buffy The Vampire Slayer only allows 10 saved games. ..." without "your Xbox Hard Disk". The other nine reworded messages were written (log: 10 of 10) but not brought up |
-| Typing the report's details on a keyboard | Not checked (test runs have no window input) |
+| **PC Controls** page | Verified: Sensitivity, Invert Look, Rumble change and are saved. **Key Bindings**: the list, Left/Right to the other bindings, **Y clears a binding** (seen on screen and in the `.ini`), A shows "Press a Key..." and the page comes back when nothing is pressed (8 s). **Not verified: a new key actually being taken.** Controls' capture reads the real keyboard and only while the game window is in front, so a hidden run cannot press the key (asked for in `docs/AREAS.md`). Not driven: Reset Bindings, scrolling past seven lines |
+| **Memory** page | Verified: PC Memory, Game's PC Memory, Video Memory, Game's Video Memory, Game Heap, Heap Peak (Logs' `btvs_mem_stats`) |
+| **Report a Problem** (Options) | Verified: category, writing details with the controller (A adds, Y deletes), Send Report, "Saving Report...", "Report Saved" with the short place; Back returns. The report held the picture, log, trail, settings, input recording. **Open Folder** is on the page but was not pressed (it opens Explorer; test runs only log it) |
+| **Report a Problem** (pause menu) | Verified in the first level: fourth line of the list under Quit, in the same font; A opens the report page, Send saves a report, B returns to the pause menu and the game; the line is gone while "Are you sure you want to QUIT?" is up. Its picture is the pause menu, not the game (see Open points) |
+| PC wording | Verified: the Start Game page says "Launch a New Game on this PC called", centred, with no block count and no picture of the console, and A still goes on to the difficulty page and the level; the game's message "Buffy The Vampire Slayer only allows 10 saved games. ..." without "your Xbox Hard Disk". The other nine reworded messages were written (log: 10 of 10) but not brought up |
+| Typing the report's details on a keyboard | Verified: `WM_CHAR` messages posted to the hidden window ("Hi 42!") appeared in Details and went into the report. Real key presses on a visible window: not checked |
 | A real controller, a visible window | Not checked: every run was hidden and scripted |
 
 Faults found by these runs and fixed: Send Report froze the game (the report maker waited on the
-game thread itself; reports are now made on a helper thread); the Xbox wording.
+game thread itself; reports are now made on a helper thread); the Xbox wording; the pages were in
+the small text font, not the game's menu font; the pad's **Y** is the game's "delete" command
+(`0x28`), not X, so the hints named the wrong button.
 
 `BTVS_MENU_PC_ENTRIES=0` runs the game with its menus untouched.
 
@@ -67,7 +69,7 @@ Namespace `GUI`, objects `GUI*.obj` in `final.map`. Guest address = map address 
 
 Commands (`TManager::PollCommands` polls `0x23..0x29` each frame, with auto-repeat for
 the first four): `0x23` left, `0x24` right, `0x25` up, `0x26` down, `0x27` select (A),
-`0x28` delete (X), `0x29` back (B). Left/right order is read from `TMenuAudio::OnCommand`
+`0x28` delete (Y; seen in a run), `0x29` back (B; the Back button too). Left/right order is read from `TMenuAudio::OnCommand`
 (`0x23` lowers a slider).
 
 ### How a menu is defined
@@ -119,12 +121,20 @@ sounds it like its own.
 | Main menu | **Exit** (69,406) | `btvs_quit()` (Graphics): settings saved, window and device closed, process ends |
 | Options, right column (x 340) | **Graphics**, **PC Audio**, **PC Controls**, **Memory** | open a page |
 | Options, 121,363 | **Report a Problem** | opens the report page |
-| Pause menu, 64,376 (small font) | **Report a Problem** | `SetMenu(Options)` and opens the report page |
+| Pause menu, fourth line of its list | **Report a Problem** | `SetMenu(Options)` and opens the report page |
+
+The pause menu's own lines (Resume 76, Options 128, Quit 180) are moved to 70 / 110 / 150 so the
+fourth fits at 190, above the objective text; it is hidden with them while the game asks
+"Are you sure you want to QUIT?".
 
 A page is the Options menu with its lines swapped: the list is hidden (state 3) and a pool
-of ten lines made once (a heading and nine rows, small font, x 121, y 76 / 110 + 29·n) is
-relabelled. Left/Right change the selected value, A steps it forward or presses the line,
-B returns to the Options list (and saves `btvs_settings.ini`).
+of ten lines made once (a heading and nine rows at x 121) is relabelled. **Style**: the heading
+and every line the player can select are in the game's menu font (the font of its own lists,
+with the same highlight); lines of description are in the game's small text font, the one it
+uses itself for descriptions ("Launch a New Game ...", the objective on the pause menu). Heading
+at y 70, menu-font lines 38 apart from 112, description lines 27. Left/Right change the selected
+value, A steps it forward or presses the line, B returns to the Options list (and saves
+`btvs_settings.ini`).
 
 - **Graphics**: Display Mode (`display.mode`), Resolution (`display.width/height`; Desktop,
   640×480 … 1600×1200, 1280×720 … 3840×2160), VSync, FPS Limit (30/60/90/120/144/165/240/Uncapped),
@@ -132,15 +142,21 @@ B returns to the Options list (and saves `btvs_settings.ini`).
 - **PC Audio**: Master / Music / Effects / Speech, 0–100 in steps of 5 (`audio.*`). The game's own
   Audio page (its three sliders) is untouched; these are the PC-side levels.
 - **PC Controls**: Sensitivity, Invert Look, Rumble (`controls.*`), Key Bindings, Reset Bindings.
-  **Key Bindings** lists Controls' actions with their three slots; Left/Right pick the slot,
-  A waits for a key or button (`btvs_input_capture_begin`), X clears it; the list scrolls.
-- **Memory**: system RAM in use / total and this process (measured here), video memory total and
-  this game's use from Graphics' `btvs_gpu_info`; all of it plus the game's heap from Logs'
-  `btvs_mem_stats` once `BTVS_HAVE_MEM_STATS` is defined. Refreshed twice a second.
+  **Key Bindings** shows one binding of each action at a time (a line in the menu font has no
+  room for three): Keyboard 1, Keyboard 2 or Controller, changed with Left/Right and named in
+  the description line. A waits for a key or button (`btvs_input_capture_begin`), Y clears the
+  binding; seven actions are on screen and the list scrolls.
+- **Memory**: "PC Memory" (in use of total), "Game's PC Memory", "Video Memory" (in use of total),
+  "Game's Video Memory", "Game Heap" (of the Xbox's 64 MB) and "Heap Peak", from Logs'
+  `btvs_mem_stats` and Graphics' `btvs_gpu_info`. Refreshed twice a second.
 - **Report a Problem**: Problem (six categories), Details (A to write with the controller:
-  Left/Right letter, A add, X delete, B done; or type on the keyboard through `btvs_menu_char`),
-  Send Report → `btvs_report_create("<category>: <details>")` on a helper thread ("Saving the
-  report..." meanwhile), then a page showing `btvs_report_last_path()`.
+  Left/Right letter, A add, Y delete, B done; or type on the keyboard through `btvs_menu_char`;
+  the line shows the end of a long text), Send Report → `btvs_report_create("<category>: <details>")`
+  on a helper thread ("Saving Report..." meanwhile). Then "Report Saved", the place in short
+  ("In the game's folder: reports\<date-time> (and a .zip beside it)"), "Nothing was sent anywhere",
+  **Open Folder** (opens it in Explorer; not in test runs) and Back.
+- **Start Game page**: the picture of the Xbox console is not shown. It is a button the page's
+  A press goes through, so it is kept and drawn off screen rather than removed.
 
 Pages only write settings; the owning area applies them from `btvs_setting_on_change`.
 
@@ -156,7 +172,7 @@ classes are hooked where the game calls them through their vtables. **No regen i
 | `0x2233F0` | `TMenuOptions::OnCommand` | Left/Right/B/X while a page is open |
 | `0x219480` | `TBuffyMenu::OnUpdate` | refresh an open page |
 | `0x222470`, `0x2226B0` | `TMenuMain::OnLoad`, `OnMessage` | Exit |
-| `0x223760`, `0x223A60` | `TMenuPause::OnLoad`, `OnMessage` | Report a Problem; `btvs_report_prepare()` |
+| `0x223760`, `0x223A60`, `0x223D70` | `TMenuPause::OnLoad`, `OnMessage`, `OnUpdate` | Report a Problem with the list; `btvs_report_prepare()`; hidden in confirm-quit |
 | `0x222F00` | `TMenuNameSession::OnUpdate` | the Start Game page without its block count |
 
 ### PC wording
@@ -168,9 +184,10 @@ run when the main, Options or pause menu loads):
   called", "Hard Disk" → "This PC", "Total Blocks" / "Free Blocks" / "- 50,000+" emptied;
 - ten messages in the game's data (too many saved games, not enough free blocks, "don't turn off
   your Xbox console", "problem with the disc") reworded for a PC, keeping their `%i`;
-- the Start Game page hides its four block-count lines every frame (the game writes "50,000+" itself).
+- the Start Game page hides its four block-count lines every frame (the game writes "50,000+" itself)
+  and its picture of the console.
 
-Left as they are: the picture of the console on the Start Game page, "MU 1" / "MU 2" and the
+Left as they are: "MU 1" / "MU 2" and the
 memory-unit messages (those pages and messages cannot come up without memory units), the button
 pictures (A, B, X, Y).
 
@@ -182,10 +199,12 @@ stand-ins through `/alternatename` until the real ones are linked.
 
 - A report made from the pause menu shows the pause menu, not the game: the screenshot is the
   next frame shown. Needs the renderer's last shown frame (asked for in `docs/AREAS.md`).
-- The pause menu's confirm-quit mode hides its own lines by id; "Report a Problem" stays visible
-  there (not looked at in a run).
-- "Report a Problem" sits at the bottom left of the pause menu in the small font; the Options
-  entries "PC Audio" and "PC Controls" stand beside the game's own "Audio" and "Controls".
+- The Options entries "PC Audio" and "PC Controls" stand beside the game's own "Audio" and "Controls".
+- A line added to a menu is drawn lower in its box than the game's own lines when the box is tall
+  (seen on the pause menu: 25 pixels with a 50-high box). The cause was not found; added lines
+  use a box as high as the text.
+- Numbers in the game's menu font are hard to read at 640x480 (its "." looks like ","); sizes of
+  10 GB and more are shown without decimals.
 - The highlighted line has a dark double in every menu, the game's own lines too (Graphics' known fault).
 - No overlay fallback was needed (task step 4); nothing here uses `btvs_draw_text`.
 

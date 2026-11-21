@@ -161,7 +161,9 @@ static int selftest(void)
     /* 5. the recording gives the same pads back, read for read */
     btvs_input__test_reset();
     s_t = 50000.0;
+    _putenv_s("BTVS_INPUT_REPLAY_CLOCK", "poll");
     CHECK(btvs_input_playback(rec));
+    _putenv_s("BTVS_INPUT_REPLAY_CLOCK", "");
     CHECK(btvs_input_playback_active());
     for (i = 0; i < TICKS; i++) {
         btvs_input_frame();
@@ -181,6 +183,50 @@ static int selftest(void)
     CHECK(!btvs_input_playback_active());
     n = btvs_input_dump_recording(rec, stdout);
     CHECK(n > 10 && n < 40);                    /* changes only, not 1400 reads */
+
+    /* 5e. the usual clock is time from the game's first pad read: a run that
+     * starts later (a longer load) gets the same pads at the same time after
+     * it, and when reads stop for a while the recording does not fall behind */
+    btvs_input__test_reset();
+    s_t = 300000.0;
+    CHECK(btvs_input_playback(rec));
+    s_t += 7000.0;                              /* nothing for 7 s: a longer load */
+    for (i = 0; i < TICKS - 30; i++) {
+        int j = i < 300 ? i : i + 25;           /* 400 ms without a read at tick 300 */
+        if (i == 300)
+            s_t += 400.0;
+        btvs_input_frame();
+        btvs_input_poll(0, &a);
+        c1 = btvs_input_poll(1, &b);
+        if (memcmp(&a, &seq[j][0], sizeof a) || memcmp(&b, &seq[j][1], sizeof b) || c1 != seqc[j]) {
+            printf("FAIL: playback by time differs at read %d\n", i);
+            print_pad(s_t, 0, 1, &seq[j][0]); print_pad(s_t, 0, 1, &a);
+            s_fail++;
+            break;
+        }
+        s_t += 16.0;
+    }
+    DeleteFileA(rec);
+
+    /* 5a. a mark reached while a recording plays is kept, and the script goes
+     * on from that part when the recording ends */
+    btvs_input__test_reset();
+    s_focus = 0;
+    s_t = 80000.0;
+    CHECK(btvs_input_script_load_text("0.1 B for 5; after level; 0.2 X for 0.2") == 2);
+    CHECK(btvs_input_record_begin(rec));
+    for (i = 0; i < 20; i++) tick(&a, &b, NULL);
+    btvs_input_record_end();
+    btvs_input__test_reset();
+    CHECK(btvs_input_script_load_text("0.1 B for 5; after level; 0.2 X for 0.2") == 2);
+    CHECK(btvs_input_playback(rec));
+    for (i = 0; i < 10; i++) tick(&a, &b, NULL);
+    btvs_input_script_mark("level");
+    while (btvs_input_playback_active()) tick(&a, &b, NULL);
+    tick(&a, &b, NULL);
+    CHECK(a.analog[BTVS_AN_B] == 0 && a.analog[BTVS_AN_X] == 0);       /* part 1's clock starts here */
+    s_t += 240.0; tick(&a, &b, NULL);
+    CHECK(a.analog[BTVS_AN_B] == 0 && a.analog[BTVS_AN_X] == 255);
     DeleteFileA(rec);
 
     /* 5b. keys held by a script go through the bindings, with no focus */
@@ -197,6 +243,53 @@ static int selftest(void)
     CHECK(a.analog[BTVS_AN_A] == 0 && a.ly == 0);
     s_t += 200.0; tick(&a, &b, NULL);
     CHECK(a.analog[BTVS_AN_X] == 255 && a.rx == -32767 && a.ry == 0);
+
+    /* 5c. a script's mouse movement is the right stick; not while the game says no (menus, pause) */
+    btvs_input__test_reset();
+    s_focus = 0;
+    s_t = 95000.0;
+    CHECK(btvs_input_script_load_text("0.1 M:10,0 for 0.2; 0.5 M:0,-40 for 0.2; 0.9 M:40,0 for 0.2") == 3);
+    btvs_input_allow_mouse_look(1);
+    tick(&a, &b, NULL);
+    s_t += 160.0; tick(&a, &b, NULL);
+    CHECK(a.rx > 18000 && a.rx < 24000 && a.ry == 0 && a.lx == 0);      /* 10 counts a read: part of the way */
+    s_t += 400.0; tick(&a, &b, NULL);
+    CHECK(a.rx == 0 && a.ry == 32767);                                 /* up, full */
+    btvs_input_allow_mouse_look(0);
+    s_t += 400.0; tick(&a, &b, NULL);
+    CHECK(a.rx == 0 && a.ry == 0);
+    btvs_input_allow_mouse_look(1);
+    tick(&a, &b, NULL);
+    CHECK(a.rx == 32767);
+    btvs_input_allow_mouse_look(0);
+
+    /* 5d. rumble goes to the controller of the player the game named, scaled
+     * by the strength setting, and stops when the window loses focus */
+    btvs_input__test_reset();
+    s_focus = 1;
+    memset(&hp, 0, sizeof hp);
+    btvs_input__test_host_pad(&hp);
+    tick(&a, &b, NULL);
+    btvs_input_rumble(1, 60000, 60000);                                 /* player 2 has no controller */
+    tick(&a, &b, NULL);
+    { int rp, rl, rr;
+      btvs_input__test_last_rumble(&rp, &rl, &rr);
+      CHECK(rl == 0 && rr == 0);
+      btvs_input_rumble(0, 40000, 20000);
+      btvs_input__test_last_rumble(&rp, &rl, &rr);
+      CHECK(rp == 0 && rl == 40000 && rr == 20000);
+      s_focus = 0;
+      tick(&a, &b, NULL);
+      btvs_input__test_last_rumble(&rp, &rl, &rr);
+      CHECK(rp == 0 && rl == 0 && rr == 0);
+      s_focus = 1;
+      tick(&a, &b, NULL);
+      btvs_input__test_last_rumble(&rp, &rl, &rr);
+      CHECK(rp == 0 && rl == 40000 && rr == 20000);                     /* and comes back with it */
+      btvs_input_rumble(0, 0, 0);
+      btvs_input__test_last_rumble(&rp, &rl, &rr);
+      CHECK(rl == 0 && rr == 0);
+    }
 
     /* 6. rebinding a controller button: X's action onto the pad's Y */
     btvs_input__test_reset();

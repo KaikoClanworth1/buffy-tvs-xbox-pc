@@ -1,0 +1,28 @@
+# In the first level (BTVS_PAD_SCRIPT_1, after boot_to_level.txt): every kind of control once.
+# Run with BTVS_INPUT_VERIFY=1 BTVS_INPUT_LOG=1 BTVS_INPUT_POS_LOG=6 and read the
+# "[INPUT] pos" lines between the pad changes.
+after level
+hold 0.2
+8.0 START                 # skips the opening cutscene
+14.0 LSU for 1.0          # forward
++2.0 LSD for 1.0          # back
++2.0 LSL for 1.0
++2.0 LSR for 1.0
++2.0 RSL for 1.0          # the camera turns ...
++2.0 LSU for 1.0          # ... so forward is another way now
++2.0 A                    # kick (she steps forward)
++2.0 X                    # punch
++1.5 Y                    # action
++1.5 B                    # jump
++2.0 LT=128 for 0.5       # triggers part of the way
++1.5 RT=64 for 0.5
++2.0 M:25,0 for 1.0       # the mouse turns the camera ...
++2.0 K:W for 1.0          # ... and forward on the keyboard is another way again
++2.0 WHITE                # an inventory screen
++2.0 B                    # and out of it
++2.0 BLACK                # the other one
++2.0 B
++2.0 START                # pause
++2.0 M:25,0 for 0.5       # paused: the mouse is not the camera
++1.5 START                # and back
++2.5 LSD for 1.0

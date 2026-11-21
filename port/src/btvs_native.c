@@ -401,13 +401,15 @@ static void ff_end(void)
 }
 
 static int ff_off(void);
+static int wide_full_width(const NativeDraw *d, int path, uint32_t sw);
+static void wide_frame(void);
 
 static void native_draw(int path, uint32_t prim, uint32_t count, uint32_t index_va, uint32_t up_data, uint32_t up_stride)
 {
     NativeDraw d;
     NativeTarget tg;
     uint32_t dev = MEM32(D3D_PDEVICE), vs, flags;
-    int st, ff = 0;
+    int st, ff = 0, full;
     s_count[path]++;
     s_verts += count;
     if (!s_up || !dev)
@@ -448,7 +450,10 @@ static void native_draw(int path, uint32_t prim, uint32_t count, uint32_t index_
         ff = 1;
     }
     native_viewport_consts();
+    full = wide_full_width(&d, path, tg.sw);
     nv2a_native_draw(&d, tg.rt, tg.ds, tg.pw, tg.ph, tg.sw, tg.sh);
+    if (full)
+        wide_frame();
     if (ff)
         ff_end();
 }
@@ -692,8 +697,88 @@ void btvs_native_start(void)
     nv2a_native_prewarm();
 }
 
+/* ── widescreen ──────────────────────────────────────────────────────
+ * [display] widescreen = 1 and a frame wider than 4:3. In a level the 3D
+ * view is really wider: the game is given a wider horizontal field of view
+ * (btvs_native_game.c: View_SetFOV), which with its own 4:3 arithmetic also
+ * makes it taller, and the extra height is cut off again here (y scaled up
+ * by the same factor). HUD, menus and movies are drawn for a 4:3 screen and
+ * stay 4:3 in the middle. In the menus (no level loaded) everything stays
+ * 4:3, bars at the sides. */
+static float s_wide = 1.0f;            /* the frame's aspect over 4:3; 1: not wide */
+static int s_fov_wide;                 /* the game's last SetFOV was widened */
+
+void btvs_native_set_wide(float aspect_over_43)
+{
+    s_wide = aspect_over_43 > 1.001f ? aspect_over_43 : 1.0f;
+}
+
+/* A level is loaded (the map manager has a map name; "" in the menus). */
+static int level_loaded(void)
+{
+    uint32_t game = MEM32(0x7D0090u), mgr, str;
+    if (game < 0x10000u || game >= 0x04000000u) return 0;
+    mgr = MEM32(game + 0x40);
+    if (mgr < 0x10000u || mgr >= 0x04000000u || !MEM8(mgr + 0x3E)) return 0;
+    str = MEM32(mgr + 0x40);
+    if (str < 0x10000u || str >= 0x04000000u) return 0;
+    return MEM8(str) >= 0x20 && MEM8(str) < 0x7F;
+}
+
+/* For View_SetFOV: the factor to widen the horizontal field of view by. */
+float btvs_native_fov_factor(void)
+{
+    s_fov_wide = s_wide > 1.0f && level_loaded();
+    return s_fov_wide ? s_wide : 1.0f;
+}
+
+/* Widescreen, in a level: screen-space drawing that covers the whole width
+ * of the game's screen -- the cutscene bars, fades, flashes, the dim behind
+ * the pause menu -- is for the whole frame, not for the 4:3 middle: it is
+ * drawn at full width (1: the caller puts the frame's setting back after the
+ * draw). Not movie frames (Draw...VerticesUP, btvs BlitImage), which are
+ * pictures and keep their shape. */
+static int wide_full_width(const NativeDraw *d, int path, uint32_t sw)
+{
+    void nv2a_native_view(float y3d, float x2d, float x3d);
+    uint32_t i, n = d->count, fmt = d->attr[0].fmt & 0xFF;
+    float lo = 1e9f, hi = -1e9f;
+    if (s_wide <= 1.0f || !s_fov_wide || d->passthrough != 1 || path == PATH_UP || !sw
+            || !d->attr[0].va || !d->attr[0].stride || (fmt != 0x42 && fmt != 0x32) || n < 3 || n > 64)
+        return 0;
+    for (i = 0; i < n; i++) {
+        uint32_t ix = d->index_va ? MEM16(d->index_va + i * 2) : i;
+        float x = MEMF(d->attr[0].va + ix * d->attr[0].stride);
+        if (x < lo) lo = x;
+        if (x > hi) hi = x;
+    }
+    if (lo > 1.0f || hi < (float)sw - 1.0f)
+        return 0;
+    nv2a_native_view(s_wide, 1.0f, 1.0f);
+    return 1;
+}
+
+static void wide_frame(void)
+{
+    void nv2a_native_view(float y3d, float x2d, float x3d);
+    if (s_wide <= 1.0f)
+        nv2a_native_view(1.0f, 1.0f, 1.0f);
+    else if (s_fov_wide && level_loaded())
+        nv2a_native_view(s_wide, 1.0f / s_wide, 1.0f);
+    else
+        nv2a_native_view(1.0f, 1.0f / s_wide, 1.0f / s_wide);
+}
+
 void btvs_native_overlay(void)
 {
+    if (s_wide > 1.0f && !(s_fov_wide && level_loaded())) {
+        /* everything is 4:3 in the middle (the menus): black at the sides,
+         * where 3D drawn past the edges of the game's screen would show */
+        float extra = (640.0f * s_wide - 640.0f) * 0.5f + 2.0f;
+        btvs_overlay_rect(-extra, 0.0f, extra, 480.0f, 0xFF000000u);
+        btvs_overlay_rect(640.0f, 0.0f, extra, 480.0f, 0xFF000000u);
+    }
+    wide_frame();                                /* (for the frame that starts after this one is shown) */
     void btvs_overlay_test(void);
     void btvs_overlay_frame(GpuTexture *frame, uint32_t pw, uint32_t ph);
     if (!s_up || !s_fb.tex)

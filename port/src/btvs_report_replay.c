@@ -17,14 +17,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #include "btvs_log.h"
+
+int btvs_screenshot(const char *path);     /* Graphics (btvs.h); a stand-in in btvs_report.c says no */
 
 /* (the level jump through the game's own functions is gone: launch data does it)
  * 1 = on its way, 0 = can't (yet), -1 = not possible at this moment, ask again. */
 
 static struct {
     int active, arrived, playing, done, goto_state, said_manual;
+    int have_spot, placed, shot_in;
+    int play_input;                 /* play the recorded input before placing (BTVS_REPLAY_INPUT=1, or a menu report) */          /* the report's exact spot (player matrix) and whether the player was put there */
+    float spot[12], health;
+    double ready_since;
     char folder[MAX_PATH], input[MAX_PATH];
     char anchor[16], anchor_name[96], level[96], checkpoint[96];
     double report_time, anchor_time, arrived_at;
@@ -91,6 +98,8 @@ static int copy_sessions(const char *from_save, const char *to_save)
 
 int btvs_replay_active(void) { return s_r.active; }
 
+int btvs_replay_wants_skip(void) { return s_r.active && !s_r.done && !s_r.play_input && s_r.have_spot; }
+
 void btvs_replay_init(void)
 {
     const char *src = getenv("BTVS_REPLAY");
@@ -153,6 +162,11 @@ void btvs_replay_init(void)
         else if (!strcmp(line, "anchor_time")) s_r.anchor_time = atof(p);
         else if (!strcmp(line, "input") && *p) sprintf_s(s_r.input, MAX_PATH, "%s\\%s", s_r.folder, p);
         else if (!strcmp(line, "input_complete") && atoi(p) == 0) partial = 1;
+        else if (!strcmp(line, "player_matrix")) {
+            s_r.have_spot = sscanf_s(p, "%f %f %f %f %f %f %f %f %f %f %f %f", &s_r.spot[0], &s_r.spot[1], &s_r.spot[2],
+                                     &s_r.spot[3], &s_r.spot[4], &s_r.spot[5], &s_r.spot[6], &s_r.spot[7], &s_r.spot[8],
+                                     &s_r.spot[9], &s_r.spot[10], &s_r.spot[11]) == 12;
+        } else if (!strcmp(line, "player_health")) s_r.health = (float)atof(p);
         else if (!strcmp(line, "launch") && *p) sprintf_s(launch, MAX_PATH, "%s\\%s", s_r.folder, p);
     }
     fclose(f);
@@ -201,8 +215,18 @@ void btvs_replay_init(void)
     else
         launch[0] = 0;
 
+    {
+        /* A report made in a level: straight to the spot (the level loads, the
+         * player is put there) unless the inputs are asked for; they take as
+         * long as the player had played. A report made in the menus has no
+         * spot: its inputs are the way there. */
+        const char *pi = getenv("BTVS_REPLAY_INPUT");
+        s_r.play_input = !s_r.have_spot || (pi && *pi && *pi != '0');
+    }
     s_r.active = 1;
     btvs_log("replay", "replaying report %s", s_r.folder);
+    btvs_log("replay", "  mode: %s", s_r.play_input ? "the recorded input is played first"
+             : "straight to the spot (BTVS_REPLAY_INPUT=1 plays the recorded input on the way instead)");
     btvs_log("replay", "  start: %s (level \"%s\"), then %.1f s of recorded input (%s)",
              launch[0] ? "with the report's launch data, straight into the level" : "a normal start (title screen)",
              s_r.level, s_r.report_time - s_r.anchor_time,
@@ -219,12 +243,14 @@ void btvs_replay_on_anchor(const char *event, const char *name)
         return;
     s_r.arrived = 1;
     s_r.arrived_at = btvs_uptime();
-    if (s_r.input[0] && btvs_input_playback(s_r.input)) {
+    if (!s_r.play_input) {
+        btvs_log("replay", "at the anchor (%s) after %.1f s: waiting for the level", event, s_r.arrived_at);
+    } else if (s_r.input[0] && btvs_input_playback(s_r.input)) {
         s_r.playing = 1;
         btvs_log("replay", "at the anchor (%s \"%s\") after %.1f s: playing the recorded input", event, name,
                  s_r.arrived_at);
     } else {
-        s_r.done = 1;
+        s_r.done = !s_r.have_spot;      /* (the player is still put on the report's spot) */
         btvs_log("replay", "at the anchor (%s \"%s\") after %.1f s: %s. The pads are yours.", event, name, s_r.arrived_at,
                  s_r.input[0] ? "the recording could not be played (see the [INPUT] line)" : "no input recording to play");
     }
@@ -233,15 +259,57 @@ void btvs_replay_on_anchor(const char *event, const char *name)
 /* Once a frame (btvs_frame_tick). */
 void btvs_replay_frame(void)
 {
+    /* A moment after arriving: the picture, to hold against the report's screenshot.png. */
+    if (s_r.active && s_r.shot_in > 0 && --s_r.shot_in == 0) {
+        char path[MAX_PATH];
+        sprintf_s(path, MAX_PATH, "%s\\replay_arrived.png", s_r.folder);
+        DeleteFileA(path);
+        if (btvs_screenshot(path))
+            btvs_log("replay", "picture of where the replay arrived: %s (the report's: screenshot.png beside it)", path);
+    }
     if (!s_r.active || s_r.done)
         return;
     if (!s_r.arrived)
         return;
     if (s_r.playing && !btvs_input_playback_active()) {
         s_r.playing = 0;
-        s_r.done = 1;
-        btvs_log("replay", "the recorded input has ended, %.1f s after the anchor (the report was made %.1f s after it)."
-                           " The pads are yours.", btvs_uptime() - s_r.arrived_at, s_r.report_time - s_r.anchor_time);
-        btvs_trail("replay_end", "seconds=%.1f", btvs_uptime());
+        btvs_log("replay", "the recorded input has ended, %.1f s after the anchor (the report was made %.1f s after it).",
+                 btvs_uptime() - s_r.arrived_at, s_r.report_time - s_r.anchor_time);
     }
+    if (s_r.playing)
+        return;
+    /* The inputs are in; what the game made of them may have drifted (it steps
+     * by measured frame time). Put the player on the report's exact spot with
+     * the game's own Teleport, once the report's level is up. */
+    if (s_r.have_spot && !s_r.placed) {
+        char now_level[96];
+        if (!btvs_game_in_level(now_level, sizeof now_level) || _stricmp(now_level, s_r.level) != 0) {
+            s_r.ready_since = 0.0;
+            return;                                 /* still loading (a report with no recording) */
+        }
+        if (s_r.ready_since == 0.0)
+            s_r.ready_since = btvs_uptime();
+        if (btvs_trail_level_loaded_at() <= 0.0 || btvs_trail_in_cutscene()) {
+            s_r.ready_since = 0.0;
+            return;                                 /* not playable yet, or a cutscene is being skipped */
+        }
+        if (btvs_uptime() - s_r.ready_since < 0.5)
+            return;
+        {
+            float pm[12], cm[12], hp = 0.0f, d = -1.0f;
+            if (btvs_game_state(pm, cm, &hp))
+                d = sqrtf((pm[9] - s_r.spot[9]) * (pm[9] - s_r.spot[9]) + (pm[10] - s_r.spot[10]) * (pm[10] - s_r.spot[10])
+                          + (pm[11] - s_r.spot[11]) * (pm[11] - s_r.spot[11]));
+            s_r.placed = btvs_game_place(s_r.spot, s_r.health);
+            btvs_log("replay", "%s (%.2f %.2f %.2f, health %.0f); %s %.2f units away",
+                     s_r.placed ? "player put on the report's exact spot" : "could not place the player",
+                     s_r.spot[9], s_r.spot[10], s_r.spot[11], s_r.health,
+                     s_r.play_input ? "the replayed input had left the player" : "the level starts", d);
+            btvs_trail("replay_placed", "x=%.2f y=%.2f z=%.2f drift=%.2f", s_r.spot[9], s_r.spot[10], s_r.spot[11], d);
+        }
+    }
+    s_r.done = 1;
+    s_r.shot_in = 45;
+    btvs_log("replay", "you are where the report was made, %.1f s after start. The pads are yours.", btvs_uptime());
+    btvs_trail("replay_end", "seconds=%.1f", btvs_uptime());
 }

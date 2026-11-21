@@ -323,9 +323,17 @@ NTSTATUS __stdcall xbox_NtCreateFile(
          * alignment rules the title already keeps). */
         if (FileAttributes & XBOX_FILE_ATTRIBUTE_READONLY)
             flags_and_attrs |= FILE_ATTRIBUTE_READONLY;
-        h = CreateFileW(win_path, xbox_access_to_win32(DesiredAccess),
-            xbox_share_to_win32(ShareAccess), NULL,
-            xbox_disposition_to_win32(CreateDisposition), flags_and_attrs, NULL);
+        {
+            /* A console runs one title; a PC can run the game twice (two test
+             * runs) or have something else reading its files. A title that
+             * opens a disc file for reading with no sharing would then fail
+             * with a sharing violation in the second one: reads share reads. */
+            DWORD acc = xbox_access_to_win32(DesiredAccess), share = xbox_share_to_win32(ShareAccess);
+            if (!(acc & (GENERIC_WRITE | GENERIC_ALL | FILE_WRITE_DATA | FILE_APPEND_DATA | DELETE)))
+                share |= FILE_SHARE_READ;
+            h = CreateFileW(win_path, acc, share, NULL,
+                xbox_disposition_to_win32(CreateDisposition), flags_and_attrs, NULL);
+        }
     }
 
     if (h == INVALID_HANDLE_VALUE) {

@@ -1,0 +1,11 @@
+# From the title screen into the first level (a new game on the default difficulty).
+# This is the script for the game's first run (BTVS_PAD_SCRIPT). The game then restarts
+# itself to load the level, and that run plays BTVS_PAD_SCRIPT_1 (level_controls.txt,
+# level_walk.txt ...).
+1.0 START every 1.5
+after menu
+2.5 A every 2.5        # New Game
+after menu12
+2.5 A every 2.5        # the session's name as offered
+after menu13
+2.5 A every 2.5        # difficulty as offered
