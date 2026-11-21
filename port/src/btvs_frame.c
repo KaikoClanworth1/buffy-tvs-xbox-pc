@@ -100,4 +100,23 @@ void D3DDevice_Swap_00595DB0(void)
     stats();
     s_frames++;
     D3DDevice_Swap_00595DB0_orig();
+    {   /* the frame that starts now (BTVS_HITCH_LOG, btvs_boot.c); the one that ended, if it was long */
+        extern volatile LONGLONG g_btvs_frame_start;
+        extern volatile LONG g_btvs_frame_no;
+        static int on = -1;
+        static double limit, last;
+        LARGE_INTEGER q;
+        double t = now_s();
+        if (on < 0) {
+            const char *e = getenv("BTVS_HITCH_LOG");
+            on = e != NULL;
+            limit = e && atof(e) > 0.0 ? atof(e) : 30.0;
+        }
+        if (on && last > 0.0 && (t - last) * 1000.0 >= limit)
+            fprintf(stderr, "[HITCH] frame %ld took %.1f ms (ended at %.2f s)\n", (long)g_btvs_frame_no, (t - last) * 1000.0, t);
+        last = t;
+        QueryPerformanceCounter(&q);
+        g_btvs_frame_start = q.QuadPart;
+        InterlockedIncrement(&g_btvs_frame_no);
+    }
 }

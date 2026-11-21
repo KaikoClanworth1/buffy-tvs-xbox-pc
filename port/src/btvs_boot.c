@@ -400,8 +400,90 @@ static DWORD WINAPI stack_at_thread(LPVOID arg)
     return 0;
 }
 
+/* BTVS_HITCH_LOG=<ms> (default 30): what the game thread is doing whenever a
+ * frame takes longer than that. A watcher looks every 2 ms; the first time a
+ * frame is over the limit it stops the game thread for a moment, takes its
+ * call stack (nothing that locks while it is stopped) and logs it with the
+ * frame's age; btvs_frame.c logs the frame's whole length when it ends. */
+volatile LONGLONG g_btvs_frame_start;   /* QueryPerformanceCounter at the start of the frame being made */
+volatile LONG g_btvs_frame_no;
+
+static DWORD WINAPI hitch_thread(LPVOID arg)
+{
+    double limit = atof(getenv("BTVS_HITCH_LOG"));
+    LARGE_INTEGER f, q;
+    LONG done = -1;
+    (void)arg;
+    if (limit <= 0.0)
+        limit = 30.0;
+    QueryPerformanceFrequency(&f);
+    SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME);
+    SymInitialize(GetCurrentProcess(), NULL, TRUE);
+    for (;;) {
+        LONG no = g_btvs_frame_no;
+        LONGLONG st = g_btvs_frame_start;
+        double age;
+        Sleep(2);
+        if (!st || !g_btvs_game_tid || no == done || no != g_btvs_frame_no)
+            continue;
+        QueryPerformanceCounter(&q);
+        age = (double)(q.QuadPart - st) * 1000.0 / (double)f.QuadPart;
+        if (age < limit)
+            continue;
+        done = no;
+        {
+            HANDLE th = OpenThread(THREAD_GET_CONTEXT | THREAD_SUSPEND_RESUME, FALSE, g_btvs_game_tid);
+            DWORD64 pcs[48];
+            int npc = 0, k, shown = 0;
+            CONTEXT c;
+            if (!th)
+                continue;
+            if (SuspendThread(th) != (DWORD)-1) {
+                memset(&c, 0, sizeof c);
+                c.ContextFlags = CONTEXT_FULL;
+                if (GetThreadContext(th, &c)) {
+                    while (npc < 48 && c.Rip) {
+                        DWORD64 base = 0, est = 0;
+                        PVOID hd = NULL;
+                        PRUNTIME_FUNCTION fn;
+                        pcs[npc++] = c.Rip;
+                        fn = RtlLookupFunctionEntry(c.Rip, &base, NULL);
+                        if (fn)
+                            RtlVirtualUnwind(0, base, c.Rip, fn, &c, &hd, &est, NULL);
+                        else {
+                            if (IsBadReadPtr((const void *)c.Rsp, 8))
+                                break;
+                            c.Rip = *(const DWORD64 *)c.Rsp;
+                            c.Rsp += 8;
+                        }
+                    }
+                }
+                ResumeThread(th);
+            }
+            CloseHandle(th);
+            fprintf(stderr, "[HITCH] frame %ld at %.0f ms:", no, age);
+            for (k = 0; k < npc && shown < 12; k++) {
+                char buf[sizeof(SYMBOL_INFO) + 256];
+                SYMBOL_INFO *si = (SYMBOL_INFO *)buf;
+                DWORD64 d = 0;
+                memset(buf, 0, sizeof buf);
+                si->SizeOfStruct = sizeof(SYMBOL_INFO);
+                si->MaxNameLen = 255;
+                if (SymFromAddr(GetCurrentProcess(), pcs[k], &d, si)) {
+                    fprintf(stderr, " %s%s", shown ? "< " : "", si->Name);
+                    shown++;
+                }
+            }
+            fprintf(stderr, "\n");
+            fflush(stderr);
+        }
+    }
+}
+
 void btvs_boot_watch_start(void)
 {
+    if (getenv("BTVS_HITCH_LOG"))
+        CloseHandle(CreateThread(NULL, 0, hitch_thread, NULL, 0, NULL));
     const char *e = getenv("BTVS_WATCH");
     if ((e && *e && (s_watch = (uint32_t)strtoul(e, NULL, 16)) != 0) || getenv("BTVS_BREAK")) {
         s_watch_host = s_watch ? (void *)XBOX_PTR(s_watch) : NULL;
