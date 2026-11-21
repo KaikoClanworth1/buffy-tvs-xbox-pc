@@ -116,6 +116,8 @@ static struct {
     int checked_env, check_every;
     CRITICAL_SECTION cs;
     int cs_ready;
+    int late_said;                  /* the "time passes inside the frame" line has been logged */
+    uint32_t most_reads;            /* the most clock reads in one frame so far */
     FILE *f;
     char path[MAX_PATH];
     volatile LONG frames;           /* frames written (recording) or given back (replay) since the start */
@@ -150,9 +152,29 @@ static uint32_t real_clock(void) { return (uint32_t)(xbox_ReadTimeStampCounterRe
 
 /* What the game thread's rdtsc returns from the start on: the game takes
  * bits 4..35 of it as its clock. */
+/* How far the clock has moved inside the frame after `reads` reads: one unit
+ * a read, and from READS_PLAIN reads on 0.1 ms a read. The game has loops
+ * whose only end is the clock (TGO::Collision_PositionObjectInValidSpace
+ * widens its search for a free place "for 2 ms"): with a clock that stood
+ * still inside a frame such a loop had no end at all. A frame of play reads
+ * the clock a few thousand times; the count alone decides, so a replay
+ * gets the same values. */
+#define READS_PLAIN 200000u
+#define READS_LATE_STEP 4581u       /* 0.1 ms of the game's clock (733.33 MHz / 16) */
+static uint32_t gone(uint32_t reads)
+{
+    return reads <= READS_PLAIN ? reads : READS_PLAIN + (reads - READS_PLAIN) * READS_LATE_STEP;
+}
+
 static uint64_t game_tsc(void)
 {
-    return (uint64_t)(uint32_t)(X.clock + X.reads++) << 4;
+    uint32_t r = X.reads++;
+    if (r == READS_PLAIN + 1u && !X.late_said) {
+        X.late_said = 1;
+        btvs_log("exact", "a frame has read the clock %u times: from here on time passes inside it (0.1 ms a read), "
+                 "so that a loop that waits for the clock ends", r);
+    }
+    return (uint64_t)(uint32_t)(X.clock + gone(r)) << 4;
 }
 
 /* ── small helpers ──────────────────────────────────────────────────────── */
@@ -283,7 +305,7 @@ static void replay_over(const char *why)
 {
     X.replay_done = 1;
     /* The clock goes on from where the replay left it, at the real rate. */
-    X.offset = X.clock + 1u + X.reads - real_clock();
+    X.offset = X.clock + 1u + gone(X.reads) - real_clock();
     InterlockedExchange(&X.mode, X_LIVE);
     btvs_log("exact", "frame replay over after %ld frames (%s): %s", X.frames, why,
              X.diverged ? "the player's path DIFFERED from the recording (see above)"
@@ -356,8 +378,13 @@ void btvs_exact_frame_begin(uint32_t mgr)
     }
     {   /* recording, or live after a replay: the real clock, taken once */
         uint32_t now = real_clock() + X.offset, d = now - X.clock;
-        if ((int32_t)d <= (int32_t)X.reads)
-            d = X.reads + 1u;           /* (never backwards) */
+        if (X.reads > X.most_reads)
+            X.most_reads = X.reads;
+        if (X.frames == 3000)
+            btvs_log("exact", "clock reads in a frame: %u at most in the first 3000 frames (time stands still inside a frame "
+                     "up to %u)", X.most_reads, READS_PLAIN);
+        if ((int32_t)d <= (int32_t)gone(X.reads))
+            d = gone(X.reads) + 1u;     /* (never backwards) */
         X.cur.delta = d;
         X.clock += d;
         X.reads = 0;

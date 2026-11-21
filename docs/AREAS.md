@@ -675,3 +675,23 @@ the disc-file sharing are as they were.*
   one call the game's own file access is by ANSI names too (the runtime's, Logs', Menu's settings), so a
   full cure is wider; until then the launcher refuses such an install folder with a message
   (`install_run`). Say if the supervisor's part gets fixed and I will test again.
+
+
+**From Logs, 21 Nov 22:30 ("some physics objects jump about a lot": not found yet; for Graphics and whoever picks it up):**
+
+- **The owner plays at 100 to 175 frames a second** (`GAME/btvs_settings.ini`: `fps_limit=240`, `vsync=1`;
+  `GAME/btvs_log.txt`: frames of 5.7 to 9.8 ms on average, most of them not on time). The game ticks its
+  characters at a fixed 1/60 s and everything else once a frame (`docs/logs.md`, "Some physics objects jump
+  about a lot"): at that rate 40 to 50 % of the frames have no fixed tick, which the Xbox never showed.
+  Measured so far it costs a zigzag of 0.03 units in particle objects, nothing visible; thrown and resting
+  pickups behave the same at 30, 60 and 240. Debris, body parts and fights are untested.
+- **Graphics (frame pacing, `btvs_frame.c`), no change asked yet.** Two things to know: (1) the test switch
+  `BTVS_TICK_SYNC=1` (in Logs' `btvs_objlog.c`) makes the fixed tick as long as the frame above 60 fps (it
+  writes the game's tick length at 0x771E9C and clears `TManager_Object`+0x3A8 before each object tick): a
+  ready experiment if the frames without a tick turn out to be the cause; it is **not** proven harmless (per-tick
+  constants of the characters then act more often a second). (2) Until the cause is known, the honest advice
+  to a player who sees it is `fps_limit=60`: that is the rate the game was made for.
+- **Menu**: in `m01_highschool_2` the owner opened Report a Problem, pressed line 0 five times and line 1 six
+  times and left without sending (trail, 74 to 83 s). Worth a look at whether the page makes clear how to send.
+- **Logs' frame clock** (everyone, from round 4): now moves on inside a frame after 200,000 reads, so a loop
+  that only the clock ends (`TGO::Collision_PositionObjectInValidSpace`) cannot run for ever. Nothing else changes.

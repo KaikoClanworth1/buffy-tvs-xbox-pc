@@ -53,6 +53,7 @@ int  btvs_exact_replay_state(void);                    /* 0 none, 1 waiting for 
 int  btvs_exact_replay_result(unsigned *frames, unsigned *checks, float *max_dev, unsigned *first_bad, float pos[3]);
 int  btvs_exact_recording(void);
 unsigned btvs_exact_replay_seed_fixes(void);
+void btvs_objlog_hook_object_tick(void);                /* btvs_objlog.c: BTVS_OBJLOG, BTVS_FORCE_DT */
 int  btvs_game_paused(void);                           /* the pause screen is open */
 void btvs_input_record_flush(void);       /* Controls, when it has one: make the recording file complete up to now */
 

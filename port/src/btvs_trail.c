@@ -637,6 +637,7 @@ btvs_guest_fn btvs_trail_lookup(uint32_t va)
     case 0x000ED520u: return hook_AutoSave;
     case 0x00024B50u: return btvs_exact_hook_input_update;
     case 0x00024E90u: return btvs_exact_hook_input_poll;
+    case 0x000A61E0u: return btvs_objlog_hook_object_tick;
     default: return (btvs_guest_fn)0;
     }
 }
