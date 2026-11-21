@@ -32,6 +32,10 @@ static struct {
     int play_input;                 /* play the recorded input before placing (BTVS_REPLAY_INPUT=1, or a menu report) */          /* the report's exact spot (player matrix) and whether the player was put there */
     float spot[12], health;
     double ready_since;
+    char frames[MAX_PATH];          /* the report's frame recording, and how much of it to give back */
+    unsigned exact_frames;
+    int exact, have_exact_pos;
+    float exact_pos[3];
     char folder[MAX_PATH], input[MAX_PATH];
     char anchor[16], anchor_name[96], level[96], checkpoint[96];
     double report_time, anchor_time, arrived_at;
@@ -79,16 +83,16 @@ static int copy_sessions(const char *from_save, const char *to_save)
     WIN32_FIND_DATAA fd;
     HANDLE h;
     int n = 0;
-    sprintf_s(pat, MAX_PATH, "%s\Cache\*.ses", from_save);
+    sprintf_s(pat, MAX_PATH, "%s\\Cache\\*.ses", from_save);
     h = FindFirstFileA(pat, &fd);
     if (h == INVALID_HANDLE_VALUE)
         return 0;
     CreateDirectoryA(to_save, NULL);
-    sprintf_s(b, MAX_PATH, "%s\Cache", to_save);
+    sprintf_s(b, MAX_PATH, "%s\\Cache", to_save);
     CreateDirectoryA(b, NULL);
     do {
-        sprintf_s(a, MAX_PATH, "%s\Cache\%s", from_save, fd.cFileName);
-        sprintf_s(b, MAX_PATH, "%s\Cache\%s", to_save, fd.cFileName);
+        sprintf_s(a, MAX_PATH, "%s\\Cache\\%s", from_save, fd.cFileName);
+        sprintf_s(b, MAX_PATH, "%s\\Cache\\%s", to_save, fd.cFileName);
         if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && CopyFileA(a, b, FALSE))
             n++;
     } while (FindNextFileA(h, &fd));
@@ -168,6 +172,10 @@ void btvs_replay_init(void)
                                      &s_r.spot[9], &s_r.spot[10], &s_r.spot[11]) == 12;
         } else if (!strcmp(line, "player_health")) s_r.health = (float)atof(p);
         else if (!strcmp(line, "launch") && *p) sprintf_s(launch, MAX_PATH, "%s\\%s", s_r.folder, p);
+        else if (!strcmp(line, "frames") && *p) sprintf_s(s_r.frames, MAX_PATH, "%s\\%s", s_r.folder, p);
+        else if (!strcmp(line, "exact_frames")) s_r.exact_frames = (unsigned)strtoul(p, NULL, 10);
+        else if (!strcmp(line, "exact_pos"))
+            s_r.have_exact_pos = sscanf_s(p, "%f %f %f", &s_r.exact_pos[0], &s_r.exact_pos[1], &s_r.exact_pos[2]) == 3;
     }
     fclose(f);
     /* (reports of the first format could name a level as the anchor; every replay starts at boot now) */
@@ -222,10 +230,15 @@ void btvs_replay_init(void)
          * spot: its inputs are the way there. */
         const char *pi = getenv("BTVS_REPLAY_INPUT");
         s_r.play_input = !s_r.have_spot || (pi && *pi && *pi != '0');
+        /* With the report's frame recording the play is given back frame for
+         * frame (clock, pad samples, random state): the same every time. */
+        if (s_r.play_input && s_r.have_spot && s_r.frames[0] && s_r.exact_frames && is_file(s_r.frames))
+            s_r.exact = btvs_exact_replay(s_r.frames, s_r.exact_frames);
     }
     s_r.active = 1;
     btvs_log("replay", "replaying report %s", s_r.folder);
-    btvs_log("replay", "  mode: %s", s_r.play_input ? "the recorded input is played first"
+    btvs_log("replay", "  mode: %s", s_r.exact ? "the recorded play is given back frame for frame (frames.rec)"
+             : s_r.play_input ? "the recorded input is played first, by time (no frame recording in this report, or BTVS_EXACT=0)"
              : "straight to the spot (BTVS_REPLAY_INPUT=1 plays the recorded input on the way instead)");
     btvs_log("replay", "  start: %s (level \"%s\"), then %.1f s of recorded input (%s)",
              launch[0] ? "with the report's launch data, straight into the level" : "a normal start (title screen)",
@@ -245,6 +258,10 @@ void btvs_replay_on_anchor(const char *event, const char *name)
     s_r.arrived_at = btvs_uptime();
     if (!s_r.play_input) {
         btvs_log("replay", "at the anchor (%s) after %.1f s: waiting for the level", event, s_r.arrived_at);
+    } else if (s_r.exact) {
+        s_r.playing = 1;
+        btvs_log("replay", "at the anchor (%s) after %.1f s: the recorded frames start when the level is up", event,
+                 s_r.arrived_at);
     } else if (s_r.input[0] && btvs_input_playback(s_r.input)) {
         s_r.playing = 1;
         btvs_log("replay", "at the anchor (%s \"%s\") after %.1f s: playing the recorded input", event, name,
@@ -271,7 +288,28 @@ void btvs_replay_frame(void)
         return;
     if (!s_r.arrived)
         return;
-    if (s_r.playing && !btvs_input_playback_active()) {
+    if (s_r.playing && s_r.exact) {
+        unsigned n, checks, bad;
+        float dev, end[3], off = -1.0f;
+        int same;
+        if (btvs_exact_replay_state() != 3)
+            return;
+        s_r.playing = 0;
+        same = btvs_exact_replay_result(&n, &checks, &dev, &bad, end);
+        if (s_r.have_exact_pos)
+            off = sqrtf((end[0] - s_r.exact_pos[0]) * (end[0] - s_r.exact_pos[0]) + (end[1] - s_r.exact_pos[1]) * (end[1] - s_r.exact_pos[1])
+                        + (end[2] - s_r.exact_pos[2]) * (end[2] - s_r.exact_pos[2]));
+        btvs_log("replay", "the recorded frames are in (%u frames, %.1f s after the anchor). The player stands at %.6f %.6f %.6f; "
+                 "the report's recording ended at %.6f %.6f %.6f: %.6f units apart. %s",
+                 n, btvs_uptime() - s_r.arrived_at, end[0], end[1], end[2], s_r.exact_pos[0], s_r.exact_pos[1], s_r.exact_pos[2],
+                 off, same ? "She was on the recorded place at every check on the way." : "Her path DIFFERED on the way (see the [exact] lines).");
+        if (same && off >= 0.0f && off < 0.001f) {
+            /* Already there, by the same road: nothing to put right. */
+            s_r.placed = 1;
+            btvs_trail("replay_placed", "x=%.2f y=%.2f z=%.2f drift=%.4f by=frames", end[0], end[1], end[2], off);
+        }
+        btvs_trail("replay_frames", "frames=%u same=%d x=%.4f y=%.4f z=%.4f apart=%.4f", n, same, end[0], end[1], end[2], off);
+    } else if (s_r.playing && !btvs_input_playback_active()) {
         s_r.playing = 0;
         btvs_log("replay", "the recorded input has ended, %.1f s after the anchor (the report was made %.1f s after it).",
                  btvs_uptime() - s_r.arrived_at, s_r.report_time - s_r.anchor_time);

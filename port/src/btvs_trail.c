@@ -519,7 +519,9 @@ static void first_time(volatile LONG *flag, const char *what)
 static void hook_GameFrame(void)
 {
     static volatile LONG seen;
+    btvs_exact_frame_begin(g_ecx);
     TGameManagerImplementation_Frame_000183A0();
+    btvs_exact_frame_end();
     first_time(&seen, "TGameManagerImplementation::Frame (the once-a-frame tick)");
     xbox_HangMonitorBeat();
     btvs_frame_tick();
@@ -560,10 +562,8 @@ static void hook_BuffySetMenu(void)
     static volatile LONG seen;
     uint32_t id = g32(g_esp + 4);
     first_time(&seen, "GUI::TBuffyManager::SetMenu");
-    if (id == 9 && s_seen_level[0])
-        btvs_report_game_snap();        /* pause: keep the game's picture for a report made from the menu */
-    else if (id == 10 || id <= 1)
-        btvs_report_game_snap_clear();
+    if (id == 10 || id <= 1)
+        btvs_report_game_snap_clear();  /* (the picture kept before a pause: btvs_report_exact.c) */
     GUI_TBuffyManager_SetMenu_00218130();
     note_menu(id, "SetMenu");
 }
@@ -635,6 +635,8 @@ btvs_guest_fn btvs_trail_lookup(uint32_t va)
     case 0x001D9A70u: return hook_CutsceneStop;
     case 0x001D94B0u: return hook_UserWantsSkip;
     case 0x000ED520u: return hook_AutoSave;
+    case 0x00024B50u: return btvs_exact_hook_input_update;
+    case 0x00024E90u: return btvs_exact_hook_input_poll;
     default: return (btvs_guest_fn)0;
     }
 }

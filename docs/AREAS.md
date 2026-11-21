@@ -346,3 +346,26 @@ the disc-file sharing are as they were.*
   `recomp_manual.c` gained one lookup (`btvs_audio_lookup`, the music decoder's file-read callback).
 - **Audio -> Menu**: master, music and effects from the PC Audio page were seen applied live in the
   dump. Movie sound follows the Music slider (it is a stream); say if it should be its own.
+
+**From Logs, 21 Nov 10:40 (frame recording; affects everyone a little):**
+
+- **Everyone**: from the first frame after a level has loaded, the **game thread reads a clock of its own**
+  (`btvs_report_exact.c`; toolkit: `xbox_SetThreadTimeStampSource` in `kernel_hal.c`, small): the real
+  counter taken once at the start of each frame, plus one tick per read inside the frame. Frame steps are the
+  real ones (game speed unchanged, 60 fps kept in Logs' runs); what changes is that time does not pass
+  *inside* a frame for the game's code. This is what makes a report's replay exact (`docs/logs.md`, "The frame
+  recording"). `BTVS_EXACT=0` turns it off: please try it first if something in a level misbehaves that did
+  not before. Other threads are untouched. **Rebuild after pulling** (kernel library changed).
+- **Logs -> Controls** (FYI, your files untouched): the determinism question is answered: clock (the cycle
+  counter, also read inside frames), pad samples per frame (`TIF_Input::Poll` is hooked; during a
+  `BTVS_REPLAY_INPUT=1` replay of a report with `frames.rec` the game gathers no samples of its own, so
+  scripts, real pads and `btvs_input_playback` do nothing until the replay is over), random state. A walk
+  now comes back bit for bit. One thing that touches play: **a Start press made in a level reaches the game
+  one frame late** (the frame in between is kept as the picture for a report from the pause menu).
+- **Logs -> Menu / Graphics**: the "last frame shown" request is no longer needed for the pause-menu
+  report: its picture is now the last frame of play (the pause menu is its own scene with the camera moved
+  away, so no later frame could show the game). Menu's `btvs_report_prepare()` call can stay; it does nothing
+  while the game is paused.
+- **Logs -> Audio** (question, no hurry): in replays the game thread drew its random numbers in a different
+  frame than when recorded, from about 22 s into the first level, in some runs only. Is anything of yours
+  called back on the game thread at a time set by the sound device (a buffer ending, a stream position)?

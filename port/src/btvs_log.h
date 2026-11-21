@@ -40,6 +40,20 @@ void btvs_trail_where(struct btvs_where *out);
 #define BTVS_TRAIL_FILE "btvs_trail.txt"
 #define BTVS_TRAIL_PREVIOUS "btvs_trail_previous.txt"
 #define BTVS_INPUT_FILE "btvs_input.rec"
+#define BTVS_FRAMES_FILE "btvs_frames.rec"
+
+/* ── btvs_report_exact.c: the frame recording (clock, pad samples, random state) ── */
+void btvs_exact_frame_begin(uint32_t game_manager);    /* around the game's own frame function */
+void btvs_exact_frame_end(void);
+void btvs_exact_hook_input_update(void);               /* guest hooks (btvs_trail_lookup) */
+void btvs_exact_hook_input_poll(void);
+int  btvs_exact_snapshot(const char *dst, unsigned *frames, float pos[3]);
+int  btvs_exact_replay(const char *path, unsigned frames);
+int  btvs_exact_replay_state(void);                    /* 0 none, 1 waiting for the level, 2 playing, 3 over */
+int  btvs_exact_replay_result(unsigned *frames, unsigned *checks, float *max_dev, unsigned *first_bad, float pos[3]);
+int  btvs_exact_recording(void);
+unsigned btvs_exact_replay_seed_fixes(void);
+int  btvs_game_paused(void);                           /* the pause screen is open */
 void btvs_input_record_flush(void);       /* Controls, when it has one: make the recording file complete up to now */
 
 /* ── btvs_mem.c ── */

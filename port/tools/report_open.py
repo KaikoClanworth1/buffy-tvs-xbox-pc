@@ -142,7 +142,7 @@ def main():
         print("WHERE THE GAME THREAD WAS")
         print("  " + symbolize(where_thread, syms)[:3000].replace("\n", "\n  "))
         print()
-    have = [n for n in ("screenshot.png", "input.rec", "settings.ini", "btvs_log.txt") if os.path.isfile(os.path.join(folder, n))]
+    have = [n for n in ("screenshot.png", "input.rec", "frames.rec", "settings.ini", "btvs_log.txt") if os.path.isfile(os.path.join(folder, n))]
     save_n = sum(len(f) for _, _, f in os.walk(os.path.join(folder, "save")))
     print("IN THE REPORT  %s; save: %d files" % (", ".join(have) or "-", save_n))
     if "input.rec" not in have:
@@ -154,7 +154,12 @@ def main():
     if spot:
         print("  made in level %s: the replay loads the level from the report's launch data and save, skips" % replay.get("level", "?"))
         print("  cutscenes and puts the player on the exact spot (about the level's loading time).")
-        print("  BTVS_REPLAY_INPUT=1 plays the %.0f s of recorded input on the way instead (then places the player)." % played)
+        if replay.get("frames") and int(replay.get("exact_frames", 0) or 0) > 0:
+            print("  BTVS_REPLAY_INPUT=1 gives the game the recorded play back frame for frame instead (%s frames:" % replay["exact_frames"])
+            print("  the same clock, pad samples and random numbers): the same things happen, the same every time.")
+        else:
+            print("  BTVS_REPLAY_INPUT=1 plays the %.0f s of recorded input on the way instead, by time: about the same" % played)
+            print("  things happen (no frame recording in this report), then the player is placed.")
     else:
         print("  made in the menus: the replay plays the %.0f s of recorded input from the start of the game." % played)
     secs = 150 if spot else int(played) + 60
