@@ -25,6 +25,7 @@
  *  [audio]    master, music, effects, speech    0..100
  *  [controls] sensitivity 1..10, invert_y 0/1, rumble 0/1
  *             (bindings: keys of the Controls area's choosing)
+ *  [menu]     highlight_shadow  0 the selected menu line drawn once, 1 the game's own black copy behind it
  */
 #ifndef BTVS_SETTINGS_H
 #define BTVS_SETTINGS_H

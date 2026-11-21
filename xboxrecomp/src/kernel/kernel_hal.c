@@ -752,7 +752,26 @@ ULONGLONG __stdcall xbox_KeQueryInterruptTime(void)
  * ========================================================================= */
 #define XBOX_TSC_HZ 733333333ull
 
+/* A thread may be given a counter of its own (a port that records what the
+ * game's thread read and gives it back in a replay). Other threads, and this
+ * one once it passes NULL again, read the real one. */
+static __declspec(thread) uint64_t (*t_tsc_source)(void);
+
+void xbox_SetThreadTimeStampSource(uint64_t (*source)(void))
+{
+    t_tsc_source = source;
+}
+
+uint64_t xbox_ReadTimeStampCounterReal(void);
+
 uint64_t xbox_ReadTimeStampCounter(void)
+{
+    if (t_tsc_source)
+        return t_tsc_source();
+    return xbox_ReadTimeStampCounterReal();
+}
+
+uint64_t xbox_ReadTimeStampCounterReal(void)
 {
     static LARGE_INTEGER freq;
     static LARGE_INTEGER origin;

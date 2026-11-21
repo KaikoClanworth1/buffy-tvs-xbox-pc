@@ -20,6 +20,7 @@ pictures are in the main checkout's `port/runs/shots/` (`*_menu_*.png`).
 | **Report a Problem** (pause menu) | Verified in the first level: fourth line of the list under Quit, in the same font; A opens the report page, Send saves a report, B returns to the pause menu and the game; the line is gone while "Are you sure you want to QUIT?" is up. Its picture is the pause menu, not the game (see Open points) |
 | PC wording | Verified: the Start Game page says "Launch a New Game on this PC called", centred, with no block count and no picture of the console, and A still goes on to the difficulty page and the level; the game's message "Buffy The Vampire Slayer only allows 10 saved games. ..." without "your Xbox Hard Disk". The other nine reworded messages were written (log: 10 of 10) but not brought up |
 | Typing the report's details on a keyboard | Verified: `WM_CHAR` messages posted to the hidden window ("Hi 42!") appeared in Details and went into the report. Real key presses on a visible window: not checked |
+| Highlighted line without its black copy | Verified at 640x480 and 1920x1080 widescreen, on the game's own pages (main menu, Options, Display) and a PC page: one bright line on the glow, no dark copy. With `Menu Shadow: Original` (`BTVS_MENU_HIGHLIGHT_SHADOW=1`) the game's own look is back. The Graphics line itself was not pressed in a run (the value was set through the environment). In a level (pause menu): not looked at |
 | A real controller, a visible window | Not checked: every run was hidden and scripted |
 
 Faults found by these runs and fixed: Send Report froze the game (the report maker waited on the
@@ -138,7 +139,8 @@ value, A steps it forward or presses the line, B returns to the Options list (an
 
 - **Graphics**: Display Mode (`display.mode`), Resolution (`display.width/height`; Desktop,
   640×480 … 1600×1200, 1280×720 … 3840×2160), VSync, FPS Limit (30/60/90/120/144/165/240/Uncapped),
-  Picture (`display.widescreen`: Original 4:3 / Widescreen / Stretched), Overlay (`display.show_fps`).
+  Picture (`display.widescreen`: Original 4:3 / Widescreen / Stretched), Overlay (`display.show_fps`),
+  Menu Shadow (`menu.highlight_shadow`: Off / Original; see below).
 - **PC Audio**: Master / Music / Effects / Speech, 0–100 in steps of 5 (`audio.*`). The game's own
   Audio page (its three sliders) is untouched; these are the PC-side levels.
 - **PC Controls**: Sensitivity, Invert Look, Rumble (`controls.*`), Key Bindings, Reset Bindings.
@@ -170,6 +172,7 @@ classes are hooked where the game calls them through their vtables. **No regen i
 | `0x223230` | `TMenuOptions::OnLoad` | add the entries and the pool; open a pending page |
 | `0x2232E0` | `TMenuOptions::OnMessage` | a PC line was pressed |
 | `0x2233F0` | `TMenuOptions::OnCommand` | Left/Right/B/X while a page is open |
+| `0x218410` | `TBuffyManager::DrawString` | the highlighted line without its black copy |
 | `0x219480` | `TBuffyMenu::OnUpdate` | refresh an open page |
 | `0x222470`, `0x2226B0` | `TMenuMain::OnLoad`, `OnMessage` | Exit |
 | `0x223760`, `0x223A60`, `0x223D70` | `TMenuPause::OnLoad`, `OnMessage`, `OnUpdate` | Report a Problem with the list; `btvs_report_prepare()`; hidden in confirm-quit |
@@ -207,6 +210,23 @@ stand-ins through `/alternatename` until the real ones are linked.
   10 GB and more are shown without decimals.
 - The highlighted line has a dark double in every menu, the game's own lines too (Graphics' known fault).
 - No overlay fallback was needed (task step 4); nothing here uses `btvs_draw_text`.
+
+## The highlighted line's black copy
+
+The game itself draws the selected line of a menu twice. `GUI::TBuffyManager::DrawString`
+(`0x218410`), when the line is in its "selected" font and the manager's byte `+0x474` is set,
+draws every letter in black (alpha = the menu's fade) at the line's own place (`0x218783`), and
+then the same letter in the line's colour 5 units right and 5 up (`0x2187E1`, one letter late;
+5.0 is the float at `0x61BD10`). So the line "lifts" off a black copy of itself, over the purple
+glow. The port drew it exactly as asked (same size, 5 units apart at 640x480, 11 pixels at
+1920x1080), on the game's own pages as well as the PC pages: neither a renderer fault nor
+something the PC pages add. Whether an Xbox on a television shows it as plainly was not
+checked (no picture of the original was at hand).
+
+The owner asked for it to go, so by default the port draws the line once, at its own place:
+the hook clears `+0x474` and sets `+0x475` around the call, which sends the function down its
+single-draw branch (`0x2188EB`) and still keeps it out of the plain `TManager::DrawString`.
+**Graphics -> Menu Shadow: Original** (`[menu] highlight_shadow=1`) gives the game's own look.
 
 ## Settings store
 

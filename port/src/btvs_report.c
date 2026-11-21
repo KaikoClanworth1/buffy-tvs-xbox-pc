@@ -52,6 +52,8 @@ static long long file_size(const char *path);
 static char s_last[MAX_PATH];
 static char s_pending[MAX_PATH];
 static DWORD s_pending_tick;
+static volatile LONG s_game_shot;
+static DWORD s_game_shot_tick;
 
 static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
 {
@@ -64,6 +66,7 @@ static BOOL CALLBACK init_once(PINIT_ONCE o, PVOID p, PVOID *c)
  * it (2 s at most: a frozen game shows no next frame, and the report must
  * still be made). */
 static int file_exists(const char *path);
+
 static int take_screenshot(const char *path)
 {
     int before = btvs_screenshot_count(), i;
@@ -382,16 +385,16 @@ static int copy_sessions(const char *from_save, const char *to_save)
     WIN32_FIND_DATAA fd;
     HANDLE h;
     int n = 0;
-    sprintf_s(pat, MAX_PATH, "%s\Cache\*.ses", from_save);
+    sprintf_s(pat, MAX_PATH, "%s\\Cache\\*.ses", from_save);
     h = FindFirstFileA(pat, &fd);
     if (h == INVALID_HANDLE_VALUE)
         return 0;
     CreateDirectoryA(to_save, NULL);
-    sprintf_s(b, MAX_PATH, "%s\Cache", to_save);
+    sprintf_s(b, MAX_PATH, "%s\\Cache", to_save);
     CreateDirectoryA(b, NULL);
     do {
-        sprintf_s(a, MAX_PATH, "%s\Cache\%s", from_save, fd.cFileName);
-        sprintf_s(b, MAX_PATH, "%s\Cache\%s", to_save, fd.cFileName);
+        sprintf_s(a, MAX_PATH, "%s\\Cache\\%s", from_save, fd.cFileName);
+        sprintf_s(b, MAX_PATH, "%s\\Cache\\%s", to_save, fd.cFileName);
         if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && CopyFileA(a, b, FALSE))
             n++;
     } while (FindNextFileA(h, &fd));
@@ -456,6 +459,9 @@ int btvs_report_make(const char *player_text, const char *trigger)
     FILE *f;
     unsigned long long save_bytes = 0;
     int have_shot = 0, have_input, input_complete, have_settings, have_launch, save_files, crashes, i, files;
+    int have_frames = 0;
+    unsigned exact_frames = 0;
+    float exact_pos[3] = { 0 };
     long long input_bytes;
     double t0 = btvs_uptime();
 
@@ -477,8 +483,16 @@ int btvs_report_make(const char *player_text, const char *trigger)
     /* The picture first: the one from before the menu opened if there is one
      * (10 minutes at most), else what is on screen now. */
     sprintf_s(path, MAX_PATH, "%s\\screenshot.png", dir);
-    if (s_pending[0] && GetTickCount() - s_pending_tick < 600000 && MoveFileExA(s_pending, path, MOVEFILE_REPLACE_EXISTING))
+    if (s_game_shot && !btvs_game_paused()) {
+        s_game_shot = 0;                /* the picture kept for a pause that is over */
+        s_pending[0] = 0;
+    }
+    if (s_pending[0] && GetTickCount() - s_pending_tick < 600000 && MoveFileExA(s_pending, path, MOVEFILE_REPLACE_EXISTING)) {
         have_shot = 1;
+        if (s_game_shot)
+            btvs_log("report", "picture: the last frame of play before the pause menu opened");
+        s_game_shot = 0;
+    }
     else
         have_shot = take_screenshot(path);
     s_pending[0] = 0;
@@ -507,6 +521,13 @@ int btvs_report_make(const char *player_text, const char *trigger)
     input_bytes = have_input ? file_size(path) : 0;
     if (input_bytes <= 0)
         have_input = 0;
+
+    /* The frame recording (clock, pad samples, random state since the level
+     * came up): what lets a replay land on the same spot every time. */
+    sprintf_s(path, MAX_PATH, "%s\\frames.rec", dir);
+    have_frames = btvs_exact_snapshot(path, &exact_frames, exact_pos);
+    if (!have_frames)
+        DeleteFileA(path);
 
     btvs_settings_save();
     have_settings = copy_into(dir, btvs_settings_path(), "settings.ini");
@@ -577,6 +598,9 @@ int btvs_report_make(const char *player_text, const char *trigger)
                 fprintf(f, "player_health=%.9g\n", hp);
             }
         }
+        if (have_frames)
+            fprintf(f, "frames=frames.rec\nexact_frames=%u\nexact_pos=%.9g %.9g %.9g\n", exact_frames, exact_pos[0],
+                    exact_pos[1], exact_pos[2]);
         fclose(f);
     }
 
@@ -600,9 +624,10 @@ int btvs_report_make(const char *player_text, const char *trigger)
         fprintf(f, "== The last things that happened (the trail; all of it: btvs_trail.txt)\n%s\n", tail);
         fprintf(f, "== System\n%s\n", sys);
         fprintf(f, "== Memory\n%s\n", memtext);
-        fprintf(f, "== In this report\nscreenshot: %s\ninput recording: %s\nsettings: %s\nsave: %d files, %llu KB\n"
+        fprintf(f, "== In this report\nscreenshot: %s\ninput recording: %s\nframe recording: %s (%u frames)\nsettings: %s\nsave: %d files, %llu KB\n"
                    "crash / hang reports: %d\n\n",
                 have_shot ? "yes" : "no (the game could not give one)", have_input ? "yes" : "no",
+                have_frames ? "yes" : "no (made in a menu, or BTVS_EXACT=0)", exact_frames,
                 have_settings ? "yes" : "no (defaults: no btvs_settings.ini)", save_files, save_bytes / 1024,
                 crashes);
         fprintf(f, "== Where the game thread is\n");
@@ -693,7 +718,7 @@ int btvs_report_create(const char *player_text)
 {
     /* A replay of a report made from the pause menu plays the player's way to
      * "Report a Problem" again: that must not make a report of its own. */
-    if (btvs_replay_active() && btvs_input_playback_active()) {
+    if (btvs_replay_active() && (btvs_input_playback_active() || btvs_exact_replay_state() == 2)) {
         btvs_log("report", "not made: this is the replay arriving at the report it replays");
         return 0;
     }
@@ -703,19 +728,16 @@ int btvs_report_create(const char *player_text)
 const char *btvs_report_last_path(void) { return s_last; }
 
 /* The picture of the game itself for a report made from the pause menu: asked
- * for on the game thread at the moment the game asks for its pause menu (the
- * trail's SetMenu hook), so the next frame shown, still the game, is kept.
- * Never waits. btvs_report_prepare() then leaves that picture alone until the
- * game is left paused no more (btvs_report_game_snap_clear). */
-static volatile LONG s_game_shot;
-static DWORD s_game_shot_tick;
-
+ * for when a Start press made in play is about to reach the game (the frame
+ * recorder holds the press back one frame for it, btvs_report_exact.c), so
+ * the next frame shown, still the game, is kept. Never waits. While the game
+ * stays paused, reports use that picture; btvs_report_prepare() leaves it. */
 void btvs_report_game_snap(void)
 {
     char path[MAX_PATH];
-    sprintf_s(path, MAX_PATH, "%s\reports", btvs_exe_dir());
+    sprintf_s(path, MAX_PATH, "%s\\reports", btvs_exe_dir());
     CreateDirectoryA(path, NULL);
-    strcat_s(path, MAX_PATH, "\pending.png");
+    strcat_s(path, MAX_PATH, "\\pending.png");
     DeleteFileA(path);
     if (btvs_screenshot(path)) {
         strcpy_s(s_pending, MAX_PATH, path);
@@ -730,8 +752,10 @@ void btvs_report_prepare(void)
 {
     char path[MAX_PATH];
     InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
-    if (s_game_shot && GetTickCount() - s_game_shot_tick < 600000)
+    if (s_game_shot && GetTickCount() - s_game_shot_tick < 600000 && btvs_game_paused())
         return;                         /* the game's picture from before the pause menu is waiting */
+    if (btvs_game_paused())
+        return;                         /* paused with no such picture: only the menu could be taken; the report takes what there is */
     sprintf_s(path, MAX_PATH, "%s\\reports", btvs_exe_dir());
     CreateDirectoryA(path, NULL);
     strcat_s(path, MAX_PATH, "\\pending.png");

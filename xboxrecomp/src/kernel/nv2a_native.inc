@@ -69,7 +69,7 @@ enum {
     NTS_ADDRESSU = 0, NTS_ADDRESSV = 1, NTS_ADDRESSW = 2, NTS_MAGFILTER = 3, NTS_MINFILTER = 4,
     NTS_MIPFILTER = 5, NTS_COLOROP = 12, NTS_COLORARG0 = 13, NTS_COLORARG1 = 14, NTS_COLORARG2 = 15,
     NTS_ALPHAOP = 16, NTS_ALPHAARG0 = 17, NTS_ALPHAARG1 = 18, NTS_ALPHAARG2 = 19, NTS_RESULTARG = 20,
-    NTS_BORDERCOLOR = 29
+    NTS_TEXCOORDINDEX = 28, NTS_BORDERCOLOR = 29
 };
 
 typedef struct {
@@ -356,11 +356,19 @@ static GpuShader *nvs_passthrough(void)
  * through the matrix the title's port put in constant slots 188..191 (its
  * four columns: world * view * projection, the viewport folded in), colours
  * and texture coordinates as they are. No lighting, no texture transforms. */
-static GpuShader *s_nfix_vs;
+static GpuShader *s_nfix_vs[256];
 
-static GpuShader *nvs_fixed(void)
+/* `tss`: the texture stages. Each stage takes the texture coordinate set its
+ * D3DTSS_TEXCOORDINDEX names (a light-map pass draws the second set through
+ * stage 0), not the set with its own number. */
+static GpuShader *nvs_fixed(const uint32_t *tss)
 {
-    if (!s_nfix_vs) {
+    uint32_t key = 0, st;
+    if (nenv("BUFFY_NATIVE_NO_TEXCOORDINDEX"))   /* (testing: as it was before) */
+        tss = NULL;
+    for (st = 0; st < 4; st++)
+        key |= ((tss ? tss[st * 32 + NTS_TEXCOORDINDEX] : st) & 3u) << (st * 2);
+    if (!s_nfix_vs[key]) {
         static char src[4096];
         sprintf_s(src, sizeof src, "%s"
             "P vs(VI I) {\n"
@@ -368,12 +376,12 @@ static GpuShader *nvs_fixed(void)
             "  p.p = float4(dot(v, c[188]), dot(v, c[189]), dot(v, c[190]), dot(v, c[191]));\n"
             "  p.p.x *= vpp[3].z; p.p.y *= vpp[3].x;\n"
             "  p.c0 = saturate(I.v[3]); p.c1 = saturate(I.v[4]);\n"
-            "  p.t0 = I.v[9]; p.t1 = I.v[10]; p.t2 = I.v[11]; p.t3 = I.v[12];\n"
+            "  p.t0 = I.v[%u]; p.t1 = I.v[%u]; p.t2 = I.v[%u]; p.t3 = I.v[%u];\n"
             "  p.fog = float4(1, 0, 0, 1);\n"
-            "  return p; }\n", s_vsh_head);
-        s_nfix_vs = nvs_compile(src);
+            "  return p; }\n", s_vsh_head, 9 + (key & 3), 9 + (key >> 2 & 3), 9 + (key >> 4 & 3), 9 + (key >> 6 & 3));
+        s_nfix_vs[key] = nvs_compile(src);
     }
-    return s_nfix_vs;
+    return s_nfix_vs[key];
 }
 
 /* ── pixel shaders: fixed function (texture stages) ── */
@@ -440,6 +448,10 @@ static void nff_op(Sb *b, uint32_t op, uint32_t a0, uint32_t a1, uint32_t a2, in
     case 22: sb_add(b, "r = saturate(dot(A.rgb - 0.5, B.rgb - 0.5) * 4.0).xxxx;"); break;  /* DOTPRODUCT3 */
     case 23: sb_add(b, "r = Z + A * B;"); break;                          /* MULTIPLYADD */
     case 24: sb_add(b, "r = lerp(B, A, Z);"); break;                      /* LERP */
+    case 25: case 26:                                                     /* BUMPENVMAP(LUMINANCE): this stage's texture
+                                                                           * shifts the next stage's coordinates (not done);
+                                                                           * its own result is what came in */
+        sb_add(b, st ? "r = cur;" : "r = i.c0;"); break;
     default: sb_add(b, "r = A;"); break;
     }
     sb_add(b, "\n    %s = saturate(r)%s; }\n", alpha ? "res.a" : "res.rgb", alpha ? ".a" : ".rgb");
@@ -1710,7 +1722,7 @@ static int nv2a_native_draw_one(const NativeDraw *d, GpuTexture *rt, GpuTexture 
         try_gpu = idx && !nenv("BUFFY_NATIVE_CPUVB") && nvb_supported(d, &mask) && !(d->passthrough && mask);
         gpu_mask = try_gpu ? mask : 0;
     }
-    vs = d->passthrough == 2 ? nvs_fixed() : d->passthrough ? nvs_passthrough() : nvs_program(d->vp_start, &uses_viewport, gpu_mask);
+    vs = d->passthrough == 2 ? nvs_fixed(d->tss) : d->passthrough ? nvs_passthrough() : nvs_program(d->vp_start, &uses_viewport, gpu_mask);
     if (!vs || !s_nlayout) { s_nstat[1]++; return 0; }
 
     /* the inputs: the game's own buffers on the GPU (indexed draws), else

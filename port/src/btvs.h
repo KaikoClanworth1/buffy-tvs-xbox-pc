@@ -31,6 +31,14 @@ int   btvs_screenshot(const char *path);
 int   btvs_screenshot_count(void);
 int   btvs_gpu_info(struct btvs_gpu_info *out);
 float btvs_fps(void);
+/* Brightness: the game's own setting (its Options -> Display slider, the
+ * console variable "gamma"), which the renderer applies to every frame shown.
+ * A slider position 0..100: 50 is the picture as the game draws it, higher is
+ * brighter (75 and above are the same: the game's limit), lower darker. The
+ * game keeps it in its own saved settings. btvs_brightness: -1 before the
+ * game has its options. Game thread. */
+int   btvs_brightness(void);
+void  btvs_brightness_set(int slider);
 /* btvs_quit: the way out (the menu's Exit; the window's close button calls it
  * too). Saves the settings, calls what btvs_on_quit registered (newest first,
  * up to 8), ends the process. Any thread.

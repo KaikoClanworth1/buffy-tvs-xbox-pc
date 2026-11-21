@@ -1186,7 +1186,8 @@ static BOOL start_game(const WCHAR *dir, PROCESS_INFORMATION *pi)
         if (hout == INVALID_HANDLE_VALUE)       /* a folder that cannot be written: nowhere, but still real handles */
             hout = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
         hin = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
-        if (hout != INVALID_HANDLE_VALUE && hin != INVALID_HANDLE_VALUE) {
+        if (hout != INVALID_HANDLE_VALUE && hin != INVALID_HANDLE_VALUE
+                && !_wgetenv(L"BTVS_LAUNCHER_NO_CONSOLE")) {    /* (testing: start it as Explorer would) */
             si.dwFlags = STARTF_USESTDHANDLES;
             si.hStdInput = hin;
             si.hStdOutput = hout;

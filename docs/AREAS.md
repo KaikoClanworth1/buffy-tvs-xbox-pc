@@ -46,6 +46,39 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 (Add a line here when you need something from another area.)
 
+- **Extras → Graphics (21 Nov, from the owner's first play: "i dont like the app 'restartes' when starting
+  the game"): one window from Play to gameplay.** What the owner sees is the game's restart into a level
+  (`btvs_boot_restart.c`): the menus and the level are two processes, and each makes and loses its own
+  window, so between them the window closes, the desktop (and the launcher behind it) shows, and a new
+  window opens that may not get the focus. Evidence, hidden run of `GAME/` at `2e73139` through the
+  launcher (title -> Start Game -> difficulty -> level 1): three processes, launcher aside --
+  supervisor pid 38468; `started 2026-11-21 11:02:48, pid 24304` (run=1, menus, `save why=leaving the
+  menus` at 11.2 s); `[boot] the game restarts itself (run 2)`; `started 2026-11-21 11:02:59, pid 31096`
+  (`BTVS_RESTARTS=1`, `level_loaded name=m00_spanishmission_1` at 32.1 s). The same happens at every level
+  change and on the way back to the menu. It is not the launcher (it starts one process and stays as it
+  is) and not a window remade inside one process (`nv2a_pb_d3d11.inc` makes the window once in
+  `gpu_startup` and never destroys it; the two `CreateDevice` lines per run reuse it).
+  **Asked for:** the window belongs to the process that lives for the whole session. Suggested shape: the
+  supervisor makes the one top-level window (title, icon, mode and size from the settings), pumps its
+  messages while it waits for the child (`MsgWaitForMultipleObjects`), and hands its handle to each child
+  in the environment; the runtime then makes its window as a child window filling it (`WS_CHILD`, parent
+  = that handle) instead of a top-level one, so the swap chain, the window procedure and the input stay
+  in the game process. Between two children the top-level window stays up, black or with a "Loading"
+  picture, and keeps the focus. Closing it ends the child; Alt+Enter / F11 and the display settings resize
+  the top-level window. Hidden test runs and `BTVS_NO_SUPERVISOR=1` stay as they are. Showing the next
+  window before the old one goes is not an option while `install.dat` and `dsstdfx.bin` are opened
+  unshared. Please also log each window creation (`[gfx] window ...` with the handle and the process),
+  so a log can show one window for a session; today nothing in the log says a window was made.
+- **Graphics → Menu (21 Nov): a Brightness line on the PC Graphics page.** The game's own brightness
+  (its Options -> Display slider) works now: the renderer applies the gamma ramp the game sets
+  (`docs/graphics.md`, "Brightness"). The levels are dark at the game's default (slider 50) because that is
+  how the game draws them; the owner should be able to raise it without finding the game's Display page.
+  `btvs.h`: `int btvs_brightness(void)` (0..100, 50 the default, -1 before the game has its options) and
+  `void btvs_brightness_set(int)`, both on the game thread; 75 and above look the same (the game's limit).
+  The game saves the value with its own settings (`vars.cfg`), so no `.ini` key is needed unless a
+  different default is wanted: that is the owner's choice, by eye (frames at 50 and 70 are in
+  `port/runs/shots/`, `1058_*`).
+
 - **Menu → Graphics (runtime)**: two test games at once collide on the disc's files. The game opens
   `install.dat` and `Sound\dsstdfx.bin` with no sharing (`kernel_file.c` passes the game's share mode
   on), so the second game gets a sharing violation and stops on "There's a problem with the disc". Seen
@@ -61,6 +94,15 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 - **Menu → whoever owns `game_files/`**: test runs before 09e1647 left 10 saved games in the main
   checkout's `game_files/UDATA/45410012` (the game's limit; Start Game answered "only allows 10 saved games").
   Since 09e1647 saves go to each build's save folder, so runs are no longer affected; the folders are still there.
+- **Menu → Graphics**: lines of a menu that are not selected are striped above 640x480. At 1920x1080
+  every other row or so of each letter is missing (main menu "Options", the Options list, PC pages; frames
+  `port/runs/shots/*_menu3_1080_*.png`); at 640x480 the same lines are solid. The selected line is solid
+  at both sizes. The draw: `GUI::TBuffyManager::DrawString` (`0x218410`) draws an unselected letter at
+  `0x2186A1..0x2186EA` through the render interface (`Interface::GetGameInterface()->[+0x4C]`), method
+  `[vtable+0x28]`, with one argument more than the selected line's method `[vtable+0x24]`: the manager's
+  `+0x68` (pushed first), then the letter's four texture coordinates, 1, 0, the colour (4 floats), the
+  font's texture and the two corners. Likely that method draws the letter in strips one 640x480 row high
+  (a wave or shimmer) and they do not fill their height at a larger picture.
 - **Menu → Controls**: let a binding capture be driven in a hidden run. `capture_step()` returns while the
   window is not in front and reads only the real keyboard, so a pad script's `K:<key>` (or a scripted
   pad button for the controller slot) is never taken: the capture ends after 8 s with nothing bound.
@@ -127,20 +169,14 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   `[INPUT] game: menu id N` / `level running` lines in the first runs' `.err` and tell Controls if
   they do not match what is on screen.
 
-- **Extras → Logs / Audio / Graphics (a player's first start fails)**: started with **no stdout/stderr at
-  all** (how Explorer's double-click and a plain `CreateProcess` start a window program; every `run.sh` run
-  has them redirected, so no test run sees this) the game **ends itself about a second into the boot,
-  exit code `0xC0000409`** (the C runtime's fast-fail). Seen twice on 21 Nov, both times the same: the last
-  log line is `[boot] logo movies (install asked: 0)`, the last `xbox_kernel.log` line the failed open of
-  `Cache\Sound\dsstdfx.bin` (err=80), i.e. just before `[audio] DirectSound replaced...` would be printed,
-  and none of the runtime's `fprintf(stderr)` lines are in `btvs_log.txt` (so `btvs_log.c`'s `freopen_s` of
-  stderr onto the log does not take in that case). Suspects: `dlog()` in `btvs_audio_dsound.c` /
-  `btvs_audio.c` (`fputs`/`vfprintf`/`fflush` on that stderr), or whatever else first touches it there.
-  To reproduce hidden: `BTVS_NO_WINDOW=1 BTVS_MUTE=1 BTVS_AFFINITY=FF00 BTVS_EXIT_AFTER=30` and start the
-  exe from a program that passes no handles (not from bash with `>`/`2>`). **Workaround in the launcher**
-  (done): Play gives the game `btvs_console.txt` in the game folder as stdout and stderr, and with that it
-  runs. A double-click on `buffy_tvs.exe` itself still fails until the game is fixed; when it is, say so
-  and Extras drops the note from the Read Me. Details: `docs/install.md`, "Play".
+- **Extras → Logs / Audio / Graphics (a player's first start failed; settled 21 Nov 03:25)**: started with
+  no stdout/stderr (a double-click), builds up to 02:17 ended themselves a second into the boot with
+  `0xC0000409`, at Audio's first write to `stderr`. Gone since Audio's lines go to the game log (`dae87b9`).
+  `port/src/btvs_console.c` (first call in `WinMain`) now gives a console-less process `btvs_console.txt`
+  as stdout/stderr and logs a call stack when the C runtime ends the process silently. **Everyone**: write
+  through `btvs_log`, not `fputs`/`fprintf(stderr)`; a test run cannot show this fault because `run.sh`
+  redirects both. To test as a player starts it: `"GAME/Buffy Launcher.exe" --play` with
+  `BTVS_LAUNCHER_NO_CONSOLE=1` and the usual test variables. Details: `docs/install.md`.
 - **Extras → Logs** (save folder name, was asked of Graphics): the owner's rule is saves in `SaveData\`
   beside the exe; the game uses `XboxData\` (`btvs_log.c`, `btvs_save_dir()`). The launcher, deploy and the
   Read Me now say `XboxData\`. If it is renamed, tell Extras (one constant, `SAVE_DIR`, and the docs).
@@ -343,3 +379,26 @@ the disc-file sharing are as they were.*
   `recomp_manual.c` gained one lookup (`btvs_audio_lookup`, the music decoder's file-read callback).
 - **Audio -> Menu**: master, music and effects from the PC Audio page were seen applied live in the
   dump. Movie sound follows the Music slider (it is a stream); say if it should be its own.
+
+**From Logs, 21 Nov 10:40 (frame recording; affects everyone a little):**
+
+- **Everyone**: from the first frame after a level has loaded, the **game thread reads a clock of its own**
+  (`btvs_report_exact.c`; toolkit: `xbox_SetThreadTimeStampSource` in `kernel_hal.c`, small): the real
+  counter taken once at the start of each frame, plus one tick per read inside the frame. Frame steps are the
+  real ones (game speed unchanged, 60 fps kept in Logs' runs); what changes is that time does not pass
+  *inside* a frame for the game's code. This is what makes a report's replay exact (`docs/logs.md`, "The frame
+  recording"). `BTVS_EXACT=0` turns it off: please try it first if something in a level misbehaves that did
+  not before. Other threads are untouched. **Rebuild after pulling** (kernel library changed).
+- **Logs -> Controls** (FYI, your files untouched): the determinism question is answered: clock (the cycle
+  counter, also read inside frames), pad samples per frame (`TIF_Input::Poll` is hooked; during a
+  `BTVS_REPLAY_INPUT=1` replay of a report with `frames.rec` the game gathers no samples of its own, so
+  scripts, real pads and `btvs_input_playback` do nothing until the replay is over), random state. A walk
+  now comes back bit for bit. One thing that touches play: **a Start press made in a level reaches the game
+  one frame late** (the frame in between is kept as the picture for a report from the pause menu).
+- **Logs -> Menu / Graphics**: the "last frame shown" request is no longer needed for the pause-menu
+  report: its picture is now the last frame of play (the pause menu is its own scene with the camera moved
+  away, so no later frame could show the game). Menu's `btvs_report_prepare()` call can stay; it does nothing
+  while the game is paused.
+- **Logs -> Audio** (question, no hurry): in replays the game thread drew its random numbers in a different
+  frame than when recorded, from about 22 s into the first level, in some runs only. Is anything of yours
+  called back on the game thread at a time set by the sound device (a buffer ending, a stream position)?

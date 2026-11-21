@@ -32,7 +32,7 @@ controller) through the game's own frame dumps, sound dumps and logs. Each area'
 | Options in the game's own menus: Graphics, PC Audio, PC Controls, Memory, Exit | Checked hidden ([docs/menu.md](docs/menu.md)) |
 | Report a Problem (Options and pause menu; F12) | Checked hidden: saves a report with picture, log, what you did, settings, input recording ([docs/logs.md](docs/logs.md)) |
 | Memory view (RAM, VRAM, the game's heap) | Checked hidden |
-| Starting `buffy_tvs.exe` by itself (not through the launcher) | **Faulty**: it ends itself a second after starting. Start the game with the launcher's Play |
+| Starting `buffy_tvs.exe` by itself (not through the launcher) | Works (checked hidden); it ended itself a second after starting in builds before 21 Nov 03:25 ([docs/install.md](docs/install.md)) |
 | Update check, icons for the exes in Explorer | Planned |
 
 ## What you need
@@ -56,8 +56,6 @@ controller) through the game's own frame dumps, sound dumps and logs. Each area'
 
 Next time the launcher opens straight on Play. Your saved games live in `XboxData\HardDisk\` in
 the game folder; installing again or updating never touches `XboxData\` or your settings.
-
-Always start the game with the launcher's **Play** (see the table above).
 
 ## Settings and controls
 

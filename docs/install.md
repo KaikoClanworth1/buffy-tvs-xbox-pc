@@ -29,7 +29,7 @@ A game folder is:
                                                     settings), Cache\ (its 105 MB install); never touched by install
   btvs_log*.txt, btvs_trail*.txt, btvs_input.rec,   written by the game (Logs); never touched by install
   reports\, crashes\, replay\, ShaderCache\, xbox_kernel.log
-  btvs_console.txt                                  the game's stdout and stderr, new at each Play (see "Play")
+  btvs_console.txt                                  the game's stdout and stderr, new at each start
 ```
 
 - **Saves**: the owner's rule was `SaveData\` beside the exe; the game as built keeps its hard disk in
@@ -105,15 +105,38 @@ After a regen from a different `Default.xbe`, put the printed values in `btvs_re
 ## Play
 
 The Play button (and `--play`) starts `<game folder>\buffy_tvs.exe` with the game folder as its working
-directory and waits for it; a non-zero exit code is shown with where to look.
+directory and waits for it; a non-zero exit code is shown with where to look. The launcher gives the game
+`btvs_console.txt` in the game folder as its stdout and stderr (new at each start).
 
-**The game is given a real stdout and stderr**: `btvs_console.txt` in the game folder, made new at each
-start. This is a workaround for a fault found on 21 Nov: started with no standard handles at all, which is
-how Explorer and a plain `CreateProcess` start a window program, the game ends itself about a second into
-the boot with exit code `0xC0000409`, at the point where sound starts ("logo movies" is the last log line;
-nothing the runtime prints reaches `btvs_log.txt` in such a run). Seen twice through the launcher before
-the workaround, never in runs with stdout/stderr redirected. So **a double-click on `buffy_tvs.exe` itself
-is expected to fail** until that is fixed in the game (asked of Logs / Audio in `docs/AREAS.md`).
+## Starting buffy_tvs.exe directly
+
+A double-click on `buffy_tvs.exe` works as of the 21 Nov 03:25 build (checked hidden, below). The launcher
+is still the way players are told to start it.
+
+**What was wrong.** A window program started by Explorer (or by a plain `CreateProcess`) has no stdout or
+stderr at all. The build of 21 Nov 02:17 and earlier ended itself about a second into the boot with exit
+code `0xC0000409` when started that way: the last log line was `[boot] logo movies`, and the next thing
+due was the first line of Audio's own log function, which wrote straight to `stderr`
+(`fputs` / `vfprintf` / `fputc` / `fflush(stderr)` in `btvs_audio_dsound.c` and `btvs_audio.c`). Code
+`0xC0000409` with no exception is how the C runtime ends a process it considers broken (an invalid
+argument to a library function, or `abort()`); it does not pass through the crash handler, so nothing was
+written. Every test run has stdout/stderr redirected to files, which is why no test run ever saw it.
+Seen twice, both identical. **Which runtime call gave up was not pinned down**: before a diagnostic build
+could catch it, Audio moved its log lines to the game log (`dae87b9`), and from that build on the exit no
+longer happens with no console at all (checked with the workarounds below switched off). So the cause is
+inferred from where it stopped and from the fault being gone after that change; other fixes landed on main
+in the same hour and no call stack was captured, so it is the likely cause, not a proven one.
+
+**What is in place now** (`port/src/btvs_console.c`, called first in `WinMain`):
+
+- If the process has no usable stdout/stderr, both are pointed at `btvs_console.txt` beside the exe
+  (written new by the process the player starts, appended by the game processes it starts for each
+  level). The runtime's own `fprintf(stderr)` lines (file opens, heap, kernel calls), which never reached
+  `btvs_log.txt` in a double-clicked run, are kept there. Handles given by the starter are left alone.
+- The C runtime's invalid-argument handler and `abort()` now write a `[crash]` line and the call stack to
+  `btvs_log.txt` before the process ends, so a silent `0xC0000409` cannot leave an empty log again.
+- Testing switches: `BTVS_LAUNCHER_NO_CONSOLE=1` makes the launcher start the game with no handles, as
+  Explorer does; `BTVS_NO_CONSOLE_FILE=1` makes the game leave them missing.
 
 ## The launcher without a window
 
@@ -154,6 +177,43 @@ For tests and scripts. Nothing is shown and no focus is taken.
   and header use the game's own title image from the installed `Default.xbe`; no art is built in.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
+
+## What was checked on 21 Nov 2026, 11:00 build (main at 2e73139)
+
+`GAME/buffy_tvs.exe`: **commit `2e73139d93`, built Nov 21 2026 11:00:10** (`btvs_log.txt` line 1). No regen
+was needed (same 90 hooks as the library; recompiler unchanged since it was generated). No game was running
+from `GAME/` at deploy time; `btvs_settings.ini` is byte-identical before and after, and there were no saves.
+Hidden, muted, CPUs 8-15, self-exit after 120 s, scripted Start button, no `BTVS_GAME_DIR`:
+
+- **Through the launcher's Play path** (`--play` from another folder): title 9.3 s, **main menu 10.4 s**,
+  Start Game, difficulty, restart, **`m00_spanishmission_1` loaded at 25.7 s** of the second process,
+  positions logged in play, exit code 0.
+- **Started with no console** (`BTVS_LAUNCHER_NO_CONSOLE=1`): the game made its own `btvs_console.txt`
+  (191 KB), title 4.6 s, **main menu 5.7 s**, **level loaded at 32.1 s** of the second process, exit code 0.
+
+The runs' saves and logs were removed from `GAME/` afterwards. New in this build: the game leaves
+`btvs_frames.rec` and its own `Bug_<level>.Log` beside the exe.
+
+## What was checked on 21 Nov 2026, 03:25 build (main at 6840c83 plus this change; direct start)
+
+Same rules: hidden, muted, CPUs 8-15, self-exit, no `BTVS_GAME_DIR`, from `GAME/` in the main checkout.
+
+- **No regen was needed**: `port/src/manual_functions.json` (90 entries) is the list the main checkout's
+  library was generated from (`recomp/gen/manual_functions.applied.json`), and the library (20 Nov 23:09)
+  is newer than the last change to the recompiler (23:00).
+- **Started with no console and both workarounds off** (`BTVS_LAUNCHER_NO_CONSOLE=1
+  BTVS_NO_CONSOLE_FILE=1`, 25 s): title at 4.7 s, exit code 0, and `btvs_console.txt` stayed empty (so there really were no handles). The old exit is gone.
+- **Started with no console, as a double-click does** (`BTVS_LAUNCHER_NO_CONSOLE=1`, scripted Start button,
+  90 s): the game made its own `btvs_console.txt` (182 KB, the runtime's lines in it), title 4.2 s, **main
+  menu 5.3 s**, Start Game, difficulty, restart, **first level `m00_spanishmission_1` loaded at 34.1 s** of
+  the second process, positions logged in play, exit code 0.
+- **The final deployed build** (`btvs_log.txt` line 1: commit `f7488c3345`, built Nov 21 2026 03:28:59)
+  through the normal Play path (`--play`, scripted Start button, 90 s): title 4.6 s, main menu 5.7 s, Start
+  Game, difficulty, restart, first level loaded 45 s into the second process, exit code 0. The three saved
+  games the test runs made were removed from `GAME\XboxData\HardDisk` afterwards.
+
+Not checked: a real double-click in Explorer (it would show the window); the `[crash]` call-stack lines
+of `btvs_console.c` (nothing has triggered them).
 
 ## What was checked on 21 Nov 2026 (the game boots: Play made real)
 
@@ -196,8 +256,7 @@ Not checked on 21 Nov, in addition to the list at the end:
   say, not something seen.
 - **The Play button itself** (the click, the "game is running" state, the message after a failed run):
   `--play` runs the same `start_game()` but not the window code around it.
-- **A double-click on `buffy_tvs.exe`**: expected to fail (see "Play"); not tried, since it would show a
-  window.
+- **A double-click on `buffy_tvs.exe`**: failed in this build; fixed and checked in the 03:25 build (above).
 - The scratch folder `D:\_btvs_install_test` could not be deleted by the session (the tool refused the
   removal) and was left for the owner to delete.
 

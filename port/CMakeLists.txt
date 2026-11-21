@@ -76,6 +76,7 @@ set(GAME_SOURCES
     src/btvs_audio_dsound.c
     src/btvs_wma.c
     src/btvs_xbecheck.c
+    src/btvs_console.c
     # Logs: the log, crash/hang reports, the trail, Report a Problem, memory statistics
     src/btvs_log.c
     src/btvs_trail.c
@@ -83,6 +84,7 @@ set(GAME_SOURCES
     src/btvs_report.c
     src/btvs_report_crash.c
     src/btvs_report_replay.c
+    src/btvs_report_exact.c
 )
 # Graphics area. Its files hook functions named in src/manual_functions.json,
 # so they join the build once the generated code has those hooks (after the

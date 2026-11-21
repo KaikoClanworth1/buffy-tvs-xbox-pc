@@ -65,6 +65,26 @@ int btvs_supervise(int *exit_code)
         if (mask && SetProcessAffinityMask(GetCurrentProcess(), mask))
             SetPriorityClass(GetCurrentProcess(), BELOW_NORMAL_PRIORITY_CLASS);
     }
+    {   /* BTVS_MAP=<map> (testing): the game starts as if it had launched
+         * itself for that map -- the launch data it would have written, with
+         * its own "map:" option -- instead of at the logos and menus.
+         * BTVS_MAP_OPTIONS adds more of the game's options ("cheats:1"). */
+        const char *map = getenv("BTVS_MAP"), *more = getenv("BTVS_MAP_OPTIONS");
+        if (map && *map) {
+            static unsigned char page[0x1000];
+            FILE *f = NULL;
+            memset(page, 0, sizeof page);
+            *(unsigned *)(page + 4) = 0x45410012u;                       /* type 0: launched by a title; its id */
+            strcpy_s((char *)page + 8, 520, "\\Device\\CdRom0;default.xbe");
+            sprintf_s((char *)page + 0x400, 0xC00, "root:Z:\\ rpecopy:d:\\ controller:0 memoryunit:0 pack:2 map:%s%s%s",
+                      map, more && *more ? " " : "", more && *more ? more : "");
+            if (!fopen_s(&f, launch, "wb") && f) {
+                fwrite(page, 1, sizeof page, f);
+                fclose(f);
+                have_launch = 1;
+            }
+        }
+    }
     SetEnvironmentVariableA("BTVS_CHILD", "1");
     SetEnvironmentVariableA("RECOMP_RELAUNCH_FILE", next);
 
