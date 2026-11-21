@@ -9,16 +9,26 @@
 # layer's objects, and LLVM in C:\Program Files\LLVM. Everything it makes goes
 # to <work folder>; <work folder>/run then holds buffy_tvs.exe + btvs_game.dll.
 # Builds on CPUs 12-15 at low priority (tools/limit.sh), like build.sh.
+#
+#   BTVS_GAMEDLL_OPT=-O2        the optimisation of the translated code (default -O2)
+#   BTVS_GAMEDLL_MEMOFF=import  the memory offset read from the exe through an import
+#                               (default "own": the DLL's own copy, see game_dll.c)
+#
+# The translated code is compiled with the port's own few headers
+# (tools/gamedll/include) and the compiler's: no Microsoft header (-nostdlibinc).
 set -euo pipefail
 source "$(dirname "$0")/../env.sh"
-HERE="$(cd "$(dirname "$0")" && pwd)"
+HERE="$(cd "$(dirname "$0")" && pwd -W)"
 OUT="$(mkdir -p "$1" && cd "$1" && pwd -W)"
 LLVM="${BTVS_LLVM:-C:/Program Files/LLVM/bin}"
 GEN="$BTVS_MAIN/port/src/recomp/gen"
 [ -f "$GEN/recomp_funcs.h" ] || GEN="$PORT/src/recomp/gen"
 VCB="$(ls -d "C:/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Tools/MSVC/"*/ | tail -1)"
 KIT="$(ls -d "C:/Program Files (x86)/Windows Kits/10/Lib/"*/ | head -1)"
-OPT="${BTVS_GAMEDLL_OPT:--O1}"
+OPT="${BTVS_GAMEDLL_OPT:--O2}"
+MEMOFF="${BTVS_GAMEDLL_MEMOFF:-own}"
+INC="$(cd "$HERE/include" && pwd -W)"
+CFLAGS="-w -nostdlibinc -I \"$INC\" -I \"$OUT/gen\""
 export MSYS2_ARG_CONV_EXCL='*'
 cd "$PORT"
 mkdir -p "$OUT/gen" "$OUT/obj0" "$OUT/obj" "$OUT/run"
@@ -26,10 +36,11 @@ NM="$LLVM/llvm-nm.exe"
 
 echo "1/6 what each side needs from the other"
 cp -u "$GEN"/* "$OUT/gen/"
+cp "$GEN/recomp_types.h" "$OUT/gen/"       # as generated: step 4 changes the copy
 # a first compile, with the header as generated, only to read the symbols
 if [ ! -f "$OUT/need_from_host.txt" ]; then
     ls "$OUT/gen"/*.c | bash tools/limit.sh xargs -P 4 -I{} sh -c \
-        '"'"$LLVM"'/clang.exe" -c -O0 -w -I "'"$OUT"'/gen" -I src -I ../xboxrecomp/include "{}" -o "'"$OUT"'/obj0/$(basename "{}" .c).obj"'
+        '"'"$LLVM"'/clang.exe" -c -O0 '"$CFLAGS"' "{}" -o "'"$OUT"'/obj0/$(basename "{}" .c).obj"'
     "$NM" --defined-only --extern-only "$OUT"/obj0/*.obj | awk 'NF==3 && $2=="T"{print $3}' | sort -u > "$OUT/gen_def.txt"
     "$NM" --undefined-only "$OUT"/obj0/*.obj | awk 'NF==2{print $2}' | sort -u > "$OUT/gen_und.txt"
     comm -23 "$OUT/gen_und.txt" "$OUT/gen_def.txt" > "$OUT/need_from_host.txt"
@@ -45,7 +56,7 @@ echo "2/6 import library for the DLL (from a list of names; the DLL need not exi
 "$LLVM/llvm-dlltool.exe" -m i386:x86-64 -d "$OUT/game.def" -l "$OUT/btvs_game.lib" -D btvs_game.dll
 
 echo "3/6 the exe without game code (MSVC's linker, as on the developer's PC)"
-CRT=" __dyn_tls_on_demand_init __tls_guard _dsign _fltused _tls_index atan2 calloc ceil cos exp2 floor fmod ldexp log2 memcpy memset memmove nearbyint sin sqrt sqrtf tan trunc truncf "
+CRT=" __chkstk __dyn_tls_on_demand_init __tls_guard _dsign _fltused _tls_index atan2 calloc ceil cos exp2 floor fmod ldexp log2 memcpy memset memmove nearbyint sin sqrt sqrtf tan trunc truncf "
 DATA=" g_xbox_mem_offset g_xbox_code_lo g_xbox_code_hi g_icall_count g_icall_trace g_icall_trace_idx "
 {   echo EXPORTS
     while read -r n; do
@@ -68,22 +79,27 @@ IFS='|' read -ra LA <<< "$LIBS"
     buffy_tvs.dir/Release/*.obj "$OUT/btvs_game.lib" "${LA[@]}" )
 
 echo "4/6 the header: registers read from the exe's thread-local block, the exe's globals imported"
-python "$HERE/patch_header.py" "$OUT/run/buffy_tvs.map" "$OUT/gen"
+python "$HERE/patch_header.py" "$OUT/run/buffy_tvs.map" "$OUT/gen" "$MEMOFF"
 
-echo "5/6 compile the translated code ($OPT, 4 at a time)"
+echo "5/6 compile the translated code ($OPT, 4 at a time, memory offset: $MEMOFF)"
 t0=$(date +%s)
 ls "$OUT/gen"/*.c | bash tools/limit.sh xargs -P 4 -I{} sh -c \
-    '"'"$LLVM"'/clang.exe" -c '"$OPT"' -w -I "'"$OUT"'/gen" -I src -I ../xboxrecomp/include "{}" -o "'"$OUT"'/obj/$(basename "{}" .c).obj"'
-"$LLVM/clang.exe" -c -O1 "$HERE/game_dll.c" -o "$OUT/obj/game_dll.obj"
+    '"'"$LLVM"'/clang.exe" -c '"$OPT"' '"$CFLAGS"' "{}" -o "'"$OUT"'/obj/$(basename "{}" .c).obj"'
+OWN=""; [ "$MEMOFF" = own ] && OWN="-DBTVS_GAME_OWN_MEM_OFFSET"
+"$LLVM/clang.exe" -c -O2 -nostdlibinc -I "$INC" $OWN "$HERE/game_dll.c" -o "$OUT/obj/game_dll.obj"
 echo "    $(( $(date +%s) - t0 )) s"
 
 echo "6/6 link btvs_game.dll (lld-link, import libraries made here, no Microsoft library)"
 printf 'LIBRARY ucrtbase.dll\nEXPORTS\n' > "$OUT/ucrt.def"
-for n in _dsign atan2 calloc ceil cos exp2 floor fmod ldexp log2 memcpy memset memmove nearbyint sin sqrt sqrtf tan trunc truncf; do echo "    $n" >> "$OUT/ucrt.def"; done
+for n in atan2 calloc ceil cos exp2 floor fmod ldexp log2 memcpy memset memmove nearbyint sin sqrt sqrtf tan trunc truncf; do echo "    $n" >> "$OUT/ucrt.def"; done
 printf 'LIBRARY KERNEL32.dll\nEXPORTS\n    GetModuleHandleW\n    ExitProcess\n' > "$OUT/k32.def"
 "$LLVM/llvm-dlltool.exe" -m i386:x86-64 -d "$OUT/ucrt.def" -l "$OUT/ucrt_min.lib"
 "$LLVM/llvm-dlltool.exe" -m i386:x86-64 -d "$OUT/k32.def" -l "$OUT/k32_min.lib"
+# the port layer calls recomp_dispatch_init: with the DLL's own memory offset that name is game_dll.c's wrapper
+if [ "$MEMOFF" = own ]; then sed 's/^    recomp_dispatch_init$/    recomp_dispatch_init=btvs_game_dispatch_init/' "$OUT/game.def" > "$OUT/game_link.def"
+else cp "$OUT/game.def" "$OUT/game_link.def"; fi
 bash tools/limit.sh "$LLVM/lld-link.exe" -dll -nodefaultlib -entry:DllMain -nologo -out:"$OUT/run/btvs_game.dll" \
-    -def:"$OUT/game.def" -implib:"$OUT/btvs_game_real.lib" -debug -pdb:"$OUT/run/btvs_game.pdb" \
+    -def:"$OUT/game_link.def" -implib:"$OUT/btvs_game_real.lib" -debug -pdb:"$OUT/run/btvs_game.pdb" \
     "$OUT"/obj/*.obj "$OUT/buffy_tvs_exe.lib" "$OUT/ucrt_min.lib" "$OUT/k32_min.lib"
+cp -u build/Release/SDL3.dll "$OUT/run/"
 ls -la "$OUT/run/buffy_tvs.exe" "$OUT/run/btvs_game.dll"
