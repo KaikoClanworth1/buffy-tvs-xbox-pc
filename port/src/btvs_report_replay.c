@@ -102,6 +102,18 @@ static int copy_sessions(const char *from_save, const char *to_save)
 
 int btvs_replay_active(void) { return s_r.active; }
 
+/* The replayed game restarted itself (the player of the replay went on to
+ * another level): the replay is over; the report's settings and its copy of
+ * the save stay in use, and the launch data is the game's own from here. */
+void btvs_replay_reboot(void)
+{
+    if (!s_r.active)
+        return;
+    s_r.active = 0;
+    s_r.playing = 0;
+    btvs_log("replay", "the replayed game restarted itself: playing on from here (settings and saves still the report's)");
+}
+
 int btvs_replay_wants_skip(void) { return s_r.active && !s_r.done && !s_r.play_input && s_r.have_spot; }
 
 void btvs_replay_init(void)

@@ -536,13 +536,24 @@ float btvs_fps(void);
 float btvs_fps_none(void) { return 0.0f; }
 #pragma comment(linker, "/alternatename:btvs_fps=btvs_fps_none")
 
+static volatile LONG s_runs;            /* restarts of the game inside the process */
+
+void btvs_crash_reboot(void)
+{
+    int i;
+    InterlockedExchange(&s_crash_reports, 0);       /* (the count and the "already reported here" list are per run) */
+    for (i = 0; i < 4; i++)
+        s_reported_addr[i] = NULL;
+    InterlockedIncrement(&s_runs);
+}
+
 static DWORD WINAPI hang_thread(LPVOID arg)
 {
     const char *e = getenv("BTVS_HANG_SECS"), *b = getenv("BTVS_BOOT_HANG_SECS");
     unsigned secs = e && *e ? (unsigned)atoi(e) : 20u, boot = b && *b ? (unsigned)atoi(b) : 90u;
     unsigned still = 0, reports = 0, t = 0;
-    long last = -1;
-    int reported = 0, boot_reported = 0;
+    long last = -1, run_seen = 0;
+    int reported = 0, boot_reported = 0, starting = 0;
     char why[120];
     (void)arg;
 
@@ -551,6 +562,30 @@ static DWORD WINAPI hang_thread(LPVOID arg)
         Sleep(1000);
         t++;
         now = xbox_HangMonitorFrames();
+        /* The game restarted itself inside the process (a level load): a
+         * stretch without frames that is a start, not a hang. It gets the
+         * start's allowance, counted from the restart. */
+        if (s_runs != run_seen) {
+            run_seen = s_runs;
+            starting = 1;
+            t = 0;
+            still = 0;
+            reported = boot_reported = 0;
+            reports = 0;
+            last = now;
+            continue;
+        }
+        if (starting) {
+            if (now == last) {
+                if (boot && t >= boot && !boot_reported) {
+                    boot_reported = 1;
+                    sprintf_s(why, sizeof why, "no frame shown %u s after the game restarted itself", t);
+                    hang_report(why);
+                }
+                continue;
+            }
+            starting = 0;
+        }
         /* A movie (the attract movie after a while in the main menu, a
          * cutscene file) is played inside one game frame: pictures still
          * reach the screen, so that is not a hang. */

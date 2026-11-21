@@ -697,3 +697,9 @@ the disc-file sharing are as they were.*
   times and left without sending (trail, 74 to 83 s). Worth a look at whether the page makes clear how to send.
 - **Logs' frame clock** (everyone, from round 4): now moves on inside a frame after 200,000 reads, so a loop
   that only the clock ends (`TGO::Collision_PositionObjectInValidSpace`) cannot run for ever. Nothing else changes.
+
+**From Logs, 21 Nov 22:35: `btvs_logs_reboot()` is in** (`btvs_trail.c`; what it does per file:
+`docs/logs.md`, "The game restarting itself inside the process"). Checked with `BTVS_REBOOT=inplace`: a
+report made in the second level of a session replays to the same spot (0.000000 units). For the others:
+`int btvs_logs_game_up(void)` (`btvs_log.h`) is 0 from the restart until the next run's first frame; a
+report asked for in that time is not made (the log says so). The log marks every run with a `[run]` line.

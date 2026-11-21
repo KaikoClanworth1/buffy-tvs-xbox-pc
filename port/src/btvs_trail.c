@@ -45,6 +45,11 @@ static char s_ring[RING][LINE];
 static unsigned s_ring_n;
 static struct btvs_where s_where;
 static int s_recording;          /* Controls took the recording */
+static volatile LONG s_game_down;       /* the game is restarting itself: its memory is not to be read */
+static double s_down_at;
+static CRITICAL_SECTION s_watch_cs;
+static int s_watch_cs_ready;
+static void game_up_again(void);
 int btvs_recording_cut;          /* a report had to restart the recording: it no longer begins at the anchor */
 static double s_pos_every = 5.0, s_pos_last = -1000.0;
 static float s_last_pos[3], s_last_health;
@@ -181,9 +186,10 @@ void btvs_trail(const char *event, const char *fmt, ...)
     }
 }
 
-void btvs_trail_init(void)
+/* The "boot" anchor of a run of the game: the first of the process, and each
+ * one the game starts by restarting itself inside it. */
+static void boot_anchor(void)
 {
-    InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
     {
         /* The launch data's command line, if the game started this run itself
          * (kernel_bridge.c reads the same file). */
@@ -206,6 +212,14 @@ void btvs_trail_init(void)
         else
             btvs_trail("boot", "version=%s run=%d", BTVS_VERSION, btvs_restarts() + 1);
     }
+}
+
+void btvs_trail_init(void)
+{
+    InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
+    InitializeCriticalSection(&s_watch_cs);
+    s_watch_cs_ready = 1;
+    boot_anchor();
     btvs_trail_start_watch();
 }
 
@@ -483,15 +497,19 @@ static DWORD WINAPI watch_thread(LPVOID arg)
     for (;;) {
         double now;
         Sleep(100);
-        if (!g_xbox_mem_offset || !g32(G_GAME))
-            continue;
-        note_level("watch");
-        note_menu(g32(G_MENU_ID), "watch");
-        now = btvs_uptime();
-        if (now - s_pos_last >= s_pos_every) {
-            s_pos_last = now;
-            sample_player();
+        if (s_game_down || !s_watch_cs_ready)
+            continue;                   /* the game is restarting itself (btvs_logs_reboot) */
+        EnterCriticalSection(&s_watch_cs);
+        if (!s_game_down && g_xbox_mem_offset && g32(G_GAME)) {
+            note_level("watch");
+            note_menu(g32(G_MENU_ID), "watch");
+            now = btvs_uptime();
+            if (now - s_pos_last >= s_pos_every) {
+                s_pos_last = now;
+                sample_player();
+            }
         }
+        LeaveCriticalSection(&s_watch_cs);
     }
 }
 
@@ -519,6 +537,8 @@ static void first_time(volatile LONG *flag, const char *what)
 static void hook_GameFrame(void)
 {
     static volatile LONG seen;
+    if (s_game_down)
+        game_up_again();
     btvs_exact_frame_begin(g_ecx);
     TGameManagerImplementation_Frame_000183A0();
     btvs_exact_frame_end();
@@ -654,4 +674,55 @@ void btvs_frame_tick(void)
 {
     InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
     btvs_replay_frame();
+}
+
+/* ── The game restarts itself inside the process (a level load) ───────────
+ *
+ * btvs_boot_restart.c calls this on the game thread when the game has asked
+ * to be started again: its threads have ended, its memory is still there and
+ * is wiped right after. Everything Logs knows about the game by address or
+ * by "seen once" is forgotten, Logs' helper threads keep off the game's
+ * memory until the next run shows its first frame (btvs_logs_game_up), and
+ * the trail gets the new run's "boot" anchor. */
+int btvs_logs_game_up(void) { return !s_game_down; }
+
+void btvs_logs_reboot(void)
+{
+    InitOnceExecuteOnce(&s_once, init_once, NULL, NULL);
+    if (s_watch_cs_ready)
+        EnterCriticalSection(&s_watch_cs);      /* (the watch thread is not in the middle of a look) */
+    InterlockedExchange(&s_game_down, 1);
+    s_down_at = btvs_uptime();
+    if (s_watch_cs_ready)
+        LeaveCriticalSection(&s_watch_cs);
+    btvs_log("run", "======== run %d of the session: the game restarts itself in this process (%.1f s into the session) ========",
+             btvs_restarts() + 1, s_down_at);
+
+    s_seen_level[0] = 0;
+    s_seen_menu = 0xFFFFFFFFu;
+    s_level_loaded_at = 0.0;
+    s_menu_asked = 0.0;
+    InterlockedExchange(&s_cutscenes, 0);
+    s_pos_last = -1000.0;
+    memset(s_last_pos, 0, sizeof s_last_pos);
+    s_last_health = 0.0f;
+    EnterCriticalSection(&s_cs);
+    s_where.level[0] = s_where.checkpoint[0] = s_where.menu[0] = 0;
+    s_where.have_pos = 0;
+    LeaveCriticalSection(&s_cs);
+
+    btvs_replay_reboot();       /* (before the anchor: a replay does not start again at it) */
+    btvs_exact_reboot();
+    btvs_report_reboot();
+    btvs_crash_reboot();
+    btvs_objlog_reboot();
+    boot_anchor();
+}
+
+/* The next run's first frame: the game's memory is its own again. */
+static void game_up_again(void)
+{
+    if (InterlockedExchange(&s_game_down, 0))
+        btvs_log("run", "run %d: the game shows its first frame %.1f s after the restart", btvs_restarts() + 1,
+                 btvs_uptime() - s_down_at);
 }

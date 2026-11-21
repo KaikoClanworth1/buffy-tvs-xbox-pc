@@ -389,3 +389,49 @@ free place for a character until 2 ms have passed, and has no other end. Since r
 clock stood still inside a frame, so that loop could have run for ever. The clock now moves on by 0.1 ms a
 read once a frame has read it 200,000 times (a frame of play reads it 2,326 times at most, measured), by the
 count alone, so replays are unchanged (the walk report replayed: 0.000000 units from the recorded place).
+
+## The game restarting itself inside the process (`btvs_logs_reboot`, 21 Nov)
+
+With Graphics' in-process restart (`docs/graphics.md`, "One process for the session") a level load no longer
+starts a new process, so nothing of Logs is forgotten by itself any more. `btvs_logs_reboot()`
+(`btvs_trail.c`) is called on the game thread when the game has asked to be started again, and does it:
+
+| File | At a restart |
+|---|---|
+| `btvs_trail.c` | the level, menu, cutscene and position state forgotten; the watch thread stands still (it is not in the middle of a look when the function returns); the new run's `boot` anchor written, as at a process start |
+| `btvs_report_exact.c` | the run's frame recording closed and its file removed; counters, the pad-sample memory and the Start hold cleared; back to waiting for a level. When the next level's frames begin, the recording starts again and the game thread gets its clock back (the runtime takes it away at a restart, so loading runs on the real clock). A frame replay does not go on into the next run |
+| `btvs_report.c` | the picture kept from before a pause dropped; `BTVS_TEST_REPORT_AT` / `_AFTER_LEVEL` looked at again for the new run (`BTVS_TEST_REPORT_RUN`) |
+| `btvs_report_crash.c` | the hang watcher treats the stretch without frames as a start (its 90 s allowance, counted from the restart); the crash count and the "already reported here" list are per run again |
+| `btvs_report_replay.c` | a replay is over; the report's settings and save copy stay in use |
+| `btvs_objlog.c` | the object table cleared |
+
+**Between the call and the next run's first frame nothing of Logs reads the game's memory**
+(`btvs_logs_game_up()` is 0): the watch thread and `btvs_game_paused()` say "nothing", and a report asked for
+then (hotkey, menu, test) is not made; the log says why. Crash and hang reports are still made (they read
+memory in a way that cannot fault).
+
+**The log across runs.** One process and one clock span the session now, so every run is marked:
+
+```
+[  30.456] [boot] the game restarts itself (run 1 of the session, "..."): in this process 36360, same window
+[  30.456] [run] ======== run 2 of the session: the game restarts itself in this process (30.5 s into the session) ========
+[  30.456] [exact] the run ends: its frame recording ends after 1392 frames; the next begins when a level is up
+[  30.456] [trail] boot version=0.0.1 run=2 launch=...
+[  49.637] [run] run 2: the game shows its first frame 19.2 s after the restart
+```
+
+A report's `replay.txt` counts from the run's own `boot` anchor (`anchor_time` is the session time of the
+restart), and its `launch.bin` is the launch data of the run it was made in, so a replay starts straight in
+that level, in a fresh process, whatever came before it in the session.
+
+**Checked in hidden runs, 21 Nov 22:20** (`BTVS_REBOOT=inplace`):
+
+- `rb1`: level 1 -> after 30 s the cemetery, in the same process (`BTVS_TEST_RELAUNCH=30:m03_cemetery_1`) ->
+  a test report 20 s into the cemetery (`BTVS_TEST_REPORT_AFTER_LEVEL=20 BTVS_TEST_REPORT_RUN=1`). The log
+  has the lines above; no hang or crash report; the report (19 files) has the cemetery's launch data, a frame
+  recording that begins with the cemetery (1,174 frames) and the picture of the moment.
+- `rb1_rp`: that report replayed with `BTVS_REPLAY_INPUT=1`: on the recorded place at all 147 checks and at
+  the end (1278.000610 -235.003235 47.995480, 0.000000 units apart), 36.7 s after start.
+- Not checked: a report from the pause menu after a restart; the hotkey during a restart (the gate is there,
+  a test run has no keyboard); a replay whose player goes on into another level; more than one restart with
+  reports in each run; quitting to the menu and starting again.
