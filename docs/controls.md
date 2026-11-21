@@ -391,7 +391,26 @@ are the game's text and stay.
 The Controls page always shows a pad (it is the game's page about the pad; the keys are on the
 port's own Key Bindings page). Its lines end where the game writes the labels. Black and White are
 the bumpers on a PC pad: the two labels have the bumper's picture beside them instead of a line
-across the whole controller.
+across the whole controller. **A rebound pad button shows the same way**: a label whose button the
+player has put somewhere else (`pad_<Action>`) loses its line and gets the picture of the button
+it is on now. So the page, the menu buttons and the tips all show what is bound.
+
+### The tips' sentences with keyboard and mouse
+
+A tip is a sentence from a text table in the level's files with marks where pictures go, written
+for a pad: "Pull the (L) trigger", "Move the (R) thumbstick", "press the (Y) button". With the
+keyboard set the pictures are keys, so the sentences are reworded too: "Press (Shift)", "Move the
+(mouse)", "Use (WASD)", "press (Q)". Pads keep the game's wording.
+
+This is done on the strings in memory, never in the game's files: when the game has read its table
+(`TTipTable`, made at a level's first tip, reached through the tip window at `0x7F18B8`), each
+sentence is passed through a few rules (`k_rule` in `btvs_input_glyphs.c`: "Pull [and hold] the ?
+trigger", "press the ? button", "Move [the] ? thumbstick"). A sentence never gets longer; what it
+loses is filled with spaces at its end. 11 of the first level's 56 tips change.
+`BTVS_GLYPH_NO_TIP_TEXT=1` leaves them alone.
+
+Left as they are: "D-pad" and "pad" in the weapon-selection tips, "Start button on other
+controllers", and the journal's own pages (another text, not looked at).
 
 **The set is chosen once per start of the game's process**: the texture pack is read once. The game
 starts a new process for every level it loads, so the pictures follow a change of device, or a
@@ -404,6 +423,8 @@ rebinding, from the next level load (or the next start).
 | `BTVS_CONTROLS_BUTTON_PICTURES=xbox` | (the settings override) the set for this run |
 | `BTVS_GLYPH_DIR=<folder>` | the folder instead of `button_pictures` beside the exe (two runs with different sets must not share one) |
 | `BTVS_GLYPH_DUMP=1` | the runtime also writes every texture the game draws to `<folder>\dump` as PNG, named with the hash: how the textures above were found, and how to find more |
+| `BTVS_GLYPH_NO_TIP_TEXT=1` | keyboard set: the tips keep the game's wording |
+| `BTVS_GLYPH_TIP_DELAY=<reads>` | the rewording that many pad reads late (how the limit below was found) |
 | `BTVS_GLYPH_RAMDUMP=<seconds>,<file>` | the game's first 64 MB of memory to a file at that time |
 
 To replace another texture: dump, find it, add its hash and what to draw to `k_menu` (or a new
@@ -411,19 +432,30 @@ table) in `btvs_input_glyphs.c`, raise `GLYPH_VERSION`.
 
 ### What was looked at, and what was not
 
-In hidden runs (21 Nov), frames dumped by the game at 640x480 and at 1920x1080 (a 1440x1080
-picture), the game's own art against the port's: the main menu, Options, the Controls page, the
-first level's camera tip, an inventory screen, the pause menu, in all three sets. 11 of the 16
-textures were seen swapped (nine named in the log, the inventory's two in the frames); the other five
-are the pressed looks of B, X, Y, L and R. The pictures sit where the game's did and stay sharp at
-1080p. Frames: `port/runs/shots/btn_*` in the main checkout.
+In hidden runs (21 Nov), frames dumped by the game, the game's own art against the port's
+(`port/runs/shots/btn_*` in the main checkout):
 
-Not seen: the look of a button at the moment it is pressed (the game flashes it for a fraction of a
-second); the journal's pages; a tip with A / B / X / Y, an arrow, "+" or White / Black in it (they
-are on the same page of pictures as the two that were seen, so they will be swapped; whether each
-sits well in its line of text was not looked at); 4K (the pictures are 4x, so they should hold; no
-frame was dumped); `auto` with a real pad, since no run has one. Not replaced: the inventory's
-3-D button pieces (`H_Inv_Button ...` in the game's HUD), if they are ever shown; no run met them.
+- 640x480 and 1920x1080 (a 1440x1080 picture): the main menu, Options, the Controls page, the first
+  level's camera tip, an inventory screen, the pause menu, in all three sets.
+- 3840x2160 (a 2880x2160 picture), Xbox set: main menu, Controls page, the tip. Edges and letters
+  are clean at that size.
+- All 16 textures were swapped, the six pressed looks included (the log names each hash; the run
+  pressed A, B, X, Y and both triggers on an inventory screen). In frames the pressed look was
+  caught for A only (a filled, glowing disc that fades back in about a third of a second); the
+  others flash between two dumped frames. `btn_pressed_pictures_all_sets.png` is the pictures
+  themselves.
+- Rebinding: with `pad_B = Y`, `pad_Y = B`, `pad_LeftTrigger = LB`, `pad_Black = LT` the Controls
+  page shows those buttons beside "Jump", "Use", "Look" and "Ammo Swap" and the menu shows Y where
+  B was; with `key_A = Enter`, `key_B = Tab` the keyboard set shows `Enter` and `Tab`.
+- The keyboard wording of the camera tip, at both sizes.
+
+Not seen: the journal's pages; a tip with A / B / X / Y, an arrow, "+" or White / Black in it (same
+page of pictures as the two that were seen; whether each sits well in its line was not looked at);
+the ten other reworded tips on screen (their text was checked by rule, not by eye); `auto` with a
+real pad, since no run has one; rebinding through the menu rather than the settings. One limit
+found: a tip that is already on screen when its sentence is reworded keeps the old wording until it
+is shown again (in every run the rewording came first). Not replaced: the inventory's 3-D button
+pieces (`H_Inv_Button ...` in the game's HUD), if they are ever shown; no run met them.
 
 ## Verified / not verified
 
@@ -543,7 +575,10 @@ pause, **Report a Problem**, one line saying which step.
    and the first level's tip shows a stick and `LT`. Start again with the DualSense instead:
    cross / circle / square / triangle and `L2`. Start again with no pad: key names (`Space`,
    `Bksp`, `E`, `Q`). Then with a pad plugged in, play a moment on the keyboard and load a level:
-   the pictures should be the keys now. Say which pictures look wrong, too small or too big.
+   the pictures should be the keys now, and the first tip should read "Move the (mouse) to move
+   the camera around. Press (Shift) to reset." Rebind a pad button or a key in Key Bindings, load
+   a level: the menus, the tips and the Controls page show the new one. Say which pictures look
+   wrong, too small or too big.
 
 Not expected to be right yet: the default keys are the Chaos Bleeds port's and were chosen before
 this game could be played (jump on Backspace is the obvious one to change).
@@ -554,8 +589,8 @@ this game could be played (jump on Backspace is the obvious one to change).
 - The mouse is still captured during cutscenes and in the inventory screens.
 - Button pictures change set only at a level load or a start, not the moment another device is
   touched (the runtime's texture pack is read once per process).
-- Button pictures: the Controls page shows the default pad layout; a rebound pad button changes
-  the small pictures everywhere, but the lines on that page still point at the default buttons.
+- With keyboard and mouse the weapon-selection tips still say "D-pad", and the journal's text is
+  not reworded.
 - A menu line for `button_pictures` (asked of Menu in `docs/AREAS.md`).
 - `[INPUT]` lines go to stderr (which a player's run redirects into the log); calling Logs'
   `btvs_log` directly would be tidier.

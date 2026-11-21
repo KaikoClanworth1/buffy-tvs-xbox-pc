@@ -30,7 +30,7 @@
 double btvs_frame_seconds(void);
 void nv2a_gpu_set_texture_pack(const WCHAR *root, int dump, int load, int prefetch);
 
-#define GLYPH_VERSION 11            /* a change in the drawing: files are made again */
+#define GLYPH_VERSION 12            /* a change in the drawing: files are made again */
 #define SCALE 4                    /* the port's pictures are this many times the game's */
 
 enum { SET_KEYS, SET_XBOX, SET_PS, SET_ORIGINAL };
@@ -941,15 +941,35 @@ static void build_controller(void)
     }
 
     /* from each label to its part; the two shoulder buttons are named beside their labels */
-    callout(&c, move, 2, 1);       callout(&c, weapon, 3, 1);
-    callout(&c, look, 2, 0);       callout(&c, target, 2, 0);
-    callout(&c, use, 3, 0);        callout(&c, jump, 2, 0);
-    callout(&c, punch, 3, 0);      callout(&c, kick, 3, 0);
-    callout(&c, camera, 3, 1);     callout(&c, back, 2, 0);     callout(&c, pause, 2, 0);
-    callout(&c, inventory, 2, 0);  callout(&c, ammo, 2, 0);
-    s_set = keep == SET_KEYS ? SET_XBOX : keep;
-    action_source("White", &g); draw_glyph(&c, PX(256), PX(30), PX(21), &g, ST_INLINE);
-    action_source("Black", &g); draw_glyph(&c, PX(277), PX(52), PX(21), &g, ST_INLINE);
+    /* From each label to its part. A label whose button the player has put
+     * somewhere else gets that button's picture beside it instead of a line
+     * (as the two shoulder buttons always do: their labels are on the far side). */
+    {
+        static const struct { const char *action, *usual; const float *pts; int n, tip; float gx, gy; } k_label[] = {
+            { "MoveForward", "LS-Up", move, 2, 1, 16, 0 },   { "DpadUp", "DpadUp", weapon, 3, 1, 16, 0 },
+            { "LeftTrigger", "LT", look, 2, 0, 16, 2 },      { "RightTrigger", "RT", target, 2, 0, -16, 2 },
+            { "Y", "Y", use, 3, 0, -15, 0 },                 { "B", "B", jump, 2, 0, -15, 0 },
+            { "X", "X", punch, 3, 0, -15, 0 },               { "A", "A", kick, 3, 0, -15, 0 },
+            { "LookUp", "RS-Up", camera, 3, 1, -15, 0 },     { "Back", "Back", back, 2, 0, 0, -15 },
+            { "Start", "Start", pause, 2, 0, 0, -15 },       { "White", "", inventory, 2, 0, -16, 2 },
+            { "Black", "", ammo, 2, 0, -17, 2 },
+        };
+        char buf[48];
+        for (i = 0; i < (int)(sizeof k_label / sizeof k_label[0]); i++) {
+            const float *p = k_label[i].pts;
+            btvs_input_binding_text(action_index(k_label[i].action), 2, buf, sizeof buf);
+            if (strlen(buf) > 4 && !strcmp(buf + 4, k_label[i].usual)) {
+                callout(&c, p, k_label[i].n, k_label[i].tip);
+            } else {
+                float stub[4];
+                stub[0] = p[0]; stub[1] = p[1];
+                stub[2] = p[0] + k_label[i].gx * 0.5f; stub[3] = p[1] + k_label[i].gy * 0.5f;
+                callout(&c, stub, 2, 0);
+                pad_source(strlen(buf) > 4 ? buf + 4 : "", &g);
+                draw_glyph(&c, PX(p[0] + k_label[i].gx), PX(p[1] + k_label[i].gy), PX(21), &g, ST_INLINE);
+            }
+        }
+    }
     s_set = keep;
 
     write_tex(&c, 0, 0, 256 * SCALE, 256 * SCALE, "pad", "128e9d296c5ed8db");
@@ -1107,8 +1127,104 @@ static void ram_dump(void)
     IN_LOG("glyphs: memory written to %s at %.2f s", path, btvs_frame_seconds());
 }
 
+/* ── the tips' sentences, with keyboard and mouse ────────────────────────── */
+
+/* The tips are sentences from a text table in the level's files, held in
+ * memory as strings ("Pull the \l trigger to reset": \l is where a picture
+ * goes). With keyboard and mouse the pictures are keys, and "trigger",
+ * "thumbstick" and "button" no longer fit, so the sentences are reworded in
+ * memory, never longer than they were (the rest is filled with spaces at the
+ * end). The game's files are not touched. */
+#define G_TIP_WINDOW   0x007F18B8u      /* the tip window (a script object) */
+#define TIP_QUERY_SLOT 0x2C8u           /* its QueryTip(name) in the vtable */
+#define TIP_TABLE      0x288u           /* its table of sentences, made at the first tip */
+
+/* '?' in a rule is the picture's letter. */
+static const struct { const char *from, *to, *to_mouse; } k_rule[] = {
+    { "Pull and hold the \\? trigger", "Hold \\?", NULL },   { "pull and hold the \\? trigger", "hold \\?", NULL },
+    { "Pull and hold \\? trigger", "Hold \\?", NULL },       { "pull and hold \\? trigger", "hold \\?", NULL },
+    { "Pull the \\? trigger", "Press \\?", NULL },           { "pull the \\? trigger", "press \\?", NULL },
+    { "ress the \\? button", "ress \\?", NULL },
+    { "Move the \\? thumbstick", "Use \\?", "Move the \\?" }, { "move the \\? thumbstick", "use \\?", "move the \\?" },
+    { "Move \\? thumbstick", "Use \\?", "Move the \\?" },     { "move \\? thumbstick", "use \\?", "move the \\?" },
+};
+
+/* 1 when the sentence was changed. */
+int btvs_input__glyphs_fit_text(char *s, int mouse_camera)
+{
+    char out[512];
+    size_t len = strlen(s), i = 0, o = 0;
+    int r, changed = 0;
+    if (len >= sizeof out)
+        return 0;
+    while (i < len) {
+        for (r = 0; r < (int)(sizeof k_rule / sizeof k_rule[0]); r++) {
+            const char *f = k_rule[r].from, *t;
+            size_t k = 0;
+            char letter = 0;
+            while (f[k] && i + k < len && (f[k] == s[i + k] || (f[k] == '?' && k && f[k - 1] == '\\'))) {
+                if (f[k] == '?')
+                    letter = s[i + k];
+                k++;
+            }
+            if (f[k])
+                continue;
+            t = k_rule[r].to_mouse && mouse_camera && letter == ']' ? k_rule[r].to_mouse : k_rule[r].to;
+            for (; *t; t++)
+                out[o++] = *t == '?' ? letter : *t;
+            i += k;
+            changed = 1;
+            break;
+        }
+        if (r == (int)(sizeof k_rule / sizeof k_rule[0]))
+            out[o++] = s[i++];
+    }
+    if (!changed || o > len)
+        return 0;
+    memset(out + o, ' ', len - o);
+    memcpy(s, out, len);
+    return 1;
+}
+
+static void tips_fit(void)
+{
+    static int done, delay = -1;
+    uint32_t tw, table, b, node, n = 0, seen = 0;
+    int guard;
+    if (done || s_set != SET_KEYS)
+        return;
+    if (!readable(G_TIP_WINDOW, 4) || (tw = MEM32(G_TIP_WINDOW)) == 0 || !readable(tw, 0x2A0u)
+            || !readable(MEM32(tw), TIP_QUERY_SLOT + 4u) || MEM32(MEM32(tw) + TIP_QUERY_SLOT) != 0x002377B0u)
+        return;
+    /* The game makes the table when a level first asks for a tip. (Making it
+     * sooner from here does not work: the level's tips file is not found.) */
+    table = MEM32(tw + TIP_TABLE);
+    if (!table || !readable(table, 0xA8u))
+        return;
+    if (delay < 0) {                            /* BTVS_GLYPH_TIP_DELAY=<reads>: testing, the rewording that much later */
+        const char *e = getenv("BTVS_GLYPH_TIP_DELAY");
+        delay = e ? atoi(e) : 0;
+    }
+    if (delay-- > 0)
+        return;
+    done = 1;
+    if (getenv("BTVS_GLYPH_NO_TIP_TEXT"))
+        return;
+    for (b = 0; b < 37u; b++)                   /* 37 chains of { sentence, name, next } */
+        for (node = MEM32(table + 8u + b * 4u), guard = 0; node && readable(node, 12) && guard < 500; node = MEM32(node + 8u), guard++) {
+            uint32_t str = MEM32(node), text;
+            if (!str || !readable(str, 8) || (text = MEM32(str)) == 0 || !readable(text, 1))
+                continue;
+            seen++;
+            if (memchr((const char *)XBOX_PTR(text), 0, 500))
+                n += (uint32_t)btvs_input__glyphs_fit_text((char *)XBOX_PTR(text), btvs_setting_int("controls", "mouse_look", 1) != 0);
+        }
+    IN_LOG("button pictures: %u of the game's %u tips reworded for keyboard and mouse", n, seen);
+}
+
 /* Once per read of player 1's pad, game thread. */
 void btvs_input__glyphs_poll(void)
 {
     ram_dump();
+    tips_fit();
 }

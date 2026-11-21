@@ -491,3 +491,10 @@ the disc-file sharing are as they were.*
 - **Controls -> Extras**: nothing to ship for this; the folder is made on first start. An installer that
   puts the game somewhere read-only would stop the pictures being written (the game then shows its own art
   and the log says how many pictures were drawn: 0).
+- **Controls -> Graphics** (FYI, seen with `BUFFY_TEX_LOG=1`): the tips' page of pictures (128x256,
+  `da8653...`) goes through the runtime's texture lookup as a new texture about 2,000 times in a 57 s level
+  run, i.e. roughly every frame a tip is on screen; every other texture is found once. Cheap now that it is
+  a replacement, but it may say something about how the game's font pages are cached.
+- **Controls -> Menu**: with keyboard and mouse the tips' sentences are reworded in memory ("Press (Shift)"
+  for "Pull the (L) trigger"); if a menu line for it is wanted, the switch today is only the test one,
+  `BTVS_GLYPH_NO_TIP_TEXT`.
