@@ -178,6 +178,27 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
+## What was checked on 21 Nov 2026, 22:09 build (main at aded248)
+
+`GAME/buffy_tvs.exe` reports commit `aded248eb7`, built Nov 21 2026 22:09:14. No regen was needed; no
+game was running from `GAME`. The owner's `btvs_settings.ini` and save files have the same checksums
+before and after; the checks used a copy of the settings and their own save and log folders.
+
+**The window still closes and a new one opens at a level load.** The restart inside the process
+(f3ca64b) is in this build but off by default: the log says `restarts: a new process each time -- no
+btvs_<area>_reboot() yet for: audio input menu logs (BTVS_REBOOT=inplace to try without)`. Watched from
+outside with `port/tools/winwatch.py` (no `BTVS_REBOOT` set; hidden, muted, movies skipped, START
+pressed by script), through the launcher's Play path, menu to level 1:
+
+- three `buffy_tvs.exe` processes in the session: the supervisor, the game for the menu (ended at
+  11.6 s), a second game for the level (started 11.8 s);
+- the game's window (`BuffyRecompGpu`) gone with the first and a new one made 0.8 s later; the
+  supervisor's session window stayed.
+
+The same without the launcher: the same three processes and two game windows. Both runs: main menu and
+`m00_spanishmission_1` reached, exit code 0. The level was loaded 11.3 s into its process in both
+(5.7 and 8.9 s in the 20:47 checks; not looked into).
+
 ## What was checked on 21 Nov 2026, 20:47 build (main at 17cdffd)
 
 `GAME/buffy_tvs.exe` reports commit `c5ad4f473c`, built Nov 21 2026 20:47:13 (main with Controls'
