@@ -109,7 +109,7 @@ front, so it works when the game is frozen), or `BTVS_TEST_REPORT_AT=<seconds>` 
 | `btvs_log.txt`, `btvs_log_previous.txt`, `btvs_trail.txt`, `btvs_trail_previous.txt` | |
 | `input.rec` | the recording since the last anchor (absent until Controls provides it) |
 | `settings.ini` | `btvs_settings.ini` |
-| `save\` | the player's saves only (`UserData`, `TitleData` of the save folder, and the session file `Cache\*.ses`; never the game's files on its cache drive or the disk images), 32 MB at most. **Today the game's saves are not there** (see Known gaps) |
+| `save\` | the player's saves only (`UserData`, `TitleData`, `HardDisk\UDATA`, `HardDisk\TDATA` of the save folder, and the session file `Cache\*.ses`; never the game's files on its cache drive or the disk images), 32 MB at most. No report has carried a save yet (see Known gaps) |
 | `launch.bin` | the launch data this run of the game was started with (a level); the replay starts the game with it |
 | `crashes\` | the 3 newest crash reports, 2 newest hang reports, the newest minidump |
 | `memory.txt` | |
@@ -223,16 +223,18 @@ Not verified:
 - **death, autosave, level completed, level-to-level restart, quit to menu**: hooks in place, never fired.
 - **Report a Problem chosen in the game's menu** (Menu's item calling `btvs_report_create`), and the
   **hotkey thread** (off in test runs by design).
-- **a save in a report / restored by a replay**: see Known gaps.
+- **a save in a report / restored by a replay**: see Known gaps. The `HardDisk` copy code has not run on a real save.
 - menu ids other than those listed are numbers in the trail (15 resurrect is from the disassembly, unseen).
 
 Known gaps:
 
-- **The game's saves are not in the save folder.** The toolkit maps the Xbox hard disk's `UDATA`/`TDATA` into
-  the game folder (`game_files\UDATA\45410012\...` in test runs), so reports carry no save, a replay cannot
-  put one back, and test runs of every session write saves into the shared game folder (it now holds 10,
-  the game's limit: "Start Game" answers that a save must be deleted first). Reported in AREAS.md; when saves
-  follow the save folder, reports and replays pick them up with no change here (`UserData`, `TitleData`).
+- **Saves in reports: the folders travel, a real saved game has not.** Since `09e1647` the console's hard
+  disk (saved games in `UDATA`, settings in `TDATA`) is `<save folder>\HardDisk`; reports copy
+  `HardDisk\UDATA` and `HardDisk\TDATA` and a replay puts them back. Seen: a menu report carried the 4 files
+  the game had written there (`vars.cfg`, the title's save-list images). Not seen: a saved game in a report,
+  or one restored by a replay. The level report above was made from "Load Game" on `buffy 10.ses`, an old
+  test save that exists only in the shared `game_files\UDATA` (the game still finds saves there), so that
+  report holds no save and replays only on a PC that has that file. Reported in AREAS.md.
 - Controls writes the recording to disk once a second: a report can miss the last second of input.
 - Frames are counted at the game loop's frame call: a load that keeps the loop away for more than 20 s
   *after* the first frame would be reported as a hang (the first level's 30 s load is before the first frame,

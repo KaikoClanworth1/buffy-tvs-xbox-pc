@@ -519,8 +519,12 @@ int btvs_report_make(const char *player_text, const char *trigger)
     sprintf_s(path, MAX_PATH, "%s\\save", dir);
     CreateDirectoryA(path, NULL);
     save_files = 0;
-    for (i = 0; i < 2; i++) {
-        static const char *const part[2] = { "UserData", "TitleData" };
+    sprintf_s(path, MAX_PATH, "%s\\save\\HardDisk", dir);
+    CreateDirectoryA(path, NULL);
+    sprintf_s(path, MAX_PATH, "%s\\save", dir);
+    for (i = 0; i < 4; i++) {
+        /* (HardDisk: the console's hard disk as a folder; the game's saved games are in its UDATA) */
+        static const char *const part[4] = { "UserData", "TitleData", "HardDisk\\UDATA", "HardDisk\\TDATA" };
         char from[MAX_PATH], to[MAX_PATH];
         sprintf_s(from, MAX_PATH, "%s\\%s", btvs_save_dir(), part[i]);
         sprintf_s(to, MAX_PATH, "%s\\save\\%s", dir, part[i]);
@@ -528,6 +532,11 @@ int btvs_report_make(const char *player_text, const char *trigger)
             save_files += btvs_copy_tree(from, to, 32ull << 20, &save_bytes);
     }
     save_files += copy_sessions(btvs_save_dir(), path);
+    {
+        char hd[MAX_PATH];
+        sprintf_s(hd, MAX_PATH, "%s\\HardDisk", path);
+        RemoveDirectoryA(hd);           /* (only goes if it stayed empty) */
+    }
     if (!save_files)
         RemoveDirectoryA(path);
     crashes = copy_newest(dir, "crash_*.txt", 3) + copy_newest(dir, "hang_*.txt", 2) + copy_newest(dir, "crash_*.dmp", 1);

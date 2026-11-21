@@ -86,7 +86,9 @@ void btvs_trail(const char *event, const char *fmt, ...);
  * the screenshot while the game picture is still on screen);
  * btvs_report_create(text) when the player confirms: writes
  * reports\<yyyymmdd-hhmmss>\ and a .zip of it beside the exe and returns 1.
- * Nothing is sent anywhere. Both may be called from any thread.
+ * Nothing is sent anywhere. Call both from any thread EXCEPT the game's own
+ * (they wait for the next frame and sample the game thread: on it they would
+ * wait for themselves).
  * btvs_report_last_path(): the folder of the newest report made this run
  * ("" if none), to show to the player. */
 void btvs_report_prepare(void);

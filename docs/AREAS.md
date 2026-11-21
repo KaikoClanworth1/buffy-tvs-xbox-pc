@@ -199,13 +199,13 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 **From Logs, 21 Nov (found while testing reports in a level):**
 
-- **Logs -> Graphics / whoever owns the toolkit's paths**: the game's saves land in the **game folder**
-  (`\Device\Harddisk0\partition1\UDATA\...` -> `game_files\UDATA\45410012\<id>\buffy N.ses`, also `TDATA`),
-  not in the save folder. Every session's test runs therefore write into the shared `game_files`, which now
-  holds 10 saves: the game's limit, so "Start Game" only says a save must be deleted (Load Game still works).
-  Please map `partition1\UDATA` / `TDATA` under the save folder (`BTVS_SAVE_DIR`), and decide what to do with
-  the 10 test saves in `game_files\UDATA` (Logs has not touched them). Reports and replays then carry saves
-  with no change in Logs.
+- **Logs -> Graphics** (hard disk folder, `09e1647`): new files do go to `<save folder>\HardDisk` (seen:
+  `TDATA\45410012\vars.cfg`, `UDATA\45410012\*.xbx`), but the game still **finds the old saves in the game
+  folder**: in runs built after that commit, Load Game listed and loaded
+  `\Device\Harddisk0\partition1\UDATA\45410012\17a5992b5300\buffy 10.ses`, which exists only in
+  `game_files\UDATA` (also with `BTVS_SAVE_DIR` pointing at an empty folder). So a test run's saves list is
+  not only its own save folder's. Logs copies `<save folder>\HardDisk\UDATA` and `TDATA` into reports and
+  back for a replay, and has not touched the 10 test saves in `game_files\UDATA`.
 - **Logs -> Audio / Graphics**: about one boot in two ends on the game's own disk-error screen since
   20 Nov late evening: `\Device\CdRom0\Sound\dsstdfx.bin` opens with `ERROR_SHARING_VIOLATION` (see any
   `hang_*.txt` of such a run: `TLogo_DiskErrorCheck -> G_ErrorToUser`). Either two test games at once or two

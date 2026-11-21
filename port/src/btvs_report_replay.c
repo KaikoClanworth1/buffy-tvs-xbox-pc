@@ -175,10 +175,12 @@ void btvs_replay_init(void)
      * it is the same for every report and takes a while to install) */
     CreateDirectoryA(base, NULL);
     {
-        static const char *const part[2] = { "UserData", "TitleData" };
+        static const char *const part[4] = { "UserData", "TitleData", "HardDisk\\UDATA", "HardDisk\\TDATA" };
         char from[MAX_PATH], to[MAX_PATH];
         int i;
-        for (i = 0; i < 2 && !later; i++) {
+        sprintf_s(to, MAX_PATH, "%s\\HardDisk", base);
+        CreateDirectoryA(to, NULL);
+        for (i = 0; i < 4 && !later; i++) {
             sprintf_s(from, MAX_PATH, "%s\\%s", path, part[i]);
             sprintf_s(to, MAX_PATH, "%s\\%s", base, part[i]);
             delete_tree(to);
