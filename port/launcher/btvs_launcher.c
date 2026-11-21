@@ -15,6 +15,9 @@
  *   --install <image> <folder> [--quiet]   exit 0 installed, 2 game files
  *                                          installed but no buffy_tvs.exe
  *                                          beside the launcher, 1 failed
+ *   --play [game folder]                   start the game as the Play button
+ *                                          does and wait for it; exits with
+ *                                          the game's exit code
  *   --identify <image | folder | xbe>      which game and release it is
  *   --list <image>                         "<bytes>\t<path>" per file
  *   --capture <install|busy|error|play> <out.bmp> [game folder]
@@ -59,8 +62,11 @@
 #define GAME_TITLE    L"Buffy the Vampire Slayer"
 #define GAME_EXE      L"buffy_tvs.exe"
 #define LAUNCHER_EXE  L"Buffy Launcher.exe"
-#define SAVE_DIR      L"SaveData"       /* beside the exe; install never touches it */
-#define REPORTS_DIR   L"Reports"        /* beside the exe (Logs area) */
+#define SAVE_DIR      L"XboxData"       /* beside the exe: the game's hard disk (saved games in
+                                         * HardDisk\, its cache in Cache\); install never touches it */
+#define REPORTS_DIR   L"reports"        /* beside the exe (Logs area) */
+#define SETTINGS_INI  L"btvs_settings.ini"
+#define CONSOLE_FILE  L"btvs_console.txt"  /* the game's stdout and stderr when started by Play */
 #define CHAOS_BLEEDS_TITLE_ID 0x56550005u
 
 #define WM_APP_PROGRESS (WM_APP + 1)    /* wParam permille, lParam heap WCHAR* or 0 */
@@ -544,6 +550,34 @@ static void copy_program(const WCHAR *target)
     }
 }
 
+/* A first install starts the game borderless at the desktop's resolution with
+ * sound on. Those are the game's own defaults too; the file only makes them
+ * visible. A settings file that is already there is the player's: left alone. */
+static void default_settings(const WCHAR *target)
+{
+    static const char text[] =
+        "; Buffy the Vampire Slayer - PC settings. The game's Options menu writes this file.\r\n"
+        "[display]\r\n"
+        "mode=1\r\n"          /* 0 windowed, 1 borderless, 2 exclusive fullscreen */
+        "width=0\r\n"         /* 0 = the desktop's size */
+        "height=0\r\n"
+        "vsync=1\r\n"
+        "[audio]\r\n"
+        "master=100\r\n"
+        "music=100\r\n"
+        "effects=100\r\n"
+        "speech=100\r\n";
+    WCHAR path[MAX_PATH];
+    HANDLE h;
+    DWORD wr;
+    join(path, target, SETTINGS_INI);
+    h = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return;
+    WriteFile(h, text, sizeof text - 1, &wr, NULL);
+    CloseHandle(h);
+}
+
 /* Space the copy needs: a file already there at the right size is rewritten
  * in place and needs none. */
 static uint64_t space_needed(Disc *d, const WCHAR *target)
@@ -570,7 +604,7 @@ static int install_run(const WCHAR *image, const WCHAR *target_in)
     ULARGE_INTEGER freeb;
     uint8_t *buf;
     int i, ok = 1;
-    WCHAR err[512], target[MAX_PATH], save[MAX_PATH];
+    WCHAR err[512], target[MAX_PATH];
 
     s_install_msg[0] = 0;
     if (!GetFullPathNameW(target_in, MAX_PATH, target, NULL) || wcslen(target) < 3 || wcslen(target) > MAX_PATH - 100) {
@@ -613,8 +647,8 @@ static int install_run(const WCHAR *image, const WCHAR *target_in)
         return INSTALL_FAILED;
     post_progress(985, L"Setting up the PC version...");
     copy_program(target);
-    join(save, target, SAVE_DIR);
-    CreateDirectoryW(save, NULL);           /* kept as it is when it exists: the player's saves */
+    /* SAVE_DIR is the game's to make; an existing one holds the player's saves */
+    default_settings(target);
     post_progress(1000, L"Installed.");
     if (!has_program(target)) {
         wcscpy_s(s_install_msg, 1024, L"The game's files are installed, but there is no " GAME_EXE L" beside the "
@@ -1126,19 +1160,52 @@ static DWORD WINAPI game_watch(LPVOID p)
     return 0;
 }
 
-static void play(void)
+/* Start the game: buffy_tvs.exe of the game folder, with the game folder as
+ * its working directory. Used by the Play button and by --play. */
+static BOOL start_game(const WCHAR *dir, PROCESS_INFORMATION *pi)
 {
     WCHAR exe[MAX_PATH], cmd[MAX_PATH + 4];
     STARTUPINFOW si;
+    join(exe, dir, GAME_EXE);
+    swprintf_s(cmd, MAX_PATH + 4, L"\"%s\"", exe);
+    memset(&si, 0, sizeof si);
+    si.cb = sizeof si;
+    {
+        /* The game gets a real stdout and stderr: btvs_console.txt in the game
+         * folder, new at each start. Started with none at all (as a window
+         * program is), the 21 Nov build ended itself a second into the boot
+         * (exit code 0xC0000409, seen twice); with them it runs. The file
+         * also keeps what the runtime prints, for problem reports. */
+        SECURITY_ATTRIBUTES sa = { sizeof sa, NULL, TRUE };
+        WCHAR out[MAX_PATH];
+        HANDLE hout, hin;
+        BOOL ok;
+        join(out, dir, CONSOLE_FILE);
+        hout = CreateFileW(out, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &sa,
+                           CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hout == INVALID_HANDLE_VALUE)       /* a folder that cannot be written: nowhere, but still real handles */
+            hout = CreateFileW(L"NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
+        hin = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING, 0, NULL);
+        if (hout != INVALID_HANDLE_VALUE && hin != INVALID_HANDLE_VALUE) {
+            si.dwFlags = STARTF_USESTDHANDLES;
+            si.hStdInput = hin;
+            si.hStdOutput = hout;
+            si.hStdError = hout;
+        }
+        ok = CreateProcessW(exe, cmd, NULL, NULL, si.dwFlags ? TRUE : FALSE, 0, NULL, dir, &si, pi);
+        if (hout != INVALID_HANDLE_VALUE) CloseHandle(hout);
+        if (hin != INVALID_HANDLE_VALUE) CloseHandle(hin);
+        return ok;
+    }
+}
+
+static void play(void)
+{
     PROCESS_INFORMATION pi;
     HANDLE dup;
     if (game_running())
         return;
-    join(exe, s_game_dir, GAME_EXE);
-    swprintf_s(cmd, MAX_PATH + 4, L"\"%s\"", exe);
-    memset(&si, 0, sizeof si);
-    si.cb = sizeof si;
-    if (!CreateProcessW(exe, cmd, NULL, NULL, FALSE, 0, NULL, s_game_dir, &si, &pi)) {
+    if (!start_game(s_game_dir, &pi)) {
         set_status(1, L"Windows could not start the game (error %lu).", GetLastError());
         return;
     }
@@ -1323,8 +1390,8 @@ static LRESULT CALLBACK wndproc(HWND w, UINT m, WPARAM wp, LPARAM lp)
     }
     case WM_APP_GAMEEND:
         if (wp)
-            set_status(1, L"The game closed with an error (code %08X). What happened is in btvs_log.txt in the "
-                          L"game folder, and in the Reports folder if it wrote a report.", (unsigned)wp);
+            set_status(1, L"The game closed with an error (code %08X). What happened is in btvs_log.txt and "
+                          L"btvs_console.txt in the game folder, and in its crashes folder if it wrote a report.", (unsigned)wp);
         else
             set_status(0, L"Ready.");
         layout();
@@ -1475,6 +1542,32 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
                 fwprintf(stderr, L"%s: %s\n", res == INSTALL_NO_PROGRAM ? L"game files installed" : L"failed", s_install_msg);
             return res == INSTALL_OK ? 0 : res == INSTALL_NO_PROGRAM ? 2 : 1;
         }
+        if (!wcscmp(argv[1], L"--play")) {
+            /* What the Play button does, without the window: the game folder
+             * is found the same way (launcher.ini, else the launcher's own
+             * folder) unless one is given. The game inherits the environment,
+             * so a test's BTVS_NO_WINDOW / BTVS_MUTE reach it. */
+            PROCESS_INFORMATION pi;
+            DWORD code = 0;
+            if (argc >= 3)
+                GetFullPathNameW(argv[2], MAX_PATH, s_game_dir, NULL);
+            else
+                load_launcher_ini();
+            if (!is_game_folder(s_game_dir) || !has_program(s_game_dir)) {
+                fwprintf(stderr, L"no installed game%s%s\r\n", s_game_dir[0] ? L" in " : L"", s_game_dir);
+                return 1;
+            }
+            if (!start_game(s_game_dir, &pi)) {
+                fwprintf(stderr, L"Windows could not start the game (error %lu)\r\n", GetLastError());
+                return 1;
+            }
+            wprintf(L"started %s\\%s (process %lu) in %s\r\n", s_game_dir, GAME_EXE, pi.dwProcessId, s_game_dir);
+            fflush(stdout);
+            WaitForSingleObject(pi.hProcess, INFINITE);
+            GetExitCodeProcess(pi.hProcess, &code);
+            wprintf(L"the game ended with code %lu\r\n", code);
+            return (int)code;
+        }
         if (argc >= 3 && !wcscmp(argv[1], L"--identify"))
             return identify(argv[2]);
         if (argc >= 3 && !wcscmp(argv[1], L"--list")) {
@@ -1491,7 +1584,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
             disc_close(&d);
             return 0;
         }
-        fwprintf(stderr, L"usage: --install <image> <folder> [--quiet] | --identify <image|folder|xbe> | --list <image> "
+        fwprintf(stderr, L"usage: --install <image> <folder> [--quiet] | --play [game folder] | --identify <image|folder|xbe> | --list <image> "
                          L"| --capture <install|busy|error|play> <out.bmp> [game folder] | --version\n");
         return 1;
     }

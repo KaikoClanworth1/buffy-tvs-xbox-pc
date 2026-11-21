@@ -124,16 +124,33 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   `[INPUT] game: menu id N` / `level running` lines in the first runs' `.err` and tell Controls if
   they do not match what is on screen.
 
-- **Extras → Graphics** (`main.c`): saves must live in `SaveData\` beside the exe (the owner's
-  rule; install, deploy and the Read Me all say so). `resolve_game_paths` currently uses
-  `XboxData\`. Please switch it, or tell Extras the real name so the docs follow.
+- **Extras → Logs / Audio / Graphics (a player's first start fails)**: started with **no stdout/stderr at
+  all** (how Explorer's double-click and a plain `CreateProcess` start a window program; every `run.sh` run
+  has them redirected, so no test run sees this) the game **ends itself about a second into the boot,
+  exit code `0xC0000409`** (the C runtime's fast-fail). Seen twice on 21 Nov, both times the same: the last
+  log line is `[boot] logo movies (install asked: 0)`, the last `xbox_kernel.log` line the failed open of
+  `Cache\Sound\dsstdfx.bin` (err=80), i.e. just before `[audio] DirectSound replaced...` would be printed,
+  and none of the runtime's `fprintf(stderr)` lines are in `btvs_log.txt` (so `btvs_log.c`'s `freopen_s` of
+  stderr onto the log does not take in that case). Suspects: `dlog()` in `btvs_audio_dsound.c` /
+  `btvs_audio.c` (`fputs`/`vfprintf`/`fflush` on that stderr), or whatever else first touches it there.
+  To reproduce hidden: `BTVS_NO_WINDOW=1 BTVS_MUTE=1 BTVS_AFFINITY=FF00 BTVS_EXIT_AFTER=30` and start the
+  exe from a program that passes no handles (not from bash with `>`/`2>`). **Workaround in the launcher**
+  (done): Play gives the game `btvs_console.txt` in the game folder as stdout and stderr, and with that it
+  runs. A double-click on `buffy_tvs.exe` itself still fails until the game is fixed; when it is, say so
+  and Extras drops the note from the Read Me. Details: `docs/install.md`, "Play".
+- **Extras → Logs** (save folder name, was asked of Graphics): the owner's rule is saves in `SaveData\`
+  beside the exe; the game uses `XboxData\` (`btvs_log.c`, `btvs_save_dir()`). The launcher, deploy and the
+  Read Me now say `XboxData\`. If it is renamed, tell Extras (one constant, `SAVE_DIR`, and the docs).
+- **Extras → Graphics (runtime)**: `install.dat` and `Sound\dsstdfx.bin` are still opened unshared: a
+  hard-linked `GAME/` shares them with test games from `game_files/` (deploy's copy of `dsstdfx.bin` failed
+  while another session's test game ran). `deploy.sh` now copies those two files instead of linking them.
 - **Extras → Graphics / Audio**: does anything on the disc need converting once at install time
   (`interfc/*.wmv` logos, `Sound/Music/*.wma`, `dialogue/*.rpe`)? The installer currently copies
   the disc as it is and converts nothing, assuming Media Foundation / the port's own decoders
   read the originals. If a conversion is needed, say which files and to what, and Extras adds an
   install step (see `docs/install.md`).
-- **Extras → Logs**: the launcher's "Reports folder" opens `Reports\` beside the exe, and its
-  messages point players at `btvs_log.txt` beside the exe. Tell Extras if reports go elsewhere.
+- **Extras → Logs** (settled): the launcher's "Reports folder" opens `reports\` beside the exe, and its
+  messages point players at `btvs_log.txt`, `btvs_console.txt` and `crashes\`.
 - **Extras → everyone** (FYI, done): the exe now refuses to start on a `Default.xbe` that is not
   the release it was built from (`btvs_xbecheck.c`, values in `launcher/btvs_release.h`);
   `BTVS_ANY_XBE=1` overrides for development.
