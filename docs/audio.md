@@ -23,15 +23,15 @@ image, no legacy DirectSound.
 | Game exe links with the audio layer | **works** | `bash port/tools/build.sh` |
 | WMA music through the game's own decoder | **works** | `BTVS_WMA_TEST` on 4 tracks: right format, length within 0.1 s of the file's header, no gaps or clicks in the dump (In the game, below) |
 | DSOUND replacement inside the game | **active** (regen of 2026-11-20) | log line `DirectSound replaced by the port's mixer`; every sound below went through it |
-| Title / main-menu music | **works**; short gaps remain when the whole game hitches (not an audio fault) | muted runs, `BTVS_AUDIO_DUMP`; slow file reads no longer break it (track read into memory) |
+| Title / main-menu music | **works** | muted run on current main: 107 s of music, one dropout under 0.2 s (a slow frame of the test game); tracks are read into memory, so slow disk reads no longer break it |
 | Menu effects (move, select, back) | **work** | same run: 10 effects started by the scripted pad, each in the log and in the dump |
-| Logo and intro movie sound | **present, but breaks up in test runs**: the translated WMV decoder is slower than real time there (profile below) | 867 gaps in a 158 s dump; not an audio fault |
+| Logo and intro movie sound | **works** in a test run with a few short dropouts (was 867 gaps while the game had one CPU) | all five movies, right length (107 s), 14 dropouts under 0.2 s and one of 0.43 s, no clicks; an unloaded PC was not checked |
 | Music looping | **works** | 190 s menu run: the 119 s track ends and starts again, second pass matches the first |
 | Looping buffers | **work** in the level | ambience loops had restarted 12 and 17 times when stopped |
 | Dialogue (`.rpe`) in the level | **works** | the opening cutscene's seven lines are tagged speech, do not overlap and play to their end |
 | Effects in the level (ambience, footsteps, attacks) | **work** | 466 buffers in a scripted run, effects follow the scripted presses, nothing clipped |
 | 3D panning | **works** (was missing until 21 Nov) | 297 of 297 off-centre sounds louder on their side; not checked against the picture |
-| Volume settings (Menu's PC Audio page) | master, music, effects **applied live**; speech not seen in the game | slider presses by pad script against the dump |
+| Volume settings (Menu's PC Audio page) | **applied live**: master, music, effects by slider presses; speech by its setting in a level | pad script against the dump; speech at 50 starts each line at a quarter gain |
 | Lip-sync against the picture, fights, later levels | **not checked** | - |
 | PCM (non-ADPCM) buffers, stereo buffers | written, **not exercised**: every sound found on the disc so far is mono ADPCM; PCM is exercised only as a stream | - |
 
@@ -368,7 +368,7 @@ line that reaches its end says so.
 **Not verified in a level**: lip-sync against the picture (the mouth follows
 `GetCurrentPosition`, which is the mixer's own read position; only the sound side was checked),
 combat against an enemy, occlusion, anything after the first minutes of the first level, other
-levels, the pause menu's effect on sound, `[audio] speech` in the game (below).
+levels, the pause menu's effect on sound.
 
 ## Looping music, volumes, movies again (2026-11-21)
 
@@ -387,8 +387,8 @@ movie after about 70 s): the 119.0 s title track plays through, fades out as the
 | Effects 100 -> 0, step by step | each effect starts quieter than the last (gain 0.147 -> 0.000), then digital silence |
 | Effects and Music back to 100 | both back |
 
-`speech` uses the same per-category gain as `effects`; it was not seen changing in the game (the
-level run for it was stopped three times by the disc-file clash, `docs/AREAS.md`).
+`speech` uses the same per-category gain as `effects`; it was checked in the level with
+`BTVS_AUDIO_SPEECH=50` (below), not by slider presses.
 
 **Music gaps: two causes found, one fixed.**
 1. *Slow file reads* (fixed). The decoder asks the game for file bytes on the music thread; reads
@@ -422,13 +422,35 @@ side; whether it keeps up on an unloaded PC at normal priority is **not known**.
 The late-sound skip of 20 Nov still has not been seen working in the game (the queue never fills,
 because the decoder never catches up).
 
+## After the game went back to all CPUs (2026-11-21, main at `a70227f` and later)
+
+Everything above was measured with the game's threads on one CPU (`BTVS_GAME_CPUS=400`, the
+default until `a70227f`). Graphics then made the game's lock atomic and let its threads use all
+the process's CPUs. Same runs again on that build, **without** `BTVS_GAME_CPUS`, two test games at
+once, muted and hidden:
+
+| Run | Before (one CPU) | Now |
+|---|---|---|
+| Main menu, 107 s of music | 6-7 gaps of 0.3-0.9 s, 35-55 frames a second | **1 dropout under 0.2 s**, the stream ran dry once, 60 frames a second (lowest second 41.8) |
+| Logos and intro movie | 867 gaps, 156 clicks, not finished after 158 s | **finish after 107 s** (their length); 14 dropouts under 0.2 s and one of 0.43 s, no clicks, the stream ran dry 20 times in 149 s |
+| First level, 115 s (this one still with `BTVS_GAME_CPUS=400`) | music ran dry in 45 of 150 seconds, median 37 frames a second | ran dry in 2 seconds, median 58; nothing clipped, no dropouts in the mix |
+
+So movie sound and music are close to clean in a test run now; the few dropouts left sit on slow
+frames of a below-normal-priority test game on a busy PC. Whether there are none on an unloaded
+PC at normal priority was **not checked** (it needs the owner's ears or an unloaded run).
+`[audio] speech = 50` in the level: the cutscene's lines start at a quarter of their gain (0.701
+-> 0.175, the slider is squared), effects unchanged. The level's music (a 4.2 MB track) was read
+ahead in 2 ms. The timer thread still spins on this build (178 million kernel calls in the run).
+
+Use plain runs from now on; `BTVS_GAME_CPUS=400` / `800` in the commands above is only needed to
+reproduce the old one-CPU behaviour.
+
 ## Still to do
 
-1. Movie sound: needs the movie decoder at real-time speed (Graphics); then rerun
-   `aud_movie` and expect no gaps.
-2. Music gaps at whole-game hitches: needs the hitches gone (Graphics / runtime); rerun
-   `aud_menu` and the level run and expect none.
-3. `[audio] speech` seen changing in a level; lip-sync against the picture; a fight; later levels.
+1. An unloaded run at normal priority (or the owner listening): movies, menu music and a level
+   with no dropouts at all.
+2. `XapiMmTimerThread` still spins (`docs/AREAS.md` has the fix that was tried).
+3. Lip-sync against the picture; a fight; later levels; the pause menu's effect on sound.
 4. Decide with Menu whether `[audio]` sliders drive the game's own three volumes instead of
    sitting on top of them. Movie sound currently follows the Music slider.
 5. Reverb from the I3DL2 parameters, if the levels sound too dry without it.
