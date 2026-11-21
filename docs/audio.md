@@ -28,6 +28,7 @@ image, no legacy DirectSound.
 | Menu effects (move, select, back) | **work** | same run: 10 effects started by the scripted pad, each in the log and in the dump |
 | Logo and intro movie sound | **works** in a test run with a few short dropouts (was 867 gaps while the game had one CPU) | all five movies, right length (107 s), 14 dropouts under 0.2 s and one of 0.43 s, no clicks; an unloaded PC was not checked |
 | Music looping | **works** | 190 s menu run: the 119 s track ends and starts again, second pass matches the first |
+| Music moving on to the next piece | **fixed 21 Nov** (the piece before could play again; "keeps repeating", below). The owner has not heard the fix yet | 300 s cemetery run: the switch is in the log and the dump has the new piece |
 | Looping buffers | **work** in the level | ambience loops had restarted 12 and 17 times when stopped |
 | Dialogue (`.rpe`) in the level | **works** | the opening cutscene's seven lines are tagged speech, do not overlap and play to their end |
 | Effects in the level (ambience, footsteps, attacks) | **work** | 466 buffers in a scripted run, effects follow the scripted presses, nothing clipped |
