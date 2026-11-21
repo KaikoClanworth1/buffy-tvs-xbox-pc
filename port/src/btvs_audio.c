@@ -35,6 +35,8 @@
 #define PAN_NEAR       16.0f        /* game units (about cm): closer than this a 3D sound moves to the centre */
 #define DEV_BUFFERS    8             /* ring of submit buffers */
 #define DEV_QUEUE      5             /* periods kept queued: 50 ms */
+#define RS_TAPS        16            /* resampler: source frames per output sample */
+#define RS_PHASES      256           /* positions between two source frames */
 
 #define PKT_PENDING    0x8000000Au
 #define PKT_FLUSHED    0x80004004u
@@ -73,10 +75,11 @@ typedef struct {
     uint32_t debt_age;               /* frames played since data came back */
     uint32_t qbytes;                 /* bytes in the queue, counting the head packet whole */
 
-    /* resampler: s0 is the frame being heard, s1 the next one */
-    int      primed, ended;
+    /* resampler: the last RS_TAPS source frames, newest last; the output
+     * point lies between hist[RS_TAPS/2-1] and hist[RS_TAPS/2] */
+    int      primed, ended, tail;
     double   phase;
-    float    s0[2], s1[2];
+    float    hist[2][RS_TAPS];
     float    gl, gr;                 /* gains at the end of the last period */
     int      gain_set;
 } Voice;
@@ -135,9 +138,9 @@ static Voice *vget(int id)
 
 /* ---- Xbox ADPCM ------------------------------------------------------------
  * IMA ADPCM, 4 bits per sample. Per channel: a 4-byte header (first sample,
- * step index) and 64 samples; the nibbles come 8 samples (4 bytes) at a time,
- * the channels taking turns. A block is 36 bytes per channel and yields 64
- * frames (the header sample only seeds the predictor). */
+ * step index) and 64 nibbles, which come 8 (4 bytes) at a time, the channels
+ * taking turns. A block is 36 bytes per channel and yields 64 frames: the
+ * header sample and 63 decoded ones. */
 
 static const int s_ima_steps[89] = {
     7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
@@ -177,12 +180,19 @@ static void adpcm_block(Voice *v, int32_t b)
         if (idx[ch] > 88) idx[ch] = 88;
     }
     p += 4 * nch;
+    /* The header's sample is the block's first frame and the first 63 nibbles
+     * give the other 63. The 64th nibble is padding (always 0 in the game's
+     * files; the step index in the next header is the one after nibble 63):
+     * playing it instead of the header sample puts a wrong sample into the
+     * sound 344 times a second, which is heard as a rasp on voices. */
+    for (ch = 0; ch < nch; ch++) v->cache[ch][0] = (int16_t)pred[ch];
     for (i = 0; i < 8; i++) {
         for (ch = 0; ch < nch; ch++) {
             for (k = 0; k < 4; k++) {
                 uint8_t byte = p[k];
-                v->cache[ch][i * 8 + k * 2]     = ima_step(byte & 0xF, &pred[ch], &idx[ch]);
-                v->cache[ch][i * 8 + k * 2 + 1] = ima_step(byte >> 4, &pred[ch], &idx[ch]);
+                int at = i * 8 + k * 2 + 1;
+                v->cache[ch][at] = ima_step(byte & 0xF, &pred[ch], &idx[ch]);
+                if (at + 1 < 64) v->cache[ch][at + 1] = ima_step(byte >> 4, &pred[ch], &idx[ch]);
             }
             p += 4;
         }
@@ -373,6 +383,39 @@ static void stream_dry(Voice *v, int frames, double step)
     if (v->debt > 2.0 * (double)(v->freq > 0 ? v->freq : v->rate)) { v->debt = 0.0; v->late = 0; }
 }
 
+/* The resampler's table: for each position between two source frames, the
+ * weights of the RS_TAPS frames around it (a sinc cut at the source's own
+ * range, Kaiser window; each row sums to 1). */
+static float s_rs[RS_PHASES + 1][RS_TAPS];
+
+static double bessel_i0(double x)
+{
+    double sum = 1.0, term = 1.0;
+    int k;
+    for (k = 1; k < 40; k++) {
+        term *= (x / (2.0 * k)) * (x / (2.0 * k));
+        sum += term;
+    }
+    return sum;
+}
+
+static void resampler_init(void)
+{
+    const double pi = 3.14159265358979323846, beta = 6.0, half = RS_TAPS / 2;
+    int p, t;
+    for (p = 0; p <= RS_PHASES; p++) {
+        double f = (double)p / RS_PHASES, row[RS_TAPS], sum = 0.0;
+        for (t = 0; t < RS_TAPS; t++) {
+            double x = (double)(t - (RS_TAPS / 2 - 1)) - f;      /* frames from the output point */
+            double w = x / half, s = fabs(x) < 1e-9 ? 1.0 : sin(pi * x) / (pi * x);
+            w = fabs(w) >= 1.0 ? 0.0 : bessel_i0(beta * sqrt(1.0 - w * w)) / bessel_i0(beta);
+            row[t] = s * w;
+            sum += row[t];
+        }
+        for (t = 0; t < RS_TAPS; t++) s_rs[p][t] = (float)(row[t] / sum);
+    }
+}
+
 /* Add `frames` frames of voice v to acc (interleaved float stereo). */
 static void voice_mix(Voice *v, float *acc, int frames)
 {
@@ -391,21 +434,21 @@ static void voice_mix(Voice *v, float *acc, int frames)
     if (step <= 0.0) return;
 
     if (!v->primed) {
-        if (!voice_fetch(v, v->s1)) {
-            if (v->ended) { v->playing = 0; v->idx = 0; }
-            stream_dry(v, frames, step);
-            return;
-        }
-        v->s0[0] = v->s1[0]; v->s0[1] = v->s1[1];
-        v->phase = 1.0;
+        /* Silence before the first frame; the first output sample is the
+         * first source frame itself. */
+        memset(v->hist, 0, sizeof v->hist);
+        v->phase = (double)(RS_TAPS / 2 + 1);
+        v->tail = 0;
         v->primed = 1;
     }
 
     for (i = 0; i < frames; i++) {
         float a, b, f;
+        const float *k0, *k1;
+        int t;
         while (v->phase >= 1.0) {
             float n[2];
-            if (v->ended == 2) {             /* the last frame has been heard */
+            if (v->tail > RS_TAPS / 2) {     /* the last frame has been heard */
                 if (s_log && v->cat == BTVS_CAT_SPEECH)
                     alog("end  #%d: speech played to its end", (int)(v - s_voice));
                 v->playing = 0; v->ended = 0; v->primed = 0; v->idx = 0;
@@ -416,16 +459,35 @@ static void voice_mix(Voice *v, float *acc, int frames)
                     stream_dry(v, frames - i, step);
                     return;
                 }
-                v->ended = 2;
+                v->tail++;                   /* silence after the last frame */
                 n[0] = n[1] = 0.0f;
+            } else {
+                v->tail = 0;
             }
-            v->s0[0] = v->s1[0]; v->s0[1] = v->s1[1];
-            v->s1[0] = n[0]; v->s1[1] = n[1];
+            memmove(v->hist[0], v->hist[0] + 1, sizeof(float) * (RS_TAPS - 1));
+            v->hist[0][RS_TAPS - 1] = n[0];
+            if (stereo) {
+                memmove(v->hist[1], v->hist[1] + 1, sizeof(float) * (RS_TAPS - 1));
+                v->hist[1][RS_TAPS - 1] = n[1];
+            }
             v->phase -= 1.0;
         }
-        f = (float)v->phase;
-        a = v->s0[0] + (v->s1[0] - v->s0[0]) * f;
-        b = v->s0[1] + (v->s1[1] - v->s0[1]) * f;
+        /* Band-limited interpolation: straight lines between the frames of a
+         * 22050 or 11025 Hz voice leave copies of it above its own range
+         * (only about 20 dB down), heard as a hiss on speech. */
+        f = (float)v->phase * (float)RS_PHASES;
+        t = (int)f;
+        if (t >= RS_PHASES) t = RS_PHASES - 1;
+        f -= (float)t;
+        k0 = s_rs[t]; k1 = s_rs[t + 1];
+        a = 0.0f;
+        for (t = 0; t < RS_TAPS; t++) a += v->hist[0][t] * (k0[t] + (k1[t] - k0[t]) * f);
+        if (stereo) {
+            b = 0.0f;
+            for (t = 0; t < RS_TAPS; t++) b += v->hist[1][t] * (k0[t] + (k1[t] - k0[t]) * f);
+        } else {
+            b = a;
+        }
         if (is3d && stereo) a = b = (a + b) * 0.5f;
         acc[i * 2]     += a * gl;
         acc[i * 2 + 1] += b * gr;
@@ -710,6 +772,7 @@ int btvs_audio_init(int flags)
     const char *e;
     if (s_inited) return 1;
     InitializeCriticalSection(&s_lock);
+    resampler_init();
     s_offline = (flags & BTVS_AUDIO_OFFLINE) != 0;
     e = getenv("BTVS_MUTE");      s_muted = e && *e && *e != '0';
     e = getenv("BTVS_AUDIO_LOG"); s_log = e && *e && *e != '0';
