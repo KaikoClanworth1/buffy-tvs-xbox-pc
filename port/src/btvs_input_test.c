@@ -333,13 +333,54 @@ static int selftest(void)
       CHECK(rl == 0 && rr == 0);
     }
 
-    /* 5f. the button pictures follow the device: a controller on player 1, or none */
+    /* 5f. the device in use follows what the player touches: a new touch
+     * only, a second apart at least, and the controller's unplugging at once */
+    _putenv_s("BTVS_INPUT_SCRIPT_DEVICE", "xbox");                      /* a script's K: lines count as the keyboard */
     btvs_input__test_reset();
-    CHECK(btvs_input__glyph_device() == 0);                             /* keyboard and mouse */
+    s_focus = 1;
+    s_t = 99000.0;
+    CHECK(btvs_input__glyph_device() == 0);                             /* no controller: keyboard and mouse */
+    CHECK(btvs_input_script_load_text("3.0 K:W for 0.1; 5.0 K:W for 0.1; 5.3 K:W for 0.1; 9.0 K:W for 0.1") == 4);
+    tick(&a, &b, NULL);
     memset(&hp, 0, sizeof hp);
     btvs_input__test_host_pad(&hp);
+    s_t = 99200.0; tick(&a, &b, NULL);
+    CHECK(btvs_input__glyph_device() == 0);                             /* plugged in, but within the first second */
+    hp.buttons = 1u << HB_A;
+    btvs_input__test_host_pad(&hp);
+    s_t = 100500.0; tick(&a, &b, NULL);
+    CHECK(btvs_input__glyph_device() == 1);                             /* a button: an Xbox-style pad */
+    hp.buttons = 0;
+    btvs_input__test_host_pad(&hp);
     tick(&a, &b, NULL);
-    CHECK(btvs_input__glyph_device() == 1);                             /* an Xbox-style pad */
+    s_t = 102050.0; tick(&a, &b, NULL);
+    CHECK(btvs_input__glyph_device() == 0);                             /* a key */
+    hp.lx = 13000;                                                      /* a stick resting at 0.4: drift */
+    btvs_input__test_host_pad(&hp);
+    s_t = 103500.0; tick(&a, &b, NULL);
+    CHECK(btvs_input__glyph_device() == 0);
+    hp.lx = 30000;                                                      /* pushed, and left there */
+    btvs_input__test_host_pad(&hp);
+    s_t = 103600.0; tick(&a, &b, NULL);
+    CHECK(btvs_input__glyph_device() == 1);
+    s_t = 104050.0; tick(&a, &b, NULL);
+    CHECK(btvs_input__glyph_device() == 1);                             /* a key 0.45 s later: not yet */
+    s_t = 104350.0; tick(&a, &b, NULL);
+    CHECK(btvs_input__glyph_device() == 1);                             /* nor 0.75 s later */
+    s_t = 106000.0; tick(&a, &b, NULL);
+    s_t = 108050.0; tick(&a, &b, NULL);
+    CHECK(btvs_input__glyph_device() == 0);                             /* a key later on */
+    s_t += 1500.0; tick(&a, &b, NULL);
+    CHECK(btvs_input__glyph_device() == 0);                             /* the stick still held does not take it back */
+    hp.buttons = 1u << HB_B;
+    btvs_input__test_host_pad(&hp);
+    tick(&a, &b, NULL);
+    CHECK(btvs_input__glyph_device() == 1);
+    btvs_input__test_host_pad(NULL);
+    s_t += 100.0; tick(&a, &b, NULL);
+    CHECK(btvs_input__glyph_device() == 0);                             /* unplugged: at once */
+    CHECK(btvs_input__device_changes() == 7);
+    _putenv_s("BTVS_INPUT_SCRIPT_DEVICE", "");
 
     /* 6. rebinding a controller button: X's action onto the pad's Y */
     btvs_input__test_reset();

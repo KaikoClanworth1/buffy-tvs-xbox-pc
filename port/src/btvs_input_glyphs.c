@@ -1262,11 +1262,31 @@ static int choose_set(void)
     }
 }
 
+static const char *const k_set_names[] = { "keyboard and mouse", "Xbox", "PlayStation", "the game's own" };
+static WCHAR s_stamp_path[MAX_PATH];
+static char s_drawn[1024];                  /* what the files in load\ were drawn from */
+
+/* Every picture drawn again, for s_set and the bindings of this moment. */
+static void draw_all(const char *want)
+{
+    FILE *f = NULL;
+    remove_old();
+    s_written = 0;
+    build_menu();
+    build_page();
+    build_controller();
+    if (s_written == (int)(sizeof k_menu / sizeof k_menu[0]) + 4 && !_wfopen_s(&f, s_stamp_path, L"wb") && f) {
+        fwrite(want, 1, strlen(want), f);
+        fclose(f);
+    }
+    strcpy_s(s_drawn, sizeof s_drawn, want);
+}
+
 /* Before the game's first frame. */
 void btvs_input__glyphs_boot(void)
 {
-    static const char *const k_names[] = { "keyboard and mouse", "Xbox", "PlayStation", "the game's own" };
-    WCHAR root[MAX_PATH], stamp_path[MAX_PATH];
+    static const char *const *const k_names = k_set_names;
+    WCHAR root[MAX_PATH], *const stamp_path = s_stamp_path;
     char want[1024], have[1024];
     const char *e = getenv("BTVS_GLYPH_DIR");
     FILE *f = NULL;
@@ -1304,17 +1324,10 @@ void btvs_input__glyphs_boot(void)
         fclose(f);
     }
     if (strcmp(want, have)) {
-        remove_old();
-        s_written = 0;
-        build_menu();
-        build_page();
-        build_controller();
-        if (s_written == (int)(sizeof k_menu / sizeof k_menu[0]) + 4 && !_wfopen_s(&f, stamp_path, L"wb") && f) {
-            fwrite(want, 1, strlen(want), f);
-            fclose(f);
-        }
+        draw_all(want);
         IN_LOG("button pictures: %s set, %d pictures drawn in %.2f s (%S)", k_names[s_set], s_written, btvs_frame_seconds() - t0, s_load);
     } else {
+        strcpy_s(s_drawn, sizeof s_drawn, want);
         IN_LOG("button pictures: %s set (%S)", k_names[s_set], s_load);
     }
     nv2a_gpu_set_texture_pack(root, getenv("BTVS_GLYPH_DUMP") != NULL, 1, 1);
@@ -1423,16 +1436,21 @@ int btvs_input__glyphs_fit_text(char *s, int mouse_camera)
     return 1;
 }
 
-static uint32_t s_fit_text[32];             /* the reworded sentences, for tips_show */
+/* The sentences that have a keyboard-and-mouse wording: where each is in the
+ * game's memory, and both wordings, so they can change with the device. */
+static uint32_t s_fit_text[32];
 static char s_fit_name[32][48];
+static char *s_fit_pad[32], *s_fit_keys[32];
 static int s_nfit;
+static int s_tips_found, s_tips_keys;       /* the table was read; the keyboard wording is in */
+static volatile LONG s_redraw;              /* the pictures: 0 as drawn, 1 being drawn again, 2 drawn, to be swapped in */
 
-static void tips_fit(void)
+static void tips_find(void)
 {
-    static int done, delay = -1;
-    uint32_t tw, table, b, node, n = 0, seen = 0;
+    static int delay = -1;
+    uint32_t tw, table, b, node, seen = 0;
     int guard;
-    if (done || s_set != SET_KEYS)
+    if (s_tips_found)
         return;
     if (!readable(G_TIP_WINDOW, 4) || (tw = MEM32(G_TIP_WINDOW)) == 0 || !readable(tw, 0x2A0u)
             || !readable(MEM32(tw), TIP_QUERY_SLOT + 4u) || MEM32(MEM32(tw) + TIP_QUERY_SLOT) != 0x002377B0u)
@@ -1448,31 +1466,134 @@ static void tips_fit(void)
     }
     if (delay-- > 0)
         return;
-    done = 1;
+    s_tips_found = 1;
     if (getenv("BTVS_GLYPH_NO_TIP_TEXT"))
         return;
     for (b = 0; b < 37u; b++)                   /* 37 chains of { sentence, name, next } */
         for (node = MEM32(table + 8u + b * 4u), guard = 0; node && readable(node, 12) && guard < 500; node = MEM32(node + 8u), guard++) {
-            uint32_t str = MEM32(node), text;
+            uint32_t str = MEM32(node), text, key;
+            char keys[512];
             if (!str || !readable(str, 8) || (text = MEM32(str)) == 0 || !readable(text, 1))
                 continue;
             seen++;
-            if (memchr((const char *)XBOX_PTR(text), 0, 500)
-                    && btvs_input__glyphs_fit_text((char *)XBOX_PTR(text), btvs_setting_int("controls", "mouse_look", 1) != 0)) {
-                uint32_t key = MEM32(node + 4u);
-                n++;
-                if (s_nfit < 32) {
-                    s_fit_text[s_nfit] = text;
-                    s_fit_name[s_nfit][0] = 0;
-                    if (key && readable(key, 48) && memchr((const char *)XBOX_PTR(key), 0, 48))
-                        strcpy_s(s_fit_name[s_nfit], sizeof s_fit_name[0], (const char *)XBOX_PTR(key));
-                    s_nfit++;
-                }
-            }
+            if (s_nfit >= 32 || !memchr((const char *)XBOX_PTR(text), 0, sizeof keys))
+                continue;
+            strcpy_s(keys, sizeof keys, (const char *)XBOX_PTR(text));
+            if (!btvs_input__glyphs_fit_text(keys, btvs_setting_int("controls", "mouse_look", 1) != 0))
+                continue;
+            s_fit_text[s_nfit] = text;
+            s_fit_pad[s_nfit] = _strdup((const char *)XBOX_PTR(text));
+            s_fit_keys[s_nfit] = _strdup(keys);
+            s_fit_name[s_nfit][0] = 0;
+            key = MEM32(node + 4u);
+            if (key && readable(key, 48) && memchr((const char *)XBOX_PTR(key), 0, 48))
+                strcpy_s(s_fit_name[s_nfit], sizeof s_fit_name[0], (const char *)XBOX_PTR(key));
+            s_nfit++;
         }
-    IN_LOG("button pictures: %u of the game's %u tips reworded for keyboard and mouse", n, seen);
-    for (b = 0; b < (uint32_t)s_nfit; b++)
-        IN_LOG("button pictures: tip %s: %s", s_fit_name[b], (const char *)XBOX_PTR(s_fit_text[b]));
+    IN_LOG("button pictures: %d of the game's %u tips have a wording for keyboard and mouse", s_nfit, seen);
+}
+
+/* The wording that goes with the pictures on screen. A sentence is changed
+ * only where it still reads as the other wording did. */
+static void tips_fit(void)
+{
+    static int listed;
+    int want, i, n = 0;
+    tips_find();
+    want = s_set == SET_KEYS;
+    if (!s_tips_found || s_redraw || want == s_tips_keys)
+        return;
+    for (i = 0; i < s_nfit; i++) {
+        const char *from = want ? s_fit_pad[i] : s_fit_keys[i], *to = want ? s_fit_keys[i] : s_fit_pad[i];
+        uint32_t len = from && to ? (uint32_t)strlen(from) : 0;
+        if (len && readable(s_fit_text[i], len + 1u) && !memcmp(XBOX_PTR(s_fit_text[i]), from, len + 1u)) {
+            memcpy((char *)XBOX_PTR(s_fit_text[i]), to, len);
+            n++;
+        }
+    }
+    s_tips_keys = want;
+    IN_LOG("button pictures: %d tips reworded for %s", n, want ? "keyboard and mouse" : "a controller, as the game has them");
+    for (i = 0; want && !listed && i < s_nfit; i++)
+        IN_LOG("button pictures: tip %s: %s", s_fit_name[i], (const char *)XBOX_PTR(s_fit_text[i]));
+    listed |= want;
+}
+
+/* ── the device changes while the game runs ──────────────────────────────── */
+
+/* The pictures are files the renderer's texture pack reads, so a change of
+ * device means: draw the files again (a worker thread, about 0.2 s), then
+ * have the renderer drop what it loaded and look again. That last step is
+ * Graphics' nv2a_gpu_texture_pack_reload(); a build whose runtime has none
+ * links the empty one below instead, and the pictures change at the next
+ * level load or start, as before. The same path redraws after a rebind. */
+void nv2a_gpu_texture_pack_reload(void);
+void btvs_input__no_texture_reload(void) { }
+#pragma comment(linker, "/alternatename:nv2a_gpu_texture_pack_reload=btvs_input__no_texture_reload")
+
+static int reload_there(void)
+{
+    static void (*volatile a)(void) = nv2a_gpu_texture_pack_reload, (*volatile b)(void) = btvs_input__no_texture_reload;
+    return a != b;
+}
+
+static char s_redraw_want[1024];
+static double s_redraw_t0;
+
+static DWORD WINAPI redraw_thread(LPVOID arg)
+{
+    (void)arg;
+    draw_all(s_redraw_want);
+    InterlockedExchange(&s_redraw, 2);
+    return 0;
+}
+
+static void follow_device(void)
+{
+    static DWORD last;
+    static char told[1024];
+    DWORD now = GetTickCount();
+    char want[1024];
+    int set, keep;
+    HANDLE h;
+    if (!s_load[0])
+        return;                                 /* started with the game's own pictures */
+    if (s_redraw == 2) {
+        nv2a_gpu_texture_pack_reload();
+        InterlockedExchange(&s_redraw, 0);
+        IN_LOG("button pictures: now the %s set, swapped while the game runs (%d pictures, %.2f s)", k_set_names[s_set], s_written,
+               btvs_frame_seconds() - s_redraw_t0);
+        return;
+    }
+    if (s_redraw || now - last < 200)
+        return;
+    last = now;
+    if ((set = choose_set()) == SET_ORIGINAL)
+        return;
+    keep = s_set;
+    s_set = set;
+    stamp_text(want, sizeof want);
+    s_set = keep;
+    if (!strcmp(want, s_drawn))
+        return;
+    if (!reload_there() || getenv("BTVS_GLYPH_NO_LIVE")) {
+        if (strcmp(want, told)) {
+            strcpy_s(told, sizeof told, want);
+            IN_LOG("button pictures: the %s set is wanted now. This build's renderer cannot swap them while the game runs: "
+                   "they change at the next level load or start", k_set_names[set]);
+        }
+        return;
+    }
+    s_set = set;
+    strcpy_s(s_redraw_want, sizeof s_redraw_want, want);
+    s_redraw_t0 = btvs_frame_seconds();
+    InterlockedExchange(&s_redraw, 1);
+    h = CreateThread(NULL, 0, redraw_thread, NULL, 0, NULL);
+    if (h) {
+        CloseHandle(h);
+    } else {
+        draw_all(want);
+        InterlockedExchange(&s_redraw, 2);
+    }
 }
 
 /* BTVS_GLYPH_SHOW_TIPS=<first>,<every>[,<type>]: testing. The reworded tips
@@ -1516,6 +1637,7 @@ static void tips_show(void)
 void btvs_input__glyphs_poll(void)
 {
     ram_dump();
+    follow_device();
     tips_fit();
     tips_show();
 }

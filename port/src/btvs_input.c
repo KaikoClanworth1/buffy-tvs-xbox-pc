@@ -326,6 +326,8 @@ static in_host_pad s_test_pad_copy;
 static uint16_t s_rumble[BTVS_PORTS][2];
 static int s_sdl_tried;
 
+static int s_pad_new;               /* a controller has just come onto port 1 */
+
 static host_dev *dev_find(int kind, uint32_t id)
 {
     int i;
@@ -360,6 +362,8 @@ static void dev_seen(int kind, uint32_t id, const in_host_pad *pad, const char *
         for (p = 0; p < BTVS_PORTS && dev_on_port(p); p++)
             ;
         d->port = p < BTVS_PORTS ? p : -1;
+        if (d->port == 0)
+            s_pad_new = 1;                      /* (the device in use: a controller plugged in) */
         if (d->port >= 0)
             IN_LOG("player %d: %s connected", d->port + 1, d->name);
         else
@@ -415,6 +419,8 @@ static void devices_refresh(void)
         s_dev[i].seen = 0;
     if (s_test_pad) {
         dev_seen(DEV_XINPUT, 0, s_test_pad, "Test controller");
+    } else if (s_clock_fn) {
+        /* the self-test: only its own controller, never one that is really plugged in */
     } else if (C.backend != BACKEND_NONE) {
         in_host_pad p;
         char name[32];
@@ -540,7 +546,7 @@ static int key_value(int code, int mouse_ok, int hw)
  * turns it off. */
 static int s_menu_mode;                         /* 0 play, 1 a menu, 2 the title screen */
 static int s_mk_code[4], s_mk_blocked[4];       /* Enter, Space, Escape, Backspace */
-static void used_dev(int kind);
+static int s_key_sig;                           /* the bound keys down at the last look, added up */
 
 static void menu_key_codes(void)
 {
@@ -567,6 +573,7 @@ static void keys_to_actions(float *v, int mouse_ok, int hw, int port)
     int *const code = s_mk_code, *const blocked = s_mk_blocked;
     int down[4], menu = C.menu_keys ? s_menu_mode : 0, a, i, k;
     menu_key_codes();
+    s_key_sig = 0;
     for (i = 0; i < 4; i++)
         down[i] = key_value(code[i], 1, hw);
     for (i = 0; i < 4; i++)
@@ -580,8 +587,7 @@ static void keys_to_actions(float *v, int mouse_ok, int hw, int port)
                     c = 0;
             if (key_value(c, mouse_ok, hw)) {
                 v[a] = 1.0f;
-                if (hw && port == 0)
-                    used_dev(2);
+                s_key_sig += c;
             }
         }
     for (i = 0; menu && i < 4; i++)
@@ -589,33 +595,153 @@ static void keys_to_actions(float *v, int mouse_ok, int hw, int port)
             v[i < 2 ? ACT_A : ACT_B] = 1.0f;
             if (menu == 2 && i < 2)
                 v[ACT_START] = 1.0f;
-            if (hw && port == 0)
-                used_dev(2);
         }
+    (void)port;
 }
 
 /* hw 0: the window has no focus, so no device, key or mouse is asked; only
  * keys held by a pad script count. */
-/* What player 1 last touched (1 a controller, 2 keyboard or mouse), kept in
- * the settings: the button pictures of the next start follow it. */
-static int s_used_dev;
+/* ── the device in use ───────────────────────────────────────────────────── */
 
-static void used_dev(int kind)
+/* Player 1's controller and the keyboard and mouse both play at all times;
+ * nothing is chosen. What is tracked here is which of the two the player is
+ * on right now, for the button pictures, the tips and the Controls page:
+ *   - a controller: a button pressed, a trigger pulled past a third, a stick
+ *     pushed past half (and not again until it has been back under a third),
+ *     or the controller plugged in;
+ *   - keyboard and mouse: a key or mouse button pressed, or the mouse moved
+ *     30 counts within a quarter second while it is the camera; also when
+ *     player 1's controller is unplugged.
+ * Only a new touch counts, never something held or resting, so a stick that
+ * drifts or sticks and a mouse that trembles change nothing; and after a
+ * change the next one waits a second, so two devices touched at once do not
+ * flicker. It is kept in the settings (last_device) for the next start. */
+#define USE_PAD  1
+#define USE_KEYS 2
+#define USE_HOLD_MS    1000.0       /* between two changes */
+#define USE_STICK_ON   0.50f
+#define USE_STICK_OFF  0.30f
+#define USE_TRIGGER_ON  85
+#define USE_TRIGGER_OFF 50
+#define USE_MOUSE_COUNTS 30
+#define USE_MOUSE_MS   250.0
+
+static struct {
+    int use;                        /* 0 not known yet, USE_PAD, USE_KEYS */
+    int ps;                         /* that controller is a PlayStation one */
+    double changed_ms;
+    uint32_t changes;
+    /* the last look at each device */
+    uint32_t pad_buttons;
+    int pad_hot[4];                 /* left stick, right stick, left trigger, right trigger */
+    int key_sig;
+    int mouse_acc;
+    double mouse_from_ms;
+    int script;                     /* BTVS_INPUT_SCRIPT_DEVICE: 0 off, 1 Xbox, 2 PlayStation */
+    int script_pad, script_keys;
+} U;
+
+static int name_is_ps(const char *n)
 {
-    if (s_used_dev == kind || s_test_pad || s_clock_fn)
-        return;
-    s_used_dev = kind;
-    btvs_setting_set_str("controls", "last_device", kind == 1 ? "controller" : "keyboard");
-    btvs_settings_save();
+    return strstr(n, "PS") || strstr(n, "DualSense") || strstr(n, "DualShock") || strstr(n, "Sony")
+        || strstr(n, "PlayStation") || !strcmp(n, "Wireless Controller");
 }
 
-int btvs_input__glyph_device(void)
+/* A new touch of a device. force: no waiting (the controller was unplugged). */
+static void use_event(int kind, int ps, const char *why, const char *name, int force, int keep)
+{
+    static const char *const k_what[] = { "nothing yet", "controller", "keyboard and mouse" };
+    double t = now_ms();
+    if (U.use == kind && (kind != USE_PAD || U.ps == ps))
+        return;
+    if (U.use && !force && t - U.changed_ms < USE_HOLD_MS && t >= U.changed_ms)
+        return;
+    IN_LOG("device in use: %s%s%s%s (%s); it was %s", kind == USE_PAD ? (ps ? "PlayStation controller" : "Xbox controller") : k_what[USE_KEYS],
+           name && *name ? ", " : "", name && *name ? name : "", "", why, k_what[U.use]);
+    U.use = kind;
+    U.ps = kind == USE_PAD && ps;
+    U.changed_ms = t;
+    U.changes++;
+    if (keep && !s_clock_fn) {
+        btvs_setting_set_str("controls", "last_device", kind == USE_PAD ? "controller" : "keyboard");
+        btvs_settings_save();
+    }
+}
+
+/* Player 1's controller, read just now. */
+static void use_look_pad(const host_dev *d)
+{
+    const in_host_pad *p = &d->pad;
+    const char *why = NULL;
+    float m[2];
+    int t[2], i;
+    m[0] = sqrtf((float)p->lx * p->lx + (float)p->ly * p->ly) / 32767.0f;
+    m[1] = sqrtf((float)p->rx * p->rx + (float)p->ry * p->ry) / 32767.0f;
+    t[0] = p->lt; t[1] = p->rt;
+    for (i = 0; i < 2; i++) {
+        if (!U.pad_hot[i] && m[i] >= USE_STICK_ON)  { U.pad_hot[i] = 1; why = i ? "right stick" : "left stick"; }
+        else if (U.pad_hot[i] && m[i] < USE_STICK_OFF) U.pad_hot[i] = 0;
+        if (!U.pad_hot[2 + i] && t[i] >= USE_TRIGGER_ON) { U.pad_hot[2 + i] = 1; why = i ? "right trigger" : "left trigger"; }
+        else if (U.pad_hot[2 + i] && t[i] < USE_TRIGGER_OFF) U.pad_hot[2 + i] = 0;
+    }
+    if (p->buttons & ~U.pad_buttons)
+        why = "a button";
+    U.pad_buttons = p->buttons;
+    if (s_pad_new) {
+        s_pad_new = 0;
+        if (U.use && !why)
+            why = "plugged in";
+    }
+    if (why)
+        use_event(USE_PAD, name_is_ps(d->name), why, d->name, 0, 1);
+}
+
+/* Keys and mouse buttons down right now (0: none), and the mouse's movement. */
+static void use_look_keys(int sig, int moved)
+{
+    double t = now_ms();
+    if (sig && sig != U.key_sig)
+        use_event(USE_KEYS, 0, "a key", NULL, 0, 1);
+    U.key_sig = sig;
+    if (t - U.mouse_from_ms > USE_MOUSE_MS || t < U.mouse_from_ms) {
+        U.mouse_from_ms = t;
+        U.mouse_acc = 0;
+    }
+    U.mouse_acc += moved;
+    if (U.mouse_acc >= USE_MOUSE_COUNTS) {
+        U.mouse_acc = 0;
+        use_event(USE_KEYS, 0, "the mouse", NULL, 0, 1);
+    }
+}
+
+/* BTVS_INPUT_SCRIPT_DEVICE=xbox|ps: testing. What a pad script presses counts
+ * as the player's device (its buttons and sticks as that controller, its K:
+ * and M: lines as keyboard and mouse), so a hidden run can show the change.
+ * Nothing of it goes to the settings. */
+static void use_look_script(const btvs_pad *before, const btvs_pad *after)
+{
+    int pad, keys = s_script_nkey || s_script_mouse;
+    if (!U.script)
+        return;
+    pad = memcmp(before, after, sizeof *before) != 0;
+    if (pad && !U.script_pad)
+        use_event(USE_PAD, U.script == 2, "a script's button", "the test script", 0, 0);
+    if (keys && !U.script_keys)
+        use_event(USE_KEYS, 0, "a script's key", NULL, 0, 0);
+    U.script_pad = pad;
+    U.script_keys = keys;
+}
+
+/* Where it starts: on the controller when one is there, unless the player
+ * was last on the keyboard. */
+static void use_start(void)
 {
     host_dev *d = NULL;
-    int r = 0, tries;
-    LOCK();
-    load_settings();
-    for (tries = 0; tries < 5 && !d; tries++) {
+    const char *e = getenv("BTVS_INPUT_SCRIPT_DEVICE");
+    int tries;
+    U.script = !e || !*e || *e == '0' ? 0 : (*e == 'p' || *e == 'P') ? 2 : 1;
+    /* (a hidden test run never asks for the owner's controllers, here either) */
+    for (tries = 0; tries < 5 && !d && (s_test_pad || s_focus_fn || !env_on("BTVS_NO_WINDOW")); tries++) {
         if (tries) {                            /* SDL's pads turn up a moment after it starts */
             UNLOCK();
             Sleep(50);
@@ -626,11 +752,28 @@ int btvs_input__glyph_device(void)
         if (C.backend == BACKEND_XINPUT || C.backend == BACKEND_NONE || s_test_pad || !s_sdl_tried)
             break;
     }
+    s_pad_new = 0;
     if (d && _stricmp(btvs_setting_str("controls", "last_device", ""), "keyboard"))
-        r = strstr(d->name, "PS") || strstr(d->name, "DualSense") || strstr(d->name, "DualShock") || strstr(d->name, "Sony")
-            || strstr(d->name, "PlayStation") || !strcmp(d->name, "Wireless Controller") ? 2 : 1;
+        use_event(USE_PAD, name_is_ps(d->name), "connected at the start", d->name, 1, 0);
+    else
+        use_event(USE_KEYS, 0, d ? "a controller is connected, but the keyboard was used last" : "no controller", NULL, 1, 0);
+}
+
+int btvs_input__glyph_device(void)
+{
+    int r;
+    LOCK();
+    load_settings();
+    if (!U.use)
+        use_start();
+    r = U.use == USE_PAD ? 1 + U.ps : 0;
     UNLOCK();
     return r;
+}
+
+uint32_t btvs_input__device_changes(void)
+{
+    return U.changes;
 }
 
 static void live_pad(int port, btvs_pad *g, int hw)
@@ -647,11 +790,12 @@ static void live_pad(int port, btvs_pad *g, int hw)
     if (d)
         for (a = 0; a < ACT_COUNT; a++)
             v[a] = source_value(&d->pad, C.pad[a]);
-    for (a = 0; d && port == 0 && a < ACT_COUNT; a++)
-        if (v[a] >= 0.5f) {
-            used_dev(1);
-            break;
-        }
+    if (hw && port == 0) {
+        if (d)
+            use_look_pad(d);
+        else if (U.use == USE_PAD)
+            use_event(USE_KEYS, 0, "the controller was unplugged", NULL, 1, 1);
+    }
 
     if (port == C.kb_port && !hw) {
         keys_to_actions(v, 1, 0, port);
@@ -673,11 +817,14 @@ static void live_pad(int port, btvs_pad *g, int hw)
             s_wheel_dir = 0;
         }
         keys_to_actions(v, cap, 1, port);
+        dx = dy = 0;
         if (cap) {
             in_mouse_delta(&dx, &dy);
             mlx = (float)dx * 0.04f * C.mouse_sens;
             mly = (float)-dy * 0.04f * C.mouse_sens;
         }
+        if (port == 0)
+            use_look_keys(in_key_any_down() + s_key_sig + (s_wheel_dir ? 7 : 0), abs(dx) + abs(dy));
     }
 
     if (v[ACT_START] >= 0.5f)  g->buttons |= BTVS_BTN_START;
@@ -1766,7 +1913,15 @@ int btvs_input_poll(int port, btvs_pad *g)
         if (f != s_was_focused || f)
             rumble_apply(f);
         s_was_focused = f;
-        script_apply(port, g);
+        {
+            btvs_pad before = *g;
+            script_apply(port, g);
+            if (port == 0) {
+                if (!U.use)
+                    use_start();
+                use_look_script(&before, g);
+            }
+        }
         conn = port == 0 || (f && dev_on_port(port)) || (s_script_ports >> port & 1) || (port == C.kb_port && (s_script_nkey || s_script_mouse));
         if (!conn)
             memset(g, 0, sizeof *g);
@@ -1892,6 +2047,8 @@ void btvs_input__test_reset(void)
     s_capture_active = 0;
     s_menu_mode = 0;
     memset(s_mk_blocked, 0, sizeof s_mk_blocked);
+    memset(&U, 0, sizeof U);
+    s_pad_new = 0; s_key_sig = 0;
     s_frame = 0; s_frame_external = 0; s_read1 = 0;
     s_test_pad = NULL;
     InterlockedExchange(&C.loaded, 0);

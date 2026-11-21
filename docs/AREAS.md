@@ -555,6 +555,12 @@ the disc-file sharing are as they were.*
   **Done, 21 Nov (Graphics):** `nv2a_gpu_texture_pack_reload()` as asked -- "Ready to use" above says
   how it behaves. The files are read on a background thread, so call it right after writing them; the
   0.2 s of drawing the 16 files is still yours to keep off the game thread (or to accept: it is 12 frames).
+  **In use, 21 Nov late (Controls):** `btvs_input_glyphs.c` draws the files on a worker thread and
+  calls it on the game thread (inside the game's `XInputGetState`) when player 1's device or a binding
+  changes. It links an empty stand-in if a runtime has no such function
+  (`/alternatename:nv2a_gpu_texture_pack_reload=btvs_input__no_texture_reload`) and then says so in the
+  log. To try it without a controller: `BTVS_INPUT_SCRIPT_DEVICE=xbox` and a pad script that mixes `K:`
+  lines and pad buttons.
 - **Extras -> Logs** (21 Nov, for releases; nothing to do for the prebuilt `GAME\`): in a release the
   game's code is not in `buffy_tvs.exe` but in `btvs_game.dll`, built on the player's PC with its own
   `btvs_game.pdb` beside it (`docs/install-build.md`). Seen in such a build's log:

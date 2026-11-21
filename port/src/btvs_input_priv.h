@@ -71,5 +71,7 @@ void btvs_input__glyphs_poll(void);
 void btvs_input__glyphs_boot(void);   /* before the first frame */
 /* The device player 1 is on: 0 keyboard and mouse, 1 an Xbox-style pad, 2 a PlayStation pad. */
 int  btvs_input__glyph_device(void);
+/* How often that has changed in this run (the first finding counts). */
+uint32_t btvs_input__device_changes(void);
 
 #endif

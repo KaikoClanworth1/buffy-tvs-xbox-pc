@@ -74,6 +74,47 @@ CMake compiles `btvs_input_xapi.c` in only when the generated code was made with
   resumes with focus). With `BTVS_NO_WINDOW=1` the game never has focus, so no device DLL is even
   loaded: a hidden test run cannot see or shake the owner's controller.
 
+### The device in use (nothing to choose)
+
+There is no "device" option and none is needed: player 1's controller and the keyboard and mouse
+**both play at all times**. A controller that is connected when the game starts, or plugged in
+later, is player 1's from that moment. What the port follows is which of the two the player is on
+right now, for the button pictures, the tips' wording and the Controls page:
+
+| The player | Becomes |
+|---|---|
+| presses a controller button, pulls a trigger past a third, pushes a stick past half, or plugs the controller in | that controller (Xbox or PlayStation set, by its name) |
+| presses a key or a mouse button, or moves the mouse 30 counts within a quarter second while it is the camera | keyboard and mouse |
+| unplugs player 1's controller | keyboard and mouse, at once |
+
+So that nothing flickers: only a **new** touch counts (a stick that drifts under half, or sits
+pushed over, and a mouse that trembles change nothing: the stick must come back under a third
+before it counts again), and after a change the next one waits one second. At the start it is the
+controller when one is connected, unless the keyboard was used last (`last_device`).
+
+Every change is a line in the log: `[INPUT] device in use: Xbox controller, Xbox controller 1 (a
+button); it was keyboard and mouse`.
+
+The pictures on screen follow at once **when the renderer can swap its replacement textures while
+the game runs** (`nv2a_gpu_texture_pack_reload`, asked of Graphics; see "Button pictures").
+With a renderer that cannot, the log says so and they follow at the next level load or start.
+
+In menus the mouse is not the camera and its movement is not looked at (keys and clicks are).
+
+**Checked (21 Nov, late):** the self-test (5f) walks a made-up controller through it: a button,
+a key, a stick resting at 0.4 (nothing), the stick pushed and left there, keys 0.45 s and 0.75 s
+after (nothing), a key later (keyboard, and the held stick does not take it back), unplugging (at
+once). In the game, a hidden run with `BTVS_INPUT_SCRIPT_DEVICE=xbox` logged each change as its
+script went between keys and pad buttons. One hidden run also started with the owner's own Xbox
+controller connected and, with no setting made, began on the Xbox set (`player 1: Xbox controller
+1 connected`, `device in use: Xbox controller ... (connected at the start)`): that was a fault of
+the test run (it must never ask for the owner's controllers; fixed the same evening, the start now
+skips them under `BTVS_NO_WINDOW`), but it is the one time a real controller was seen found by
+itself. Lines and two frames: `port/runs/shots/btn_auto_*`.
+**Not checked:** a real controller's buttons and sticks while playing, plugging one in and pulling
+it out in a real session, a PlayStation controller's name, and the pictures changing on screen
+(no renderer has the reload yet).
+
 ## Defaults
 
 Controller (any pad, by position; Black / White are the bumpers):
@@ -126,7 +167,7 @@ are written; if the player changed even one, all of them stay exactly as they we
 | `sensitivity` | 5 | mouse, 1–10 |
 | `keyboard_player` | 1 | which player the keyboard and mouse are; 0 = off |
 | `button_pictures` | `auto` | `auto`, `xbox`, `playstation`, `keyboard`, `original`: see "Button pictures" |
-| `last_device` | | written by the port: `controller` or `keyboard`, whichever player 1 used last (for `auto`) |
+| `last_device` | | written by the port at every change: `controller` or `keyboard`, whichever player 1 used last (where `auto` starts next time) |
 | `key_<Action>` | see above | up to two keys: `key_B = Space, Backspace`; `None` = unbound |
 | `menu_keys` | 1 | in menus Enter / Space are A and Esc / Backspace are B (see Defaults); 0 off |
 | `key_defaults` | | written by the port: which default keys the file was last checked against |
@@ -370,8 +411,20 @@ itself, for the device the player is on:
 | Keyboard and mouse | no pad, or the keyboard or mouse was the last thing used | the keys and mouse buttons bound: `Space`, `E`, and a mouse whose left button, right button or wheel (the middle button) is amber |
 
 `[controls] button_pictures` chooses: `auto` (default), `xbox`, `playstation`, `keyboard`, or
-`original` for the game's own art untouched. The pictures follow the **bindings**: rebind jump to
-another key or pad button and the pictures show that one.
+`original` for the game's own art untouched. `auto` is "The device in use" above; the others pin
+a set. The pictures follow the **bindings**: rebind jump to another key or pad button and the
+pictures show that one.
+
+**Changing while the game runs.** Five times a second the port compares what the pictures on disk
+were drawn from (set, bindings) with what is wanted now. When they differ it draws the 16 files
+again on a worker thread (about 0.2 s, the game keeps running), then calls
+`nv2a_gpu_texture_pack_reload()` on the game thread and swaps the tips' wording to match (both
+wordings of each sentence are kept; a sentence is only written where it still reads as the other
+wording did). The log: `button pictures: now the Xbox set, swapped while the game runs`. That
+function is Graphics'; `btvs_input_glyphs.c` links an empty stand-in when the runtime has none
+(`/alternatename`), finds that out at run time, and then only logs `the Xbox set is wanted now.
+This build's renderer cannot swap them while the game runs`: pictures and wording stay as they
+are, together, until the next level load or start.
 
 **Nothing of anyone else's is in them and there is no picture file in the repository.** Every
 picture is drawn by `port/src/btvs_input_glyphs.c` from circles, rounded boxes and lines, with
@@ -462,6 +515,8 @@ rebinding, from the next level load (or the next start).
 | `BTVS_GLYPH_TIP_DELAY=<reads>` | the rewording that many pad reads late (how the limit below was found) |
 | `BTVS_GLYPH_SHOW_TIPS=<first>,<every>,3` | keyboard set, in a level: the reworded tips put on screen one after the other through the game's own `ITipWindow::ShowTip`, the first at `<first>` seconds, the next every `<every>` seconds (the last number is the tip's kind; under 3 the game's own tip wins). For frames of sentences a scripted run cannot walk to |
 | `BTVS_GLYPH_RAMDUMP=<seconds>,<file>` | the game's first 64 MB of memory to a file at that time |
+| `BTVS_GLYPH_NO_LIVE=1` | no change of pictures while the game runs, whatever the renderer can do |
+| `BTVS_INPUT_SCRIPT_DEVICE=xbox` (or `ps`) | what a pad script presses counts as the player's device: its buttons and sticks as that controller, its `K:` and `M:` lines as keyboard and mouse. A hidden run can then show the device changing. Nothing of it goes to `last_device` |
 
 To replace another texture: dump, find it, add its hash and what to draw to `k_menu` (or a new
 table) in `btvs_input_glyphs.c`, raise `GLYPH_VERSION`.
@@ -650,9 +705,10 @@ what the buttons do in the first level, not from play).
 - The inventory screens are not treated as menus (see Defaults): the port has no sign that they
   are open. `IInventory::SetOpen` (0x22E4E0) is where to look.
 - The mouse is still captured during cutscenes and in the inventory screens.
-- Button pictures, and with them the Controls page (pad or keyboard and mouse), change set only at
-  a level load or a start, not the moment another device is touched: the runtime's texture pack is
-  read once per process. Asked of Graphics in `docs/AREAS.md` (a way to read it again).
+- Button pictures, and with them the Controls page and the tips' wording, change at once only
+  with a renderer that has `nv2a_gpu_texture_pack_reload` (asked of Graphics in `docs/AREAS.md`).
+  Controls' half is in and waits for it; until then they change at the next level load or start.
+- The mouse moved in a menu does not count as using the keyboard and mouse (it is not read there).
 - With keyboard and mouse the weapon-selection tips still say "D-pad", and the journal's text is
   not reworded.
 - A menu line for `button_pictures` (asked of Menu in `docs/AREAS.md`).
