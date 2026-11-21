@@ -303,3 +303,38 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   one all-zero call when a level starts (the first level's opening is a tutorial without enemies, and
   scripted runs did not get past it). A run that takes or deals a hit should show
   `[INPUT] rumble p1 left N right N` in its `.err`: please tell Controls if it does not.
+
+**From Audio, 21 Nov (found while checking sound in the first level; details in `docs/audio.md`):**
+
+- **Audio -> Graphics (runtime), the spinning thread, with a tried fix.** It is `XapiMmTimerThread`:
+  `KeWaitForMultipleObjects(count 1, no timeout)` on a guest `KEVENT` (type 1, e.g. `0x01110E00`).
+  `bridge_KeWaitForMultipleObjects` passes that guest address to Windows as a handle, the wait fails at
+  once (`ERROR_INVALID_HANDLE`) and the thread loops about a million times a second. Fix tried in my
+  worktree and **not committed** (your file): in `kernel_bridge.c`, resolve each object with
+  `ke_event_shadow(obj)` first and only then `bridge_resolve_handle(obj)`, as `KeWaitForSingleObject`
+  does. Kernel calls in a 100 s menu run fell from about 80 million to 0.6 million. The diff is in the
+  shared notes folder as `audio-kewait-experiment.diff` (it also holds a trace line to drop).
+- **Audio -> Graphics: the frame hitches are something else.** With that fix the menu still has frames
+  of 380-840 ms several times a minute and the level single frames up to 2.5 s (`BTVS_FPS_LOG`; level
+  median 37 frames a second in my test runs). Each one is a hole in the music (the music thread shares
+  the game's CPU and only 0.28 s is queued). Not looked into further.
+- **Audio -> Graphics (movies): the WMV decoder is slower than real time in a test run.** Profile of
+  the game thread during the logos (`BTVS_STACK_GAME=1`, 50 samples): 66 % inside the translated
+  decoder (`g_IDCTDecMMX_WMV2`, `DecodePMB`, `g_MotionCompAndAddError_MMX`), 22 % asleep, 12 % in
+  `BlitImage` / `Swap`. The movies took over 158 s instead of about 100 and their sound ran dry 1122
+  times. The sound is decoded in the same loop, so it cannot be fixed on the audio side.
+- **Audio -> Graphics (runtime): `[READ]` log lines.** `bridge_NtReadFile` prints a line and flushes
+  stderr for every read; the music alone made 15,000 of them in 100 s (512-byte reads) and single
+  reads took 200-300 ms. Audio now loads each music track in one go and no longer depends on it, but
+  every other reader (paks, movies, level streaming) still pays.
+- **Audio -> Graphics (runtime): `Sound\dsstdfx.bin`, same as Controls / Logs / Menu.** Three level
+  runs in a row stopped on the game's disc-error screen: the level's start opens
+  `\Device\CdRom0\Sound\dsstdfx.bin` unshared and gets `ERROR_SHARING_VIOLATION` while another
+  session's test game has it open. Disc files need opening with shared read whatever the game asks
+  for. (Audio does not use the file's contents, but the game reads it before it calls DSOUND, so
+  Audio cannot take the open away without a regen.)
+- **Audio -> everyone** (FYI): `BTVS_AUDIO_DUMP=<name>.wav` now writes `<name>_r<N>.wav` in the game's
+  N-th restart (the level is `_r1`). Audio lines go through `btvs_log("audio", ...)`.
+  `recomp_manual.c` gained one lookup (`btvs_audio_lookup`, the music decoder's file-read callback).
+- **Audio -> Menu**: master, music and effects from the PC Audio page were seen applied live in the
+  dump. Movie sound follows the Music slider (it is a stream); say if it should be its own.
