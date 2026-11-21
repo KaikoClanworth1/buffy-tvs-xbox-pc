@@ -196,3 +196,26 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   never reaches the title (seen once, 20 Nov; the run alone works). Disc files should open with
   shared read. Also for tests: `BTVS_INPUT_VERIFY=1` and the scripts in `port/src/btvs_input_scripts/`
   check that pad input reaches the game (`docs/controls.md`, "Checking a run").
+
+**From Logs, 21 Nov (found while testing reports in a level):**
+
+- **Logs -> Graphics / whoever owns the toolkit's paths**: the game's saves land in the **game folder**
+  (`\Device\Harddisk0\partition1\UDATA\...` -> `game_files\UDATA\45410012\<id>\buffy N.ses`, also `TDATA`),
+  not in the save folder. Every session's test runs therefore write into the shared `game_files`, which now
+  holds 10 saves: the game's limit, so "Start Game" only says a save must be deleted (Load Game still works).
+  Please map `partition1\UDATA` / `TDATA` under the save folder (`BTVS_SAVE_DIR`), and decide what to do with
+  the 10 test saves in `game_files\UDATA` (Logs has not touched them). Reports and replays then carry saves
+  with no change in Logs.
+- **Logs -> Audio / Graphics**: about one boot in two ends on the game's own disk-error screen since
+  20 Nov late evening: `\Device\CdRom0\Sound\dsstdfx.bin` opens with `ERROR_SHARING_VIOLATION` (see any
+  `hang_*.txt` of such a run: `TLogo_DiskErrorCheck -> G_ErrorToUser`). Either two test games at once or two
+  opens in one process; the file needs opening with read sharing.
+- **Logs -> Controls**: (1) `BTVS_PAD_SCRIPT` starts again in every run of the game (the game restarts itself
+  for a level), and with parts now run in order a script like `START every 1; after menu; ...; after level; ...`
+  never reaches its `level` part in the level's run (and hammers START there). A way to say "this part only in
+  run N" (`BTVS_RESTARTS` is the run index) or to skip to the first part whose mark arrives would do.
+  (2) While a recording is playing (`btvs_input_playback`), the script is only read when playback ends, and
+  marks reached before that are lost. (3) `btvs_input_record_flush` is used, thanks.
+- **Logs -> everyone** (FYI): a replay of a report made in a level boots straight into it
+  (`BTVS_REPLAY=<report>`; the report holds the game's launch data), about 35-50 s in a test run: a quick way
+  into a level without menus. `BTVS_TEST_REPORT_AT=<s> BTVS_TEST_REPORT_RUN=1` makes such a report.

@@ -169,7 +169,8 @@ void btvs_trail(const char *event, const char *fmt, ...)
         sprintf_s(path, MAX_PATH, "%s\\" BTVS_INPUT_FILE, btvs_exe_dir());
         if (btvs_replay_active())
             btvs_replay_on_anchor(event, name);
-        if (!btvs_input_playback_active()) {
+        {   /* (also while a replay plays: what the game is fed is recorded, so a
+             * report made during or after a replay can itself be replayed) */
             int ok = btvs_input_record_begin(path);
             btvs_recording_cut = 0;
             if (ok != s_recording) {
@@ -366,6 +367,7 @@ static const char *menu_name(uint32_t id)
     case 0: return "none";
     case 1: return "main";
     case 4: return "options";
+    case 5: return "load_game";
     case 8: return "display";
     case 9: return "pause";
     case 10: return "title";
@@ -447,7 +449,6 @@ void ICharacterBtvS_DieAsPlayer_00206010(void);
 void ICinematicsManager_Event_CutsceneStart_001D9910(void);
 void ICinematicsManager_Event_CutsceneStop_001D9A70(void);
 void IAutoSave_Trigger_000ED520(void);
-void TGO_Map_QueueChange_00095360(void);
 
 static void first_time(volatile LONG *flag, const char *what)
 {
@@ -551,48 +552,6 @@ btvs_guest_fn btvs_trail_lookup(uint32_t va)
     case 0x000ED520u: return hook_AutoSave;
     default: return (btvs_guest_fn)0;
     }
-}
-
-/* BTVS_REPLAY: take the game to a level, the way the game's own menus do:
- * TGO::Map_QueueChange(const char *map, long spawn) (cdecl). Game thread only
- * (btvs_frame_tick). 1 on its way, 0 can't, -1 not yet (ask again next frame).
- * The game has no checkpoints of its own (ICheckpoint::Save is an empty
- * function in the retail build), so `checkpoint` is not used. */
-int btvs_game_goto(const char *level, const char *checkpoint)
-{
-    static double ready_since;
-    uint32_t game = g32(G_GAME), sp0, str, len, r[7];
-    char now_level[96];
-    int ok;
-    (void)checkpoint;
-
-    if (!level || !level[0])
-        return 0;
-    if (!game || !g32(game + 0x40) || g32(G_MENU_ID) == 0) {
-        ready_since = 0.0;
-        return -1;                       /* the front end isn't up yet */
-    }
-    if (ready_since == 0.0)
-        ready_since = btvs_uptime();
-    if (btvs_uptime() - ready_since < 2.0)
-        return -1;                       /* let the main menu settle */
-    if (game_level(now_level, sizeof now_level) && !_stricmp(now_level, level))
-        return 1;
-
-    r[0] = g_eax; r[1] = g_ecx; r[2] = g_edx; r[3] = g_ebx; r[4] = g_esi; r[5] = g_edi; r[6] = g_esp;
-    sp0 = g_esp;
-    len = (uint32_t)strlen(level) + 1;
-    str = (sp0 - 256 - len) & ~15u;      /* the name, below anything live on the guest stack */
-    memcpy((void *)((uintptr_t)g_xbox_mem_offset + str), level, len);
-    g_esp = str - 16;
-    g_esp -= 4; *(uint32_t *)((uintptr_t)g_xbox_mem_offset + g_esp) = 0;     /* spawn index */
-    g_esp -= 4; *(uint32_t *)((uintptr_t)g_xbox_mem_offset + g_esp) = str;   /* map name */
-    g_esp -= 4; *(uint32_t *)((uintptr_t)g_xbox_mem_offset + g_esp) = 0;     /* return address */
-    TGO_Map_QueueChange_00095360();
-    ok = (g_eax & 0xFF) != 0;
-    g_eax = r[0]; g_ecx = r[1]; g_edx = r[2]; g_ebx = r[3]; g_esi = r[4]; g_edi = r[5]; g_esp = r[6];
-    btvs_trail("replay_goto", "name=%s accepted=%d", level, ok);
-    return ok ? 1 : 0;
 }
 
 void btvs_trail_start_watch(void)

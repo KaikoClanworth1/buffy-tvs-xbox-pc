@@ -4,8 +4,9 @@
  *     place: BTVS_SETTINGS_INI -> the report's settings.ini, BTVS_SAVE_DIR -> a
  *     fresh copy of the report's save\ under <exe>\replay\ (the player's own
  *     saves and settings are never touched);
- *  2. the game is taken to the report's anchor (replay.txt: boot / level /
- *     checkpoint / load) - btvs_game_goto() in btvs_trail.c, the game hooks;
+ *  2. if the report was made in a level, the game is started with the
+ *     report's launch data (launch.bin: what the game handed itself when it
+ *     restarted to load that level), so it boots straight into the level;
  *  3. when the trail reports that anchor, the report's input recording is
  *     played from there (Controls' btvs_input_playback), and when it ends the
  *     pads are the player's again: that is the moment the report was made.
@@ -19,9 +20,8 @@
 
 #include "btvs_log.h"
 
-/* btvs_trail.c (game hooks): take the game to a level / checkpoint now.
+/* (the level jump through the game's own functions is gone: launch data does it)
  * 1 = on its way, 0 = can't (yet), -1 = not possible at this moment, ask again. */
-int btvs_game_goto(const char *level, const char *checkpoint);
 
 static struct {
     int active, arrived, playing, done, goto_state, said_manual;
@@ -233,20 +233,8 @@ void btvs_replay_frame(void)
 {
     if (!s_r.active || s_r.done)
         return;
-    if (!s_r.arrived) {
-        if (!strcmp(s_r.anchor, "boot") || s_r.goto_state == 1)
-            return;
-        s_r.goto_state = btvs_game_goto(s_r.level, s_r.checkpoint);
-        if (s_r.goto_state == 1) {
-            btvs_log("replay", "going straight to level \"%s\"%s%s", s_r.level, s_r.checkpoint[0] ? ", checkpoint " : "",
-                     s_r.checkpoint);
-        } else if (s_r.goto_state == 0 && !s_r.said_manual) {
-            s_r.said_manual = 1;
-            btvs_log("replay", "can't jump to level \"%s\" directly in this build: play to it; the recorded input "
-                               "starts by itself when the game gets there", s_r.level);
-        }
+    if (!s_r.arrived)
         return;
-    }
     if (s_r.playing && !btvs_input_playback_active()) {
         s_r.playing = 0;
         s_r.done = 1;
