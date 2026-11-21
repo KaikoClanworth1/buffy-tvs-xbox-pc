@@ -54,12 +54,18 @@ static void pace(void)
         return;
     }
     step = 1.0 / (double)limit;
-    /* first frame, or more than a frame late: start again from now. (It used
-     * to wait until it was 100 ms behind, and ran the frames after a slow one
-     * with no pause at all to catch up: a hitch followed by a burst.) */
-    if (next == 0 || t - next > step)
+    /* The next frame is due one step after the last one was. A frame that is
+     * already late is shown at once -- and if it is more than a step late the
+     * count starts again from now, so a slow frame is not followed by a burst
+     * of frames with no pause (it used to catch up for up to 100 ms). */
+    if (next == 0)
         next = t;
     next += step;
+    if (t >= next) {
+        if (t - next > step)
+            next = t;
+        return;
+    }
     for (;;) {
         double left = next - now_s();
         if (left <= 0)
