@@ -114,6 +114,8 @@ tip). So jump is on Backspace today, which wants changing once the owner has pla
 | `mouse_look` | 1 | the mouse turns the camera |
 | `sensitivity` | 5 | mouse, 1–10 |
 | `keyboard_player` | 1 | which player the keyboard and mouse are; 0 = off |
+| `button_pictures` | `auto` | `auto`, `xbox`, `playstation`, `keyboard`, `original`: see "Button pictures" |
+| `last_device` | | written by the port: `controller` or `keyboard`, whichever player 1 used last (for `auto`) |
 | `key_<Action>` | see above | up to two keys: `key_A = Space, MouseMiddle`; `None` = unbound |
 | `pad_<Action>` | see above | one controller input: `pad_Black = LB` |
 
@@ -342,6 +344,87 @@ that lands exactly would need the game's own clock recorded and played back fram
 In the menus: a 29 s recording of `menu_path.txt` from boot, played back in a second run, gave the
 same 29 pad changes and the same menus in the same order (10, 1, 12, 1, 5, 1, 11, 1, 11, 1).
 
+## Button pictures
+
+The game's 2002 button art (the Y / X / B / A medallions beside SELECT and BACK, the small pictures
+inside tips, the black Xbox controller on the Controls page) is replaced by pictures the port draws
+itself, for the device the player is on:
+
+| Set | When | Looks |
+|---|---|---|
+| Xbox | an XInput pad (or any pad that is not a PlayStation one) is player 1 | A B X Y in their colours, `LB RB LT RT`, sticks `L` `R` |
+| PlayStation | player 1's pad is named DualSense / DualShock / PS4 / PS5 / Sony | cross, circle, square, triangle; `L1 R1 L2 R2` |
+| Keyboard and mouse | no pad, or the keyboard or mouse was the last thing used | the keys and mouse buttons bound, by name: `Space`, `E`, a mouse with the button lit |
+
+`[controls] button_pictures` chooses: `auto` (default), `xbox`, `playstation`, `keyboard`, or
+`original` for the game's own art untouched. The pictures follow the **bindings**: rebind jump to
+another key or pad button and the pictures show that one.
+
+**Nothing of anyone else's is in them and there is no picture file in the repository.** Every
+picture is drawn by `port/src/btvs_input_glyphs.c` from circles, rounded boxes and lines, with
+letters from the PC's own Segoe UI font. No downloaded set, no console maker's art, no licence to
+keep. The game's data is not touched either.
+
+### How
+
+The game draws all of it from textures (found with the runtime's texture dump, below):
+
+| What | The game's textures | The port's |
+|---|---|---|
+| Menu buttons A B X Y, and L R on the inventory screens | twelve, 64x64: one as usual and one flashed when pressed, each | 256x256 each |
+| The pictures in tips and the journal | one 128x256 page of twenty; the text writes them as the letters `a`..`t` of a font (`IJournal::TranslateGlyphs`): A B X Y, L R, eight arrows, the two sticks, "turn", "+", White, Black | 512x1024 |
+| The controller on the Controls page | 384x320 over three textures (256x256, 128x256, 256x64) | 1536x1280, cut the same way |
+
+Before the game's first frame (`btvs_input__glyphs_boot`, from the `XInitDevices` replacement) the
+port draws its pictures four times the game's size (sharp up to 4K, where a menu pixel is 4.5
+screen pixels), writes them as PNG files into `button_pictures\load` beside the exe, and gives that
+folder to the runtime's **texture pack** (`xboxrecomp/src/kernel/nv2a_texpack.inc`,
+`nv2a_gpu_set_texture_pack`). The texture pack swaps a texture for the file whose name holds a hash
+of the texture's contents; the game's own coordinates then land on the bigger picture. Drawing takes
+about 0.2 s and is done again only when something it depends on changed (the set, a binding, the
+drawing itself: `load\made_from.txt`).
+
+The menus fade a button that does nothing on a page themselves, so there is one look for a button
+and one for the moment it is pressed. Labels (SELECT, BACK, the Controls page's "Jump", "Kick" ...)
+are the game's text and stay.
+
+The Controls page always shows a pad (it is the game's page about the pad; the keys are on the
+port's own Key Bindings page). Its lines end where the game writes the labels. Black and White are
+the bumpers on a PC pad: the two labels have the bumper's picture beside them instead of a line
+across the whole controller.
+
+**The set is chosen once per start of the game's process**: the texture pack is read once. The game
+starts a new process for every level it loads, so the pictures follow a change of device, or a
+rebinding, from the next level load (or the next start).
+
+### Test switches
+
+| | |
+|---|---|
+| `BTVS_CONTROLS_BUTTON_PICTURES=xbox` | (the settings override) the set for this run |
+| `BTVS_GLYPH_DIR=<folder>` | the folder instead of `button_pictures` beside the exe (two runs with different sets must not share one) |
+| `BTVS_GLYPH_DUMP=1` | the runtime also writes every texture the game draws to `<folder>\dump` as PNG, named with the hash: how the textures above were found, and how to find more |
+| `BTVS_GLYPH_RAMDUMP=<seconds>,<file>` | the game's first 64 MB of memory to a file at that time |
+
+To replace another texture: dump, find it, add its hash and what to draw to `k_menu` (or a new
+table) in `btvs_input_glyphs.c`, raise `GLYPH_VERSION`.
+
+### What was looked at, and what was not
+
+In hidden runs (21 Nov), frames dumped by the game at 640x480 and at 1920x1080 (a 1440x1080
+picture), the game's own art against the port's: the main menu, Options, the Controls page, the
+first level's camera tip, an inventory screen, the pause menu, in all three sets. 11 of the 16
+textures were seen swapped (nine named in the log, the inventory's two in the frames); the other five
+are the pressed looks of B, X, Y, L and R. The pictures sit where the game's did and stay sharp at
+1080p. Frames: `port/runs/shots/btn_*` in the main checkout.
+
+Not seen: the look of a button at the moment it is pressed (the game flashes it for a fraction of a
+second); the journal's pages; a tip with A / B / X / Y, an arrow, "+" or White / Black in it (they
+are on the same page of pictures as the two that were seen, so they will be swapped; whether each
+sits well in its line of text was not looked at); 4K (the pictures are 4x, so they should hold; no
+frame was dumped); `auto` with a real pad, since no run has one. Not replaced: the inventory's
+3-D button pieces (`H_Inv_Button ...` in the game's HUD), if they are ever shown; no run met them.
+
 ## Verified / not verified
 
 **In the running game** (hidden, muted test runs through `port/tools/run.sh`; no window, no focus,
@@ -455,6 +538,13 @@ pause, **Report a Problem**, one line saying which step.
    you want for jump. Back in the level that key jumps. Quit the game, start it again: it still
    does. Then Reset Bindings: Backspace jumps again.
 
+7. **Button pictures.** With the Xbox pad plugged in, start the game: the menus show coloured
+   A B X Y discs (not the old purple medallions), Options -> Controls shows a modern controller,
+   and the first level's tip shows a stick and `LT`. Start again with the DualSense instead:
+   cross / circle / square / triangle and `L2`. Start again with no pad: key names (`Space`,
+   `Bksp`, `E`, `Q`). Then with a pad plugged in, play a moment on the keyboard and load a level:
+   the pictures should be the keys now. Say which pictures look wrong, too small or too big.
+
 Not expected to be right yet: the default keys are the Chaos Bleeds port's and were chosen before
 this game could be played (jump on Backspace is the obvious one to change).
 
@@ -462,5 +552,10 @@ this game could be played (jump on Backspace is the obvious one to change).
 
 - Keyboard defaults that suit this game (see the end of the checklist).
 - The mouse is still captured during cutscenes and in the inventory screens.
+- Button pictures change set only at a level load or a start, not the moment another device is
+  touched (the runtime's texture pack is read once per process).
+- Button pictures: the Controls page shows the default pad layout; a rebound pad button changes
+  the small pictures everywhere, but the lines on that page still point at the default buttons.
+- A menu line for `button_pictures` (asked of Menu in `docs/AREAS.md`).
 - `[INPUT]` lines go to stderr (which a player's run redirects into the log); calling Logs'
   `btvs_log` directly would be tidier.

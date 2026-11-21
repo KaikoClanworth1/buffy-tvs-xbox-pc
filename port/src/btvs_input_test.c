@@ -291,6 +291,14 @@ static int selftest(void)
       CHECK(rl == 0 && rr == 0);
     }
 
+    /* 5f. the button pictures follow the device: a controller on player 1, or none */
+    btvs_input__test_reset();
+    CHECK(btvs_input__glyph_device() == 0);                             /* keyboard and mouse */
+    memset(&hp, 0, sizeof hp);
+    btvs_input__test_host_pad(&hp);
+    tick(&a, &b, NULL);
+    CHECK(btvs_input__glyph_device() == 1);                             /* an Xbox-style pad */
+
     /* 6. rebinding a controller button: X's action onto the pad's Y */
     btvs_input__test_reset();
     s_focus = 1;

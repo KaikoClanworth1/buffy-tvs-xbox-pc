@@ -481,6 +481,43 @@ static int key_value(int code, int mouse_ok, int hw)
 
 /* hw 0: the window has no focus, so no device, key or mouse is asked; only
  * keys held by a pad script count. */
+/* What player 1 last touched (1 a controller, 2 keyboard or mouse), kept in
+ * the settings: the button pictures of the next start follow it. */
+static int s_used_dev;
+
+static void used_dev(int kind)
+{
+    if (s_used_dev == kind || s_test_pad || s_clock_fn)
+        return;
+    s_used_dev = kind;
+    btvs_setting_set_str("controls", "last_device", kind == 1 ? "controller" : "keyboard");
+    btvs_settings_save();
+}
+
+int btvs_input__glyph_device(void)
+{
+    host_dev *d = NULL;
+    int r = 0, tries;
+    LOCK();
+    load_settings();
+    for (tries = 0; tries < 5 && !d; tries++) {
+        if (tries) {                            /* SDL's pads turn up a moment after it starts */
+            UNLOCK();
+            Sleep(50);
+            LOCK();
+        }
+        devices_refresh();
+        d = dev_on_port(0);
+        if (C.backend == BACKEND_XINPUT || C.backend == BACKEND_NONE || s_test_pad || !s_sdl_tried)
+            break;
+    }
+    if (d && _stricmp(btvs_setting_str("controls", "last_device", ""), "keyboard"))
+        r = strstr(d->name, "PS") || strstr(d->name, "DualSense") || strstr(d->name, "DualShock") || strstr(d->name, "Sony")
+            || strstr(d->name, "PlayStation") || !strcmp(d->name, "Wireless Controller") ? 2 : 1;
+    UNLOCK();
+    return r;
+}
+
 static void live_pad(int port, btvs_pad *g, int hw)
 {
     float v[ACT_COUNT];
@@ -495,6 +532,11 @@ static void live_pad(int port, btvs_pad *g, int hw)
     if (d)
         for (a = 0; a < ACT_COUNT; a++)
             v[a] = source_value(&d->pad, C.pad[a]);
+    for (a = 0; d && port == 0 && a < ACT_COUNT; a++)
+        if (v[a] >= 0.5f) {
+            used_dev(1);
+            break;
+        }
 
     if (port == C.kb_port && !hw) {
         for (a = 0; a < ACT_COUNT; a++)
@@ -518,8 +560,11 @@ static void live_pad(int port, btvs_pad *g, int hw)
             s_wheel_dir = 0;
         }
         for (a = 0; a < ACT_COUNT; a++)
-            if (key_value(C.key[a][0], cap, 1) || key_value(C.key[a][1], cap, 1))
+            if (key_value(C.key[a][0], cap, 1) || key_value(C.key[a][1], cap, 1)) {
                 v[a] = 1.0f;
+                if (port == 0)
+                    used_dev(2);
+            }
         if (cap) {
             in_mouse_delta(&dx, &dy);
             mlx = (float)dx * 0.04f * C.mouse_sens;

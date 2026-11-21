@@ -66,4 +66,10 @@ void btvs_input__test_last_rumble(int *port, int *left, int *right);
 /* Print a recording as text. Returns the number of records, -1 on error. */
 int  btvs_input_dump_recording(const char *path, FILE *out);
 
+/* btvs_input_glyphs.c: once per read of player 1's pad (game thread). */
+void btvs_input__glyphs_poll(void);
+void btvs_input__glyphs_boot(void);   /* before the first frame */
+/* The device player 1 is on: 0 keyboard and mouse, 1 an Xbox-style pad, 2 a PlayStation pad. */
+int  btvs_input__glyph_device(void);
+
 #endif

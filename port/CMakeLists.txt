@@ -163,7 +163,7 @@ if(BTVS_MANUAL_APPLIED MATCHES "File_Read_002B46D0")     # Graphics/boot: the ga
     target_sources(${PROJECT_NAME} PRIVATE src/btvs_boot_hooks.c)
 endif()
 if(BTVS_MANUAL_APPLIED MATCHES "XInputGetState_006105EF")
-    target_sources(${PROJECT_NAME} PRIVATE src/btvs_input_xapi.c)
+    target_sources(${PROJECT_NAME} PRIVATE src/btvs_input_xapi.c src/btvs_input_glyphs.c)
 else()
     message(WARNING "Controls: the generated code still has the game's own XInput functions; "
                     "run tools/regen.sh in the main checkout to switch to the PC input layer")

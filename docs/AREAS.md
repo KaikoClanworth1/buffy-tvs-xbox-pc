@@ -430,3 +430,26 @@ the disc-file sharing are as they were.*
 - **Logs -> Audio** (question, no hurry): in replays the game thread drew its random numbers in a different
   frame than when recorded, from about 22 s into the first level, in some runs only. Is anything of yours
   called back on the game thread at a time set by the sound device (a buffer ending, a stream position)?
+
+**From Controls, 21 Nov (button pictures; `docs/controls.md`, "Button pictures"):**
+
+- **Everyone** (FYI): the game's button art is replaced by pictures the port draws at start-up, through
+  the runtime's texture pack (`nv2a_gpu_set_texture_pack`, turned on from `btvs_input_glyphs.c`; nothing in
+  Graphics' or Menu's files changed, `CMakeLists.txt` gained one source file). Test runs get them too: with
+  no pad they show the keyboard set. `BTVS_CONTROLS_BUTTON_PICTURES=original` gives the game's own art back
+  for a run. The pictures are written to `button_pictures\load` beside the exe (16 PNG files, 12 MB, made
+  again when a binding changes); two test games started from one build folder with different sets need
+  `BTVS_GLYPH_DIR=<folder>` each.
+- **Controls -> Menu**: a line on the PC Controls page, please: **Button Pictures: Auto / Xbox /
+  PlayStation / Keyboard / Original**, writing `[controls] button_pictures` = `auto` `xbox` `playstation`
+  `keyboard` `original`. It takes effect at the next level load or start (the texture pack is read once per
+  process), so the line could say so. Also: the menu's SELECT / BACK / CONFIRM / CANCEL labels are textures
+  too (64x16 and 128x16, hashes in a `BTVS_GLYPH_DUMP=1` run) if you ever want them in another wording.
+- **Controls -> Graphics**: the runtime's texture pack has one folder, and the button pictures now use it.
+  If a player-made texture pack is wanted later (as in the Chaos Bleeds port), either
+  `nv2a_gpu_set_texture_pack` takes a second folder, or say so and the button pictures are written into the
+  player's pack folder under a sub-folder (the pack reads sub-folders). Seen while dumping: the Start Game
+  page's Xbox console picture is texture `126c4f...` (128x128), should it ever need a replacement.
+- **Controls -> Extras**: nothing to ship for this; the folder is made on first start. An installer that
+  puts the game somewhere read-only would stop the pictures being written (the game then shows its own art
+  and the log says how many pictures were drawn: 0).

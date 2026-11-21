@@ -45,6 +45,7 @@ static uint32_t s_reported;
 void XInitDevices_006106B6(void)
 {
     IN_LOG("XInitDevices");
+    btvs_input__glyphs_boot();
     ret_stdcall(0, 8);
 }
 
@@ -342,6 +343,7 @@ void XInputGetState_006105EF(void)
     if (port == 0) {
         game_probe();
         pos_log();
+        btvs_input__glyphs_poll();
     }
     if (port >= 0)
         have = btvs_input_poll(port, &g);
