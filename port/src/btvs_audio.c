@@ -32,6 +32,7 @@
 #define MAX_VOICES     384
 #define MAX_PACKETS    128
 #define SKIP_RESERVE   0.35         /* seconds a stream keeps queued when late sound is skipped */
+#define PAN_NEAR       16.0f        /* game units (about cm): closer than this a 3D sound moves to the centre */
 #define DEV_BUFFERS    8             /* ring of submit buffers */
 #define DEV_QUEUE      5             /* periods kept queued: 50 ms */
 
@@ -55,6 +56,7 @@ typedef struct {
     const uint8_t *data;
     uint32_t bytes, frames;
     uint32_t idx;                    /* next frame to fetch */
+    uint32_t wraps;                  /* times a looping buffer started again */
     int32_t  cblock;                 /* decoded ADPCM block, -1 = none */
     int16_t  cache[2][64];
 
@@ -109,15 +111,21 @@ static IXAudio2SourceVoice    *s_xsrc;
 static int16_t  s_devbuf[DEV_BUFFERS][BTVS_AUDIO_PERIOD * 2];
 static int      s_devnext;
 
+/* Where log lines go: the game gives btvs_log (btvs_audio_dsound.c); the
+ * stand-alone test program has none and gets stderr. */
+static void (*s_log_sink)(const char *line);
+void btvs_audio_set_log(void (*sink)(const char *line)) { s_log_sink = sink; }
+
 static void alog(const char *fmt, ...)
 {
+    char line[512];
     va_list ap;
     va_start(ap, fmt);
-    fputs("[audio] ", stderr);
-    vfprintf(stderr, fmt, ap);
-    fputc('\n', stderr);
-    fflush(stderr);
+    vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
+    if (s_log_sink) { s_log_sink(line); return; }
+    fprintf(stderr, "[audio] %s\n", line);
+    fflush(stderr);
 }
 
 static Voice *vget(int id)
@@ -278,6 +286,7 @@ static int voice_fetch(Voice *v, float out[2])
     if (v->idx >= v->frames) {
         if (!v->looping || !v->frames) { v->ended = 1; return 0; }
         v->idx = 0;
+        v->wraps++;
     }
     if (v->tag == BTVS_FMT_XBOX_ADPCM) {
         int32_t b = (int32_t)(v->idx / 64);
@@ -320,16 +329,25 @@ static void voice_gains(const Voice *v, float *gl, float *gr)
         if (v->maxd > mind && dist > v->maxd) dist = v->maxd;
         if (dist > mind)
             att = mind / (mind + s_rolloff * (dist - mind));
-        if (dist > 1e-4f) {
+        {
             float right[3], fl, tl;
             /* left-handed: right = top x front */
             right[0] = s_ltop[1] * s_lfront[2] - s_ltop[2] * s_lfront[1];
             right[1] = s_ltop[2] * s_lfront[0] - s_ltop[0] * s_lfront[2];
             right[2] = s_ltop[0] * s_lfront[1] - s_ltop[1] * s_lfront[0];
             fl = sqrtf(dot3(right, right));
+            /* The direction comes from the positions as they are, not from
+             * the scaled distance: the game sets the distance factor to the
+             * smallest float there is (it wants no roll-off from DSOUND), and
+             * a scaled distance of nothing must not mean "no direction". */
             tl = sqrtf(dot3(d, d));
             if (v->mode3d == 1) { right[0] = 1; right[1] = 0; right[2] = 0; fl = 1; }
-            if (fl > 1e-6f && tl > 1e-6f) pan = dot3(d, right) / (fl * tl);
+            if (fl > 1e-6f && tl > 1e-6f) {
+                pan = dot3(d, right) / (fl * tl);
+                /* A source inside the listener's head (cutscene speech is
+                 * put less than a unit from the camera) has no side. */
+                if (tl < PAN_NEAR) pan *= tl / PAN_NEAR;
+            }
         }
         if (pan < -1.0f) pan = -1.0f;
         if (pan > 1.0f) pan = 1.0f;
@@ -388,6 +406,8 @@ static void voice_mix(Voice *v, float *acc, int frames)
         while (v->phase >= 1.0) {
             float n[2];
             if (v->ended == 2) {             /* the last frame has been heard */
+                if (s_log && v->cat == BTVS_CAT_SPEECH)
+                    alog("end  #%d: speech played to its end", (int)(v - s_voice));
                 v->playing = 0; v->ended = 0; v->primed = 0; v->idx = 0;
                 return;
             }
@@ -695,6 +715,16 @@ int btvs_audio_init(int flags)
     e = getenv("BTVS_AUDIO_LOG"); s_log = e && *e && *e != '0';
     e = getenv("BTVS_AUDIO_DUMP");
     if (e && *e) {
+        /* The game restarts itself to load a level (a new process each time):
+         * restart N writes <name>_r<N>.wav, so one run's dumps do not replace
+         * each other. */
+        char path[MAX_PATH];
+        const char *r = getenv("BTVS_RESTARTS"), *dot = strrchr(e, '.');
+        if (r && *r && dot && !strpbrk(dot, "/\\"))
+            snprintf(path, sizeof path, "%.*s_r%s%s", (int)(dot - e), e, r, dot);
+        else
+            snprintf(path, sizeof path, "%s%s%s", e, r && *r ? "_r" : "", r && *r ? r : "");
+        e = path;
         s_dump = fopen(e, "wb");
         if (s_dump) { setvbuf(s_dump, NULL, _IOFBF, 1 << 16); dump_header(); }
         else alog("cannot write BTVS_AUDIO_DUMP file %s", e);
@@ -921,11 +951,20 @@ void btvs_audio_voice_play(int id, int looping)
             v->playing = 1;
             v->ended = 0;
             if (!v->primed) v->gain_set = 0;     /* a fresh start does not ramp */
-            if (s_log)
-                alog("play #%d %s %d Hz %dch %u frames vol %d cat %d%s%s", id,
+            v->wraps = 0;
+            if (s_log) {
+                float gl, gr;
+                voice_gains(v, &gl, &gr);
+                alog("play #%d %s %d Hz %dch %.2f s vol %d %s%s gain L %.3f R %.3f", id,
                      v->tag == BTVS_FMT_XBOX_ADPCM ? "ADPCM" : "PCM", v->freq ? v->freq : v->rate,
-                     v->channels, v->frames, v->volume, v->cat, looping ? " loop" : "",
-                     v->mode3d != 2 ? " 3D" : "");
+                     v->channels, (double)v->frames / (double)(v->freq ? v->freq : v->rate), v->volume,
+                     v->cat == BTVS_CAT_SPEECH ? "speech" : v->cat == BTVS_CAT_MUSIC ? "music" : "effect",
+                     looping ? " loop" : "", gl, gr);
+                if (v->mode3d != 2)
+                    alog("     #%d 3D mode %d at %.1f %.1f %.1f, listener %.1f %.1f %.1f front %.2f %.2f %.2f, min %.0f max %.0f",
+                         id, v->mode3d, v->pos[0], v->pos[1], v->pos[2], s_lpos[0], s_lpos[1], s_lpos[2],
+                         s_lfront[0], s_lfront[1], s_lfront[2], v->mind, v->maxd);
+            }
         }
     }
     UNLOCK();
@@ -935,7 +974,14 @@ void btvs_audio_voice_stop(int id)
 {
     Voice *v;
     LOCK();
-    if ((v = vget(id)) != NULL && !v->is_stream) v->playing = 0;
+    if ((v = vget(id)) != NULL && !v->is_stream) {
+        if (s_log && v->playing && v->looping)
+            alog("stop #%d: the loop had started again %u times", id, v->wraps);
+        else if (s_log && v->playing && v->frames)
+            alog("stop #%d: cut off at %.2f of %.2f s", id, (double)v->idx / (double)v->rate,
+                 (double)v->frames / (double)v->rate);
+        v->playing = 0;
+    }
     UNLOCK();
 }
 

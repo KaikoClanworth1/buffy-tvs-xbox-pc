@@ -40,6 +40,7 @@ enum { BTVS_CAT_EFFECTS = 0, BTVS_CAT_MUSIC = 1, BTVS_CAT_SPEECH = 2, BTVS_CAT_C
 int  btvs_audio_init(int flags);                    /* 1 = running. Safe to call again. */
 void btvs_audio_shutdown(void);                     /* stops the thread, closes the dump */
 void btvs_audio_render(int frames);                 /* offline mode only */
+void btvs_audio_set_log(void (*sink)(const char *line));   /* where "[audio]" lines go (default: stderr) */
 
 /* The audio clock: frames mixed since init (at BTVS_AUDIO_RATE). */
 uint64_t btvs_audio_clock(void);

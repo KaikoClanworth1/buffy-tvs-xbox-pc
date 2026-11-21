@@ -111,6 +111,13 @@ recomp_func_t recomp_lookup_manual(uint32_t xbox_va)
             return btvs_wma_test_cb;
     }
 
+    /* Audio: the music decoder's file-read callback (btvs_audio_dsound.c). */
+    {
+        extern recomp_func_t btvs_audio_lookup(uint32_t va);
+        recomp_func_t f = btvs_audio_lookup(xbox_va);
+        if (f) return f;
+    }
+
     /* Logs: the trail's wrappers around a few of the game's virtual functions
      * (level loaded, menu screen, death, the once-a-frame tick): btvs_trail.c. */
     {
