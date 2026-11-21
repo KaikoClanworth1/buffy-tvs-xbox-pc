@@ -165,11 +165,37 @@ void TLogo_ExecuteMovies_00062DB0(void)
  * horizontal field of view; the game works the vertical one out for its 4:3
  * screen. Widescreen in a level: the horizontal angle is widened so that its
  * tangent grows by the frame's aspect over 4:3 (the same picture height, more
- * at the sides); btvs_native.c cuts the extra height the game then adds. */
+ * at the sides); btvs_native.c cuts the extra height the game then adds.
+ *
+ * Who asks matters:
+ * - TGame::Render (through Context_ViewParams): the level's camera. Widened.
+ * - TGORender_CustomViewport::Render: an object drawn as part of the screen's
+ *   furniture, in a small viewport with a lens of its own (20 degrees): the
+ *   weapon beside the ammunition count, the items of the inventory screens.
+ *   It sets its view (return address 0x98088), draws, and puts the level's
+ *   back (0x981C6). Those are HUD: not widened, and drawn where the 2D HUD is
+ *   (btvs_native_ui_view). Widened like the level they were squeezed, moved
+ *   off their places and, away from the middle, off the screen.
+ * - View_SetViewport calls this again with the angle already stored (return
+ *   address 0x2A50F9): passed on as it is (it used to be widened twice). */
 void TIF_Render_Implement_View_SetFOV_002A5110_orig(void);
 void TIF_Render_Implement_View_SetFOV_002A5110(void)
 {
-    float f = btvs_native_fov_factor();
+    uint32_t ret = MEM32(g_esp), from = ret == 0x0001A396u ? MEM32(g_esp + 12) : 0;
+    float f;
+    if (getenv("BTVS_FOV_LOG"))
+        fprintf(stderr, "[FOV] %.4f rad, from %08X <- %08X\n", MEMF(g_esp + 4), ret, MEM32(g_esp + 12));
+    if (ret == 0x002A50F9u) {
+        TIF_Render_Implement_View_SetFOV_002A5110_orig();
+        return;
+    }
+    if (from == 0x00098088u) {
+        btvs_native_ui_view(1);
+        TIF_Render_Implement_View_SetFOV_002A5110_orig();
+        return;
+    }
+    btvs_native_ui_view(0);
+    f = btvs_native_fov_factor();
     if (f > 1.0f) {
         float rad = MEMF(g_esp + 4);                 /* (radians: the game halves it and takes the tangent) */
         if (rad > 0.05f && rad < 3.0f) {

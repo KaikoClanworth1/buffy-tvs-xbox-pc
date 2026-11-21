@@ -1951,6 +1951,8 @@ static int nv2a_native_draw_one(const NativeDraw *d, GpuTexture *rt, GpuTexture 
         memset(k[192], 0, sizeof(float) * 16);
         k[192][0] = uses_viewport ? 1.0f : 0.0f;
         k[195][0] = s_nview[0]; k[195][1] = s_nview[1]; k[195][2] = s_nview[2];
+        if (uses_viewport && s_nconst[58][0] != 0.0f)
+            k[195][2] = 1.0f;                    /* (the 3D x scale is in the viewport's place and width, below) */
         {
             /* W-buffering (D3DZB_USEW, which the title's 3D uses): depth is W
              * mapped through the clip range, as on the NV2A (vsh_generate's
@@ -2162,6 +2164,12 @@ static int nv2a_native_draw_one(const NativeDraw *d, GpuTexture *rt, GpuTexture 
         vp.y = (s_nconst[59][1] - hy) * sy;
         vp.w = 2.0f * hx * sx;
         vp.h = 2.0f * hy * sy;
+        /* a 3D picture narrower than the frame (nv2a_native_view's x3d: 4:3
+         * in the middle of a wide frame): the title's viewport is a part of
+         * that picture, so it moves and narrows with it -- scaling x inside a
+         * small viewport instead left it at its place in the wide frame */
+        vp.x = (float)pw * 0.5f + (vp.x - (float)pw * 0.5f) * s_nview[2];
+        vp.w *= s_nview[2];
     } else {
         vp.x = 0; vp.y = 0;
         vp.w = (float)pw; vp.h = (float)ph;

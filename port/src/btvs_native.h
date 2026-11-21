@@ -53,6 +53,7 @@ void btvs_native_start(void);            /* the device comes up; game thread, af
 void btvs_native_overlay(void);           /* this frame's overlay items onto the frame (btvs_native_overlay.c) */
 void btvs_native_set_wide(float aspect_over_43);   /* widescreen: the frame's aspect over 4:3 (1: not wide) */
 float btvs_native_fov_factor(void);      /* for View_SetFOV */
+void btvs_native_ui_view(int on);        /* for View_SetFOV: 3D that is HUD (an item in its own viewport) begins / ends */
 void btvs_native_present(void);          /* show the frame (from the Swap hook) */
 void btvs_native_frame_size(uint32_t *w, uint32_t *h);   /* internal render size now */
 

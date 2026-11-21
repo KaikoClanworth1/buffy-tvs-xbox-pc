@@ -340,6 +340,7 @@ static void log_draw(int path, const NativeDraw *d, uint32_t dev, uint32_t up_st
             surface_size(t, &w, &h);
             fprintf(stderr, " t%d=%08X(fmt %02X %ux%u word %08X data %08X pal %08X)", i, t, (MEM32(t + 0xC) >> 8) & 0xFF, w, h, MEM32(t + 0xC), MEM32(t + 4), d->tex[i].palette);
         }
+    fprintf(stderr, " vp %u,%u %ux%u", MEM32(dev + DEV_VIEWPORT), MEM32(dev + DEV_VIEWPORT + 4), MEM32(dev + DEV_VIEWPORT + 8), MEM32(dev + DEV_VIEWPORT + 12));
     fprintf(stderr, " A");
     for (i = 0; i < 16; i++)
         if (d->attr[i].fmt)
@@ -819,6 +820,7 @@ void btvs_native_start(void)
  * 4:3, bars at the sides. */
 static float s_wide = 1.0f;            /* the frame's aspect over 4:3; 1: not wide */
 static int s_fov_wide;                 /* the game's last SetFOV was widened */
+static int s_ui_view;                  /* 3D now is HUD: an object in a viewport of its own (View_SetFOV) */
 
 void btvs_native_set_wide(float aspect_over_43)
 {
@@ -842,6 +844,20 @@ float btvs_native_fov_factor(void)
 {
     s_fov_wide = s_wide > 1.0f && level_loaded();
     return s_fov_wide ? s_wide : 1.0f;
+}
+
+static void wide_frame(void);
+
+/* For View_SetFOV: from here on (1) / no longer (0) the 3D drawn is part of
+ * the HUD -- the game's "custom viewport" objects: the weapon by the
+ * ammunition count, the inventory's items -- and goes where the 2D HUD goes:
+ * the 4:3 middle, not widened, not cut. */
+void btvs_native_ui_view(int on)
+{
+    if (s_ui_view == (on != 0))
+        return;
+    s_ui_view = on != 0;
+    wide_frame();
 }
 
 /* Widescreen, in a level: screen-space drawing that covers the whole width
@@ -875,6 +891,8 @@ static void wide_frame(void)
     void nv2a_native_view(float y3d, float x2d, float x3d);
     if (s_wide <= 1.0f)
         nv2a_native_view(1.0f, 1.0f, 1.0f);
+    else if (s_ui_view)
+        nv2a_native_view(1.0f, 1.0f / s_wide, 1.0f / s_wide);
     else if (s_fov_wide && level_loaded())
         nv2a_native_view(s_wide, 1.0f / s_wide, 1.0f);
     else
@@ -890,6 +908,7 @@ void btvs_native_overlay(void)
         btvs_overlay_rect(-extra, 0.0f, extra, 480.0f, 0xFF000000u);
         btvs_overlay_rect(640.0f, 0.0f, extra, 480.0f, 0xFF000000u);
     }
+    s_ui_view = 0;
     wide_frame();                                /* (for the frame that starts after this one is shown) */
     void btvs_overlay_test(void);
     void btvs_overlay_frame(GpuTexture *frame, uint32_t pw, uint32_t ph);
