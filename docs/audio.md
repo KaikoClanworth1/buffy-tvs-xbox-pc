@@ -504,6 +504,47 @@ From this build on the log gets a `[audio] device:` line, at most every 30 s and
 something happened, counting empty queues, XAudio2 glitches, dropped periods and clipped samples.
 If the owner still hears crackle, that line in `btvs_log.txt` says whether it is the device side.
 
+## "Some audio keeps repeating when fighting" (2026-11-21, the owner on the 19:22 build)
+
+**Found and fixed: a music piece could play again in place of the next one.** The port reads each
+music track into memory at its first read (Music gaps, above) and kept it for the music object
+that asked. The game uses a music object and its `FILE` again for the next piece, and the only
+check against that was the first read's bytes: the decoder's first read is 30 bytes, and **59 of
+the 62 tracks in `Sound\Music` begin with the same 30 bytes** (the other three, `fight_02/03/04`,
+share theirs). So the held track was handed out again: the piece before played a second time
+instead of the new one. The held track is now tied to the track's name.
+
+Caught in a run (cemetery, 300 s, music only in the dump): at 237.3 s the game put
+`bvs_waits_lp1.wma` into the object that held `theme_buffywaits03.wma`. With the fix the log says
+`music: ... follows ... in the same music object; the held track is dropped` and the dump after
+that point is the new piece (the first 4 s of the old one are found nowhere in 236-250 s,
+correlation -0.03; the same test finds them at 155.7 s with 1.000). The old build was not run
+again for this; that it replayed the old piece follows from the code and the identical headers.
+
+**Effects and speech in a fight: nothing repeats that the game did not ask for.** Two cemetery
+fights with scripted attacks (`BTVS_MAP=m03_cemetery_1`, X every 0.5 s, Y every 2.3 s), 60 frames
+a second and a 240 limit (80-105 reached in the test run), with every `Play`, `Stop` and
+`SetBufferData` the game makes in the log (`BTVS_AUDIO_LOG=1`, lines `ds   #n ...`):
+
+| | 60 fps | 240 limit |
+|---|---|---|
+| `Play` calls | 1419 | 1566 |
+| on a buffer that was still playing | 0 | 0 |
+| `Play` without new sample data (a resume or replay) | 0 | - |
+| `Stop` not followed by the game detaching the sample | 0 | - |
+| one-shots started with the looping flag | 0 audible (18 loops at -100 dB, each stopped within 50 ms) | 7 such |
+| same sample at the same place in the same frame | 10 doubles | 9 doubles, 3 triples |
+| loops left running loud | none (two ambience loops, stopped at exit) | none |
+
+Every one-shot ends once; `GetStatus` goes to "not playing" and the game then stops and detaches
+it. The most played audible samples are hit and grunt variants at irregular times (27 plays of
+the commonest in 100 s). So the suspects on the effect side (one-shots looping, status never
+ending, `Stop` ignored, stale buffer data, the new resampler's end handling) were not seen.
+
+**Not known**: whether the music fault is what the owner heard; they did not say which sound. No
+recording of their fight exists (`btvs_frames.rec` covered other levels). If it is still there
+after this build, a Report a Problem in the fight, or the name of the sound, is needed.
+
 ## Still to do
 
 1. An unloaded run at normal priority (or the owner listening): movies, menu music and a level

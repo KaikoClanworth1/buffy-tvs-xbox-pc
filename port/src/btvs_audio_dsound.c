@@ -353,6 +353,7 @@ HOOK(IDirectSoundBuffer_SetBufferData_005A8837)
 {
     int v = voice_of(arg(0), MAGIC_BUFFER);
     uint32_t data = arg(1), bytes = arg(2);
+    if (s_trace && v >= 0) dlog("ds   #%d SetBufferData %08X %u bytes", v, data, bytes);
     if (v >= 0) {
         if (!data || !bytes) {
             btvs_audio_voice_data(v, NULL, 0);
@@ -375,6 +376,8 @@ HOOK(IDirectSoundBuffer_SetBufferData_005A8837)
 HOOK(IDirectSoundBuffer_Play_005A77B3)
 {
     int v = voice_of(arg(0), MAGIC_BUFFER);
+    if (s_trace && v >= 0)
+        dlog("ds   #%d Play flags %x%s", v, arg(3), btvs_audio_voice_playing(v) ? " (already playing)" : "");
     if (v >= 0) btvs_audio_voice_play(v, (arg(3) & DSBPLAY_LOOPING) != 0);
     ret_stdcall(DS_OK, 16);
 }
@@ -382,6 +385,8 @@ HOOK(IDirectSoundBuffer_Play_005A77B3)
 HOOK(IDirectSoundBuffer_Stop_005A77D7)
 {
     int v = voice_of(arg(0), MAGIC_BUFFER);
+    if (s_trace && v >= 0)
+        dlog("ds   #%d Stop%s", v, btvs_audio_voice_playing(v) ? "" : " (not playing)");
     if (v >= 0) btvs_audio_voice_stop(v);
     ret_stdcall(DS_OK, 4);
 }
@@ -615,7 +620,7 @@ extern void TFileName_GetRoot_002B6000(void);
 
 #define MUSIC_FILES   4
 #define MUSIC_MAX     (64u << 20)
-static struct { uint32_t self, file, size; uint8_t *data; } s_music[MUSIC_FILES];
+static struct { uint32_t self, file, size; uint8_t *data; char name[128]; } s_music[MUSIC_FILES];
 static int s_music_next, s_preload = -1;
 
 static uint32_t guest_cdecl(recomp_func_t fn, int nargs, const uint32_t *args)
@@ -695,6 +700,7 @@ static void wma_read(void)
     uint32_t self = arg(0), off = arg(1), n = arg(2), pp = arg(3);
     uint32_t turn, buf, file, prev, got, i;
     int slot = -1;
+    const char *track;
     LARGE_INTEGER t0;
 
     if (s_preload < 0) {
@@ -711,8 +717,30 @@ static void wma_read(void)
     buf = MEM32(self + 0x80 + turn * 4);
     file = MEM32(self + 0x7C);
 
+    {
+        uint32_t info = MEM32(self + 4), name = info ? MEM32(info + 0x10) : 0;
+        track = name ? (const char *)XBOX_PTR(name) : "";
+    }
     for (i = 0; i < MUSIC_FILES; i++)
         if (s_music[i].data && s_music[i].self == self && s_music[i].file == file) slot = (int)i;
+    /* The game uses a music object and its FILE again for the next piece, and
+     * 59 of the 62 tracks begin with the same 30 bytes (all the decoder asks
+     * for first), so only the name tells a held track from a new one. Without
+     * this the piece before was played again in place of the new one. */
+    if (slot >= 0 && strncmp(s_music[slot].name, track, sizeof s_music[slot].name - 1)) {
+        dlog("music: %s follows %s in the same music object; the held track is dropped", track,
+             s_music[slot].name);
+        free(s_music[slot].data);
+        s_music[slot].data = NULL;
+        slot = -1;
+        if (off != 0) {                             /* mid-track: the game's own read */
+            WMAStreamCallback_00067100();
+            return;
+        }
+    }
+    if (s_trace > 0 && off == 0)
+        dlog("music: %08X reads %u bytes from the start of %s (FILE %08X)%s", self, n, track, file,
+             slot >= 0 ? ", a track is held for it" : "");
     if (slot >= 0 && off == 0) {
         /* A read from the start: a new track may have been opened behind the
          * same FILE. One real read tells. */
@@ -746,6 +774,7 @@ static void wma_read(void)
         free(s_music[slot].data);
         s_music[slot].self = self; s_music[slot].file = file;
         s_music[slot].data = data; s_music[slot].size = size;
+        strncpy_s(s_music[slot].name, sizeof s_music[slot].name, track, _TRUNCATE);
         if (s_trace > 0) dlog("music: track of %u bytes read ahead in %.0f ms", size, ms_since(&t0));
     }
 
