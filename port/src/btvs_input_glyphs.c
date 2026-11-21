@@ -30,7 +30,7 @@
 double btvs_frame_seconds(void);
 void nv2a_gpu_set_texture_pack(const WCHAR *root, int dump, int load, int prefetch);
 
-#define GLYPH_VERSION 12            /* a change in the drawing: files are made again */
+#define GLYPH_VERSION 13            /* a change in the drawing: files are made again */
 #define SCALE 4                    /* the port's pictures are this many times the game's */
 
 enum { SET_KEYS, SET_XBOX, SET_PS, SET_ORIGINAL };
@@ -438,6 +438,8 @@ static void action_source(const char *action, gsrc *g)
     }
 }
 
+static void keys4_source(const char *const act[4], gsrc *g);
+
 /* A whole stick: the pad's stick, or the four keys (the mouse, for the camera). */
 static void stick_source(int right, gsrc *g)
 {
@@ -460,10 +462,19 @@ static void stick_source(int right, gsrc *g)
         g->kind = K_MOUSE; g->n = 5;                            /* the mouse itself */
         return;
     }
+    keys4_source(k_dir[right], g);
+}
+
+/* Four keys as one picture: up / left down right. */
+static void keys4_source(const char *const act[4], gsrc *g)
+{
+    char buf[48];
+    int i;
+    memset(g, 0, sizeof *g);
     g->kind = K_KEYS4;
     for (i = 0; i < 4; i++) {
         gsrc k;
-        key_source(key_of(k_dir[right][i], buf, sizeof buf), &k);
+        key_source(key_of(act[i], buf, sizeof buf), &k);
         if (k.kind == K_KEY && lstrlenW(k.label[0]) <= 2)
             lstrcpyW(g->label[i], k.label[0]);
         else if (k.kind == K_KEYARROW)
@@ -516,6 +527,49 @@ static void key_cap(cv *c, float cx, float cy, float w, float h, float d, int st
     plate(c, &s, d, st);
     if (label && label[0])
         text(c, label, cx, cy, cap, 700, st == ST_PRESSED ? DARK : INK, 1.0f, w - d * 0.20f);
+}
+
+/* A mouse, d high, with the parts in `lit` light. */
+enum { M_LEFT = 1, M_RIGHT = 2, M_WHEEL = 4, M_UP = 8, M_DOWN = 16, M_MOVED = 32 };
+
+static void mouse_pic(cv *c, float cx, float cy, float d, int st, int lit)
+{
+    const float *ink = st == ST_PRESSED ? DARK : INK;
+    float hw = d * 0.30f, hh = d * 0.46f, split = cy - hh * 0.18f;
+    float keep[4];
+    shape s = sh(SH_RBOX, cx, cy, hw, hh, hw * 0.95f, 0), wheel;
+    int half;
+    plate(c, &s, d, st);
+    memcpy(keep, s_clip, sizeof keep);
+    for (half = 0; half < 2; half++) {          /* a lit half above the split */
+        if (!(lit & (half ? M_RIGHT : M_LEFT)))
+            continue;
+        s_clip[1] = cy - hh; s_clip[3] = split;
+        s_clip[0] = half ? cx : cx - hw; s_clip[2] = half ? cx + hw : cx;
+        paint(c, &s, P_FILL, 0, st == ST_PRESSED ? D0 : INK, st == ST_PRESSED ? D1 : LILAC, 1.0f);
+        memcpy(s_clip, keep, sizeof keep);
+        paint(c, &s, P_STROKE, d * 0.065f, ink, ink, 1.0f);
+    }
+    line(c, cx - hw, split, cx + hw, split, d * 0.05f, ink, 1.0f);
+    line(c, cx, cy - hh, cx, split, d * 0.05f, (lit & (M_LEFT | M_RIGHT)) == (M_LEFT | M_RIGHT) && st != ST_PRESSED ? DARK : ink, 1.0f);
+    wheel = sh(SH_RBOX, cx, cy - hh * 0.56f, d * 0.065f, d * 0.13f, d * 0.065f, 0);
+    if (lit & M_WHEEL) {
+        paint(c, &wheel, P_FILL, 0, st == ST_PRESSED ? D0 : INK, st == ST_PRESSED ? D1 : LILAC, 1.0f);
+        paint(c, &wheel, P_STROKE, d * 0.045f, st == ST_PRESSED ? INK : DARK, st == ST_PRESSED ? INK : DARK, 1.0f);
+    } else {
+        paint(c, &wheel, P_FILL, 0, st == ST_PRESSED ? INK : D0, st == ST_PRESSED ? LILAC : D1, 1.0f);
+        paint(c, &wheel, P_STROKE, d * 0.045f, ink, ink, 1.0f);
+    }
+    if ((lit & (M_UP | M_DOWN)) == (M_UP | M_DOWN)) {   /* the wheel, turned */
+        arrow(c, cx, cy + hh * 0.22f, d * 0.17f, -1.5707963f, d * 0.055f, ink, 1.0f);
+        arrow(c, cx, cy + hh * 0.62f, d * 0.17f, 1.5707963f, d * 0.055f, ink, 1.0f);
+    } else if (lit & (M_UP | M_DOWN)) {
+        arrow(c, cx, cy + hh * 0.42f, d * 0.26f, lit & M_UP ? -1.5707963f : 1.5707963f, d * 0.07f, ink, 1.0f);
+    }
+    if (lit & M_MOVED) {
+        arrow(c, cx - hw - d * 0.12f, cy, d * 0.10f, 3.1415927f, d * 0.055f, ink, 1.0f);
+        arrow(c, cx + hw + d * 0.12f, cy, d * 0.10f, 0, d * 0.055f, ink, 1.0f);
+    }
 }
 
 /* (cx, cy): the middle; d: the size (a face button's diameter), in pixels. */
@@ -650,35 +704,8 @@ static void draw_glyph(cv *c, float cx, float cy, float d, const gsrc *g, int st
         break;
     }
     case K_MOUSE: {
-        float hw = d * 0.30f, hh = d * 0.46f, split = cy - hh * 0.18f;
-        float keep[4];
-        shape wheel;
-        s = sh(SH_RBOX, cx, cy, hw, hh, hw * 0.95f, 0);
-        plate(c, &s, d, st);
-        memcpy(keep, s_clip, sizeof keep);
-        if (g->n == 0 || g->n == 1) {           /* a lit half above the split */
-            s_clip[1] = cy - hh; s_clip[3] = split;
-            s_clip[0] = g->n == 0 ? cx - hw : cx; s_clip[2] = g->n == 0 ? cx : cx + hw;
-            paint(c, &s, P_FILL, 0, st == ST_PRESSED ? D0 : INK, st == ST_PRESSED ? D1 : LILAC, 1.0f);
-            memcpy(s_clip, keep, sizeof keep);
-            paint(c, &s, P_STROKE, d * 0.065f, ink, ink, ia);
-        }
-        line(c, cx - hw, split, cx + hw, split, d * 0.05f, ink, ia);
-        line(c, cx, cy - hh, cx, split, d * 0.05f, ink, ia);
-        wheel = sh(SH_RBOX, cx, cy - hh * 0.56f, d * 0.065f, d * 0.13f, d * 0.065f, 0);
-        if (g->n >= 2 && g->n <= 4) {
-            paint(c, &wheel, P_FILL, 0, st == ST_PRESSED ? D0 : INK, st == ST_PRESSED ? D1 : LILAC, 1.0f);
-            paint(c, &wheel, P_STROKE, d * 0.045f, st == ST_PRESSED ? INK : DARK, st == ST_PRESSED ? INK : DARK, 1.0f);
-        } else {
-            paint(c, &wheel, P_FILL, 0, st == ST_PRESSED ? INK : D0, st == ST_PRESSED ? LILAC : D1, 1.0f);
-            paint(c, &wheel, P_STROKE, d * 0.045f, ink, ink, ia);
-        }
-        if (g->n == 3 || g->n == 4)             /* the wheel, turned up or down */
-            arrow(c, cx, cy + hh * 0.42f, d * 0.26f, g->n == 3 ? -1.5707963f : 1.5707963f, d * 0.07f, ink, ia);
-        if (g->n == 5) {                        /* the mouse, moved */
-            arrow(c, cx - hw - d * 0.12f, cy, d * 0.10f, 3.1415927f, d * 0.055f, ink, ia);
-            arrow(c, cx + hw + d * 0.12f, cy, d * 0.10f, 0, d * 0.055f, ink, ia);
-        }
+        static const int k_mask[6] = { M_LEFT, M_RIGHT, M_WHEEL, M_WHEEL | M_UP, M_WHEEL | M_DOWN, M_MOVED };
+        mouse_pic(c, cx, cy, d, st, k_mask[g->n]);
         break;
     }
     case K_ARROW: {
@@ -889,6 +916,169 @@ static void callout(cv *c, const float *pts, int n, int tip)
     }
 }
 
+/* The same page with keyboard and mouse: a keyboard and a mouse with every
+ * key and button that does something light, and beside each of the game's
+ * labels the keys the action is on now (two at most). */
+static char s_lit[64][24];
+static int s_nlit;
+
+static int lit(const char *name)
+{
+    int i;
+    for (i = 0; i < s_nlit; i++)
+        if (!strcmp(s_lit[i], name))
+            return 1;
+    return 0;
+}
+
+/* One key of the keyboard: (x, y) its top left, w its width in keys, u a key's size. */
+static void board_key(cv *c, float x, float y, float w, float u, const char *name)
+{
+    static const float WHITE[3] = { 1, 1, 1 };
+    static const float ang[4] = { -1.5707963f, 1.5707963f, 3.1415927f, 0 };
+    float cx = PX(x + w * u * 0.5f), cy = PX(y + u * 0.5f), d = PX(u);
+    shape s = sh(SH_RBOX, cx, cy, PX(w * u * 0.5f - u * 0.07f), PX(u * 0.43f), PX(u * 0.17f), 0);
+    gsrc k;
+    if (!name[0] || !lit(name)) {
+        paint(c, &s, P_FILL, 0, D0, D1, 0.92f);
+        paint(c, &s, P_STROKE, d * 0.05f, MUTED, MUTED, 0.50f);
+        return;
+    }
+    paint(c, &s, P_GLOW, d * 0.30f, LILAC, LILAC, 0.55f);
+    paint(c, &s, P_FILL, 0, INK, LILAC, 1.0f);
+    paint(c, &s, P_STROKE, d * 0.07f, WHITE, INK, 1.0f);
+    key_source(name, &k);
+    if (k.kind == K_KEYARROW)
+        arrow(c, cx, cy, d * 0.42f, ang[k.n], d * 0.09f, DARK, 1.0f);
+    else
+        text(c, k.label[0], cx, cy, lstrlenW(k.label[0]) <= 1 ? d * 0.46f : d * 0.30f, 700, DARK, 1.0f, PX(w * u) - d * 0.26f);
+}
+
+static void build_keys_page(void)
+{
+    static const struct { const char *name; float w; } k_rows[5][15] = {
+        { { "`", 1 }, { "1", 1 }, { "2", 1 }, { "3", 1 }, { "4", 1 }, { "5", 1 }, { "6", 1 }, { "7", 1 }, { "8", 1 }, { "9", 1 },
+          { "0", 1 }, { "-", 1 }, { "=", 1 }, { "Backspace", 2 } },
+        { { "Tab", 1.5f }, { "Q", 1 }, { "W", 1 }, { "E", 1 }, { "R", 1 }, { "T", 1 }, { "Y", 1 }, { "U", 1 }, { "I", 1 }, { "O", 1 },
+          { "P", 1 }, { "[", 1 }, { "]", 1 }, { "\\", 1.5f } },
+        { { "CapsLock", 1.75f }, { "A", 1 }, { "S", 1 }, { "D", 1 }, { "F", 1 }, { "G", 1 }, { "H", 1 }, { "J", 1 }, { "K", 1 },
+          { "L", 1 }, { ";", 1 }, { "'", 1 }, { "Enter", 2.25f } },
+        { { "LShift", 2.25f }, { "Z", 1 }, { "X", 1 }, { "C", 1 }, { "V", 1 }, { "B", 1 }, { "N", 1 }, { "M", 1 }, { "Comma", 1 },
+          { ".", 1 }, { "/", 1 }, { "RShift", 2.75f } },
+        { { "LCtrl", 1.25f }, { "", 1.25f }, { "LAlt", 1.25f }, { "Space", 6.25f }, { "RAlt", 1.25f }, { "", 1.25f }, { "", 1.25f },
+          { "RCtrl", 1.25f } },
+    };
+    static const struct { const char *name; float x; } k_top[] = {
+        { "Escape", 0 }, { "F1", 2 }, { "F2", 3 }, { "F3", 4 }, { "F4", 5 }, { "F5", 6.5f }, { "F6", 7.5f }, { "F7", 8.5f },
+        { "F8", 9.5f }, { "F9", 11 }, { "F10", 12 }, { "F11", 13 }, { "F12", 14 },
+    };
+    static const struct { const char *name; float x, row; } k_nav[] = {
+        { "Insert", 0, 0 }, { "Home", 1, 0 }, { "PageUp", 2, 0 }, { "Delete", 0, 1 }, { "End", 1, 1 }, { "PageDown", 2, 1 },
+        { "Up", 1, 3 }, { "Left", 0, 4 }, { "Down", 1, 4 }, { "Right", 2, 4 },
+    };
+    /* the game's labels with one action each: the label's ring, the first key from it, the step to the second */
+    static const struct { const char *action; float x, y, dx, dy, step; int most; } k_one[] = {
+        { "LeftTrigger", 90, 18, 0, 18, 20, 2 },  { "RightTrigger", 228, 18, 0, 18, -20, 2 },
+        { "White", 272, 28, -16, 2, -20, 1 },     { "Black", 294, 50, -16, 2, -20, 2 },
+        { "Y", 297, 90, -16, 0, -20, 2 },         { "B", 318, 112, -16, 0, -20, 2 },
+        { "X", 297, 133, -16, 0, -20, 2 },        { "A", 318, 154, -16, 0, -20, 2 },
+        { "Back", 141, 279, 0, -18, -20, 2 },     { "Start", 175, 279, 0, -18, 20, 2 },
+    };
+    static const char *const k_move[4] = { "MoveForward", "MoveLeft", "MoveBack", "MoveRight" };
+    static const char *const k_weapon[4] = { "DpadUp", "DpadLeft", "DpadDown", "DpadRight" };
+    static const char *const k_camera[4] = { "LookUp", "LookLeft", "LookDown", "LookRight" };
+    static const float BODY0[3] = { 0.17f, 0.12f, 0.30f }, BODY1[3] = { 0.07f, 0.04f, 0.14f };
+    const float U = 11.0f, X0 = 37, Y0 = 85, NAVX = X0 + 15.4f * U, ROW0 = Y0 + 1.35f * U;
+    const float MX = 221, MY = 205, MD = 60;
+    const int mouse_look = btvs_setting_int("controls", "mouse_look", 1) != 0;
+    char buf[48];
+    cv c;
+    shape s;
+    gsrc g;
+    int i, k, a, n = btvs_input_action_count(), mask = 0;
+    float x, stub[6];
+    if (!cv_make(&c, 384 * SCALE, 320 * SCALE))
+        return;
+
+    s_nlit = 0;
+    for (a = 0; a < n; a++) {
+        if (strstr(btvs_input_action_name(a), "StickClick"))    /* (not on this page) */
+            continue;
+        for (k = 0; k < 2; k++) {
+            btvs_input_binding_text(a, k, buf, sizeof buf);
+            if (buf[0] && s_nlit < 64)
+                strcpy_s(s_lit[s_nlit++], sizeof s_lit[0], buf);
+        }
+    }
+    if (lit("MouseLeft"))   mask |= M_LEFT;
+    if (lit("MouseRight"))  mask |= M_RIGHT;
+    if (lit("MouseMiddle")) mask |= M_WHEEL;
+    if (lit("WheelUp"))     mask |= M_WHEEL | M_UP;
+    if (lit("WheelDown"))   mask |= M_WHEEL | M_DOWN;
+
+    /* the keyboard */
+    s = sh(SH_RBOX, PX(X0 + 9.2f * U), PX(Y0 + 3.175f * U), PX(9.2f * U + 5), PX(3.175f * U + 5), PX(6), 0);
+    paint(&c, &s, P_GLOW, PX(7), LILAC, LILAC, 0.38f);
+    paint(&c, &s, P_FILL, 0, BODY0, BODY1, 0.985f);
+    paint(&c, &s, P_STROKE, PX(1.5f), INK, LILAC, 0.95f);
+    for (i = 0; i < (int)(sizeof k_top / sizeof k_top[0]); i++)
+        board_key(&c, X0 + k_top[i].x * U, Y0, 1, U, k_top[i].name);
+    for (i = 0; i < 5; i++)
+        for (k = 0, x = X0; k < 15 && k_rows[i][k].w > 0; x += k_rows[i][k].w * U, k++)
+            board_key(&c, x, ROW0 + (float)i * U, k_rows[i][k].w, U, k_rows[i][k].name);
+    for (i = 0; i < (int)(sizeof k_nav / sizeof k_nav[0]); i++)
+        board_key(&c, NAVX + k_nav[i].x * U, ROW0 + k_nav[i].row * U, 1, U, k_nav[i].name);
+
+    /* the mouse */
+    s = sh(SH_RBOX, PX(MX), PX(MY), PX(MD * 0.30f), PX(MD * 0.46f), PX(MD * 0.285f), 0);
+    paint(&c, &s, P_GLOW, PX(7), LILAC, LILAC, 0.38f);
+    mouse_pic(&c, PX(MX), PX(MY), PX(MD), ST_INLINE, mask);
+
+    /* the labels */
+    for (i = 0; i < (int)(sizeof k_one / sizeof k_one[0]); i++) {
+        int shown = 0;
+        a = action_index(k_one[i].action);
+        stub[0] = k_one[i].x; stub[1] = k_one[i].y;
+        stub[2] = k_one[i].x + k_one[i].dx * 0.5f; stub[3] = k_one[i].y + k_one[i].dy * 0.5f;
+        callout(&c, stub, 2, 0);
+        for (k = 0; k < 2 && shown < k_one[i].most; k++) {
+            btvs_input_binding_text(a, k, buf, sizeof buf);
+            if (!buf[0])
+                continue;
+            key_source(buf, &g);
+            draw_glyph(&c, PX(k_one[i].x + k_one[i].dx + (float)shown * k_one[i].step), PX(k_one[i].y + k_one[i].dy), PX(19), &g, ST_INLINE);
+            shown++;
+        }
+        if (!shown) {                           /* nothing bound */
+            memset(&g, 0, sizeof g);
+            draw_glyph(&c, PX(k_one[i].x + k_one[i].dx), PX(k_one[i].y + k_one[i].dy), PX(19), &g, ST_INLINE);
+        }
+    }
+    stub[0] = 26; stub[1] = 53; stub[2] = 33; stub[3] = 53;
+    callout(&c, stub, 2, 0);
+    keys4_source(k_move, &g);
+    draw_glyph(&c, PX(55), PX(52), PX(42), &g, ST_INLINE);
+    stub[0] = 30; stub[1] = 212; stub[2] = 37; stub[3] = 212;
+    callout(&c, stub, 2, 0);
+    keys4_source(k_weapon, &g);
+    draw_glyph(&c, PX(59), PX(211), PX(42), &g, ST_INLINE);
+    stub[0] = 297; stub[1] = 212;
+    if (mouse_look) {                           /* the camera is the mouse itself */
+        stub[2] = 264; stub[3] = 212; stub[4] = MX + MD * 0.16f; stub[5] = MY + MD * 0.16f;
+        callout(&c, stub, 3, 1);
+    } else {
+        stub[2] = 290; stub[3] = 212;
+        callout(&c, stub, 2, 0);
+        keys4_source(k_camera, &g);
+        draw_glyph(&c, PX(268), PX(211), PX(42), &g, ST_INLINE);
+    }
+
+    write_tex(&c, 0, 0, 256 * SCALE, 256 * SCALE, "pad", "128e9d296c5ed8db");
+    write_tex(&c, 256 * SCALE, 0, 128 * SCALE, 256 * SCALE, "pad", "678e86aa4ca925a0");
+    write_tex(&c, 0, 256 * SCALE, 256 * SCALE, 64 * SCALE, "pad", "f26871cd3ad49a55");
+    free(c.p);
+}
+
 static void build_controller(void)
 {
     static const float move[] = { 26, 53, 62.5f, 94.5f }, weapon[] = { 30, 212, 62, 212, 88, 184 };
@@ -903,10 +1093,12 @@ static void build_controller(void)
     shape s;
     gsrc g;
     int i, keep = s_set;
+    if (s_set == SET_KEYS) {
+        build_keys_page();
+        return;
+    }
     if (!cv_make(&c, 384 * SCALE, 320 * SCALE))
         return;
-    if (s_set == SET_KEYS)                      /* the page is about the pad: a pad it is */
-        s_set = SET_XBOX;
 
     /* triggers and shoulder buttons, behind the body */
     for (i = 0; i < 2; i++) {
@@ -1186,6 +1378,10 @@ int btvs_input__glyphs_fit_text(char *s, int mouse_camera)
     return 1;
 }
 
+static uint32_t s_fit_text[32];             /* the reworded sentences, for tips_show */
+static char s_fit_name[32][48];
+static int s_nfit;
+
 static void tips_fit(void)
 {
     static int done, delay = -1;
@@ -1216,10 +1412,59 @@ static void tips_fit(void)
             if (!str || !readable(str, 8) || (text = MEM32(str)) == 0 || !readable(text, 1))
                 continue;
             seen++;
-            if (memchr((const char *)XBOX_PTR(text), 0, 500))
-                n += (uint32_t)btvs_input__glyphs_fit_text((char *)XBOX_PTR(text), btvs_setting_int("controls", "mouse_look", 1) != 0);
+            if (memchr((const char *)XBOX_PTR(text), 0, 500)
+                    && btvs_input__glyphs_fit_text((char *)XBOX_PTR(text), btvs_setting_int("controls", "mouse_look", 1) != 0)) {
+                uint32_t key = MEM32(node + 4u);
+                n++;
+                if (s_nfit < 32) {
+                    s_fit_text[s_nfit] = text;
+                    s_fit_name[s_nfit][0] = 0;
+                    if (key && readable(key, 48) && memchr((const char *)XBOX_PTR(key), 0, 48))
+                        strcpy_s(s_fit_name[s_nfit], sizeof s_fit_name[0], (const char *)XBOX_PTR(key));
+                    s_nfit++;
+                }
+            }
         }
     IN_LOG("button pictures: %u of the game's %u tips reworded for keyboard and mouse", n, seen);
+    for (b = 0; b < (uint32_t)s_nfit; b++)
+        IN_LOG("button pictures: tip %s: %s", s_fit_name[b], (const char *)XBOX_PTR(s_fit_text[b]));
+}
+
+/* BTVS_GLYPH_SHOW_TIPS=<first>,<every>[,<type>]: testing. The reworded tips
+ * put on screen one after the other through the game's own ShowTip, the
+ * first <first> seconds after the process started, the next every <every>
+ * seconds, so that frames can be taken of each. */
+static void tips_show(void)
+{
+    static int state, type, idx;
+    static double next, every;
+    union { float f; uint32_t u; } secs;
+    uint32_t tw, saved;
+    recomp_func_t fn;
+    if (state == 0) {
+        const char *e = getenv("BTVS_GLYPH_SHOW_TIPS");
+        state = 2;
+        if (e && sscanf_s(e, "%lf,%lf,%d", &next, &every, &type) >= 2)
+            state = 1;
+    }
+    if (state != 1 || idx >= s_nfit || btvs_frame_seconds() < next)
+        return;
+    next += every;
+    if (!readable(G_TIP_WINDOW, 4) || (tw = MEM32(G_TIP_WINDOW)) == 0 || (fn = recomp_lookup(0x00236EF0u)) == NULL)
+        return;
+    IN_LOG("glyphs: tip %d (%s) shown at %.2f s as type %d (the window's was %d)", idx, s_fit_name[idx], btvs_frame_seconds(),
+           type, (int)MEM32(tw + 0x270u));
+    secs.f = (float)every - 0.4f;
+    saved = g_esp;                              /* ShowTip(text, owner, type, seconds), a thiscall */
+    PUSH32(g_esp, secs.u);
+    PUSH32(g_esp, (uint32_t)type);
+    PUSH32(g_esp, 0);
+    PUSH32(g_esp, s_fit_text[idx]);
+    PUSH32(g_esp, 0);
+    g_ecx = tw;
+    fn();
+    g_esp = saved;
+    idx++;
 }
 
 /* Once per read of player 1's pad, game thread. */
@@ -1227,4 +1472,5 @@ void btvs_input__glyphs_poll(void)
 {
     ram_dump();
     tips_fit();
+    tips_show();
 }

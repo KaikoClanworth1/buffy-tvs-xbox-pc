@@ -498,3 +498,11 @@ the disc-file sharing are as they were.*
 - **Controls -> Menu**: with keyboard and mouse the tips' sentences are reworded in memory ("Press (Shift)"
   for "Pull the (L) trigger"); if a menu line for it is wanted, the switch today is only the test one,
   `BTVS_GLYPH_NO_TIP_TEXT`.
+- **Controls -> Graphics / toolkit** (request, 21 Nov): the Controls page now has a pad version and a
+  keyboard-and-mouse version, and the owner wants the pictures to change when the device in use changes.
+  Today they change at the next level load or start, because the texture pack is read once per process
+  (`tp_init` scans `load\` once, `TpEntry.tex` is kept, and the game's textures already uploaded keep their
+  replacement). Wanted in `nv2a_texpack.inc`: **`void nv2a_gpu_texture_pack_reload(void)`**, callable from
+  the game thread, that drops the loaded replacement textures (same file names, new contents) and makes
+  textures already in the runtime's texture cache look their replacement up again. Controls would then
+  redraw its 16 files (0.2 s) and call it when player 1 moves from pad to keyboard or back, or rebinds.

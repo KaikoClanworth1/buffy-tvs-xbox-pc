@@ -388,12 +388,23 @@ The menus fade a button that does nothing on a page themselves, so there is one 
 and one for the moment it is pressed. Labels (SELECT, BACK, the Controls page's "Jump", "Kick" ...)
 are the game's text and stay.
 
-The Controls page always shows a pad (it is the game's page about the pad; the keys are on the
-port's own Key Bindings page). Its lines end where the game writes the labels. Black and White are
-the bumpers on a PC pad: the two labels have the bumper's picture beside them instead of a line
-across the whole controller. **A rebound pad button shows the same way**: a label whose button the
-player has put somewhere else (`pad_<Action>`) loses its line and gets the picture of the button
-it is on now. So the page, the menu buttons and the tips all show what is bound.
+**The Controls page has two versions**, chosen with the set (so by the device in use):
+
+- *A pad* (Xbox and PlayStation sets). Its lines end where the game writes the labels. Black and
+  White are the bumpers on a PC pad: the two labels have the bumper's picture beside them instead
+  of a line across the whole controller. A rebound pad button shows the same way: a label whose
+  button the player has put somewhere else (`pad_<Action>`) loses its line and gets the picture of
+  the button it is on now.
+- *Keyboard and mouse* (keyboard set; `build_keys_page`). A keyboard and a mouse in the place of the
+  pad, with every key and mouse button that does something light and named, and beside each of the
+  game's labels the keys the action is on now: both of them when it has two ("Punch": `E` and the
+  left mouse button), four as a cluster for Move, Weapon Select and (without mouse look) Camera.
+  With mouse look on, Camera's line goes to the mouse. It reads the bindings (`key_<Action>`,
+  `mouse_look`), so a rebound key shows beside its label and lights up on the keyboard.
+  Keys that are not on the drawn keyboard (the number pad, `Mouse4` / `Mouse5`) still show beside
+  the label. Inventory shows its first key only (no room for two beside Target's).
+
+So the page, the menu buttons and the tips all show what is bound.
 
 ### The tips' sentences with keyboard and mouse
 
@@ -406,7 +417,9 @@ This is done on the strings in memory, never in the game's files: when the game 
 (`TTipTable`, made at a level's first tip, reached through the tip window at `0x7F18B8`), each
 sentence is passed through a few rules (`k_rule` in `btvs_input_glyphs.c`: "Pull [and hold] the ?
 trigger", "press the ? button", "Move [the] ? thumbstick"). A sentence never gets longer; what it
-loses is filled with spaces at its end. 11 of the first level's 56 tips change.
+loses is filled with spaces at its end. 11 of the first level's 56 tips change (the log names each
+with its new sentence): `MoveCamera`, `Grapple`, `FA_PushUse`, `PickupStake`, `ReaperWing`,
+`StalkMove`, `Stalk`, `PickupKey`, `ZoomCrossbow`, `Throwing`, `AimCrossbow`.
 `BTVS_GLYPH_NO_TIP_TEXT=1` leaves them alone.
 
 Left as they are: "D-pad" and "pad" in the weapon-selection tips, "Start button on other
@@ -425,6 +438,7 @@ rebinding, from the next level load (or the next start).
 | `BTVS_GLYPH_DUMP=1` | the runtime also writes every texture the game draws to `<folder>\dump` as PNG, named with the hash: how the textures above were found, and how to find more |
 | `BTVS_GLYPH_NO_TIP_TEXT=1` | keyboard set: the tips keep the game's wording |
 | `BTVS_GLYPH_TIP_DELAY=<reads>` | the rewording that many pad reads late (how the limit below was found) |
+| `BTVS_GLYPH_SHOW_TIPS=<first>,<every>,3` | keyboard set, in a level: the reworded tips put on screen one after the other through the game's own `ITipWindow::ShowTip`, the first at `<first>` seconds, the next every `<every>` seconds (the last number is the tip's kind; under 3 the game's own tip wins). For frames of sentences a scripted run cannot walk to |
 | `BTVS_GLYPH_RAMDUMP=<seconds>,<file>` | the game's first 64 MB of memory to a file at that time |
 
 To replace another texture: dump, find it, add its hash and what to draw to `k_menu` (or a new
@@ -448,12 +462,25 @@ In hidden runs (21 Nov), frames dumped by the game, the game's own art against t
   page shows those buttons beside "Jump", "Use", "Look" and "Ammo Swap" and the menu shows Y where
   B was; with `key_A = Enter`, `key_B = Tab` the keyboard set shows `Enter` and `Tab`.
 - The keyboard wording of the camera tip, at both sizes.
+- All eleven reworded tips on screen at 1080p, keyboard set (`btn_kbm_tip_<name>_1080p.png`, and
+  `btn_kbm_tips_reworded_all_1080p.png` for the eleven in one picture). The camera tip came up by
+  itself; the other ten were put up with `BTVS_GLYPH_SHOW_TIPS` (the game's own tip window and
+  text, but not at the place in the level where the game shows them). Each reads as a sentence.
+  Two things seen: where a sentence ends with a picture, the full stop after it sits under the
+  picture's edge ("... hold (F) and press (Q)"), and the four-key picture for "use (WASD) to aim"
+  is small in a line of text at 1080p (it has one letter's room).
+- The keyboard-and-mouse Controls page at 640x480 and 1080p with the default keys
+  (`btn_kbm_controls_page_*`; `..._compare_1080p.png` is the pad page it replaces beside it), and
+  with `key_A = Enter`, `key_Start = P`, `key_X = MouseLeft`, `key_LeftTrigger = Tab`,
+  `mouse_look = 0`: the new keys are beside "Kick", "Pause", "Punch" and "Look", lit on the
+  keyboard, and Camera has its four keys instead of the line to the mouse.
 
 Not seen: the journal's pages; a tip with A / B / X / Y, an arrow, "+" or White / Black in it (same
 page of pictures as the two that were seen; whether each sits well in its line was not looked at);
-the ten other reworded tips on screen (their text was checked by rule, not by eye); `auto` with a
-real pad, since no run has one; rebinding through the menu rather than the settings. One limit
-found: a tip that is already on screen when its sentence is reworded keeps the old wording until it
+the reworded tips at 640x480 other than the camera one; the keyboard Controls page with the game's
+Configuration 2 or 3 chosen; `auto` with a real pad, since no run has one (so the change from one
+Controls page to the other was seen only by choosing the set); rebinding through the menu rather
+than the settings. One limit found: a tip that is already on screen when its sentence is reworded keeps the old wording until it
 is shown again (in every run the rewording came first). Not replaced: the inventory's 3-D button
 pieces (`H_Inv_Button ...` in the game's HUD), if they are ever shown; no run met them.
 
@@ -574,7 +601,8 @@ pause, **Report a Problem**, one line saying which step.
    A B X Y discs (not the old purple medallions), Options -> Controls shows a modern controller,
    and the first level's tip shows a stick and `LT`. Start again with the DualSense instead:
    cross / circle / square / triangle and `L2`. Start again with no pad: key names (`Space`,
-   `Bksp`, `E`, `Q`). Then with a pad plugged in, play a moment on the keyboard and load a level:
+   `Bksp`, `E`, `Q`), and Options -> Controls shows a keyboard and a mouse with your keys lit
+   instead of the controller. Then with a pad plugged in, play a moment on the keyboard and load a level:
    the pictures should be the keys now, and the first tip should read "Move the (mouse) to move
    the camera around. Press (Shift) to reset." Rebind a pad button or a key in Key Bindings, load
    a level: the menus, the tips and the Controls page show the new one. Say which pictures look
@@ -587,8 +615,9 @@ this game could be played (jump on Backspace is the obvious one to change).
 
 - Keyboard defaults that suit this game (see the end of the checklist).
 - The mouse is still captured during cutscenes and in the inventory screens.
-- Button pictures change set only at a level load or a start, not the moment another device is
-  touched (the runtime's texture pack is read once per process).
+- Button pictures, and with them the Controls page (pad or keyboard and mouse), change set only at
+  a level load or a start, not the moment another device is touched: the runtime's texture pack is
+  read once per process. Asked of Graphics in `docs/AREAS.md` (a way to read it again).
 - With keyboard and mouse the weapon-selection tips still say "D-pad", and the journal's text is
   not reworded.
 - A menu line for `button_pictures` (asked of Menu in `docs/AREAS.md`).
