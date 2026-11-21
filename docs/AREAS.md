@@ -567,3 +567,11 @@ the disc-file sharing are as they were.*
   `[crash] guest function names: 170 from the .pdb` (the hooks only). Could crash reports also read
   `btvs_game.pdb` (made by lld-link, same folder as the exe) when `btvs_game.dll` is loaded, and name
   the module in a stack line? The DLL is linked `-debug`; say if another form (a `.map`) suits better.
+- **Extras -> Graphics** (21 Nov): the game cannot start from a folder whose path has letters outside
+  the PC's code page. Seen with an install in `...\Büffy 日本 test é\` on this (Western) Windows:
+  `[boot] cannot start the game process (error 123)`, exit code 1, nothing else in `btvs_console.txt`.
+  `btvs_boot_restart.c` starts the child with `CreateProcessA(exe, GetCommandLineA(), ...)`; the wide
+  forms (`GetModuleFileNameW`, `GetCommandLineW`, `CreateProcessW`) would carry any name. Beyond that
+  one call the game's own file access is by ANSI names too (the runtime's, Logs', Menu's settings), so a
+  full cure is wider; until then the launcher refuses such an install folder with a message
+  (`install_run`). Say if the supervisor's part gets fixed and I will test again.
