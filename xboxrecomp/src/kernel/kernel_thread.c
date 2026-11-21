@@ -156,6 +156,55 @@ NTSTATUS __stdcall xbox_PsTerminateSystemThread(NTSTATUS ExitStatus)
  * Maps to: SleepEx (for alertable waits) or Sleep
  * ============================================================================ */
 
+/* A sleep of one millisecond that is one millisecond.
+ *
+ * Sleep(1) lasts until the system's next timer tick, which is 1 ms only
+ * while Windows honours the process's timeBeginPeriod(1) -- and Windows 11
+ * stops honouring it for a process whose window is hidden, minimised or
+ * covered: the tick goes back to 15.6 ms. A title's loader that hands blocks
+ * from a disk thread to the thread that waits for them with Sleep(0) (the
+ * yield path below) then took 15 ms a block instead of 1: a level load of 4 s
+ * became 25 s, in a process that had been up for a while (a title restarted
+ * inside the process), never in a new one. A high-resolution waitable timer
+ * does not depend on the tick. One a thread, closed when the thread ends.
+ * RECOMP_SLEEP1_OLD=1: Sleep(1) as before (testing). */
+static DWORD s_short_fls = FLS_OUT_OF_INDEXES;
+
+static void WINAPI short_sleep_close(void *p)
+{
+    if (p && p != INVALID_HANDLE_VALUE)
+        CloseHandle((HANDLE)p);
+}
+
+static void xbox_short_sleep(void)
+{
+    static int old = -1;
+    HANDLE t;
+    if (old < 0)
+        old = getenv("RECOMP_SLEEP1_OLD") != NULL;
+    if (s_short_fls == FLS_OUT_OF_INDEXES) {
+        DWORD i = FlsAlloc(short_sleep_close);
+        if (InterlockedCompareExchange((volatile LONG *)&s_short_fls, (LONG)i, (LONG)FLS_OUT_OF_INDEXES) != (LONG)FLS_OUT_OF_INDEXES)
+            FlsFree(i);
+    }
+    t = old || s_short_fls == FLS_OUT_OF_INDEXES ? INVALID_HANDLE_VALUE : (HANDLE)FlsGetValue(s_short_fls);
+    if (!t) {
+        t = CreateWaitableTimerExW(NULL, NULL, 0x00000002 /* CREATE_WAITABLE_TIMER_HIGH_RESOLUTION */, TIMER_ALL_ACCESS);
+        FlsSetValue(s_short_fls, t ? t : INVALID_HANDLE_VALUE);
+        if (!t)
+            t = INVALID_HANDLE_VALUE;
+    }
+    if (t != INVALID_HANDLE_VALUE) {
+        LARGE_INTEGER due;
+        due.QuadPart = -10000;                       /* 1 ms from now */
+        if (SetWaitableTimer(t, &due, 0, NULL, NULL, FALSE)) {
+            WaitForSingleObject(t, 50);
+            return;
+        }
+    }
+    Sleep(1);
+}
+
 NTSTATUS __stdcall xbox_KeDelayExecutionThread(
     KPROCESSOR_MODE WaitMode,
     BOOLEAN Alertable,
@@ -197,7 +246,7 @@ NTSTATUS __stdcall xbox_KeDelayExecutionThread(
         if (!last || (q.QuadPart - last) * 2000 > freq)          /* 0.5 ms since the last yield: it did something */
             streak_start = q.QuadPart;
         if ((q.QuadPart - streak_start) * 500 > freq) {          /* 2 ms of nothing but yields */
-            Sleep(1);
+            xbox_short_sleep();
             QueryPerformanceCounter(&q);
         } else {
             SwitchToThread();

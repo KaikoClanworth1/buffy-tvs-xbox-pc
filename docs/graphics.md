@@ -417,6 +417,34 @@ process (2.9 to 3.4 over the runs) against 3.9 s after the new process's log beg
 start. The load is the game's work either way; what is saved is the process, its window, the device and
 reading the shaders back -- about half a second -- and the window never goes.
 
+**Loads of 23 to 27 s inside the process (21 Nov, late), and what it was.** With every area's function
+in and the restart on by default, Extras measured level loads of 23-27 s against 5 s in a new process.
+Not the areas, not the recorder's clock this time, not the restart: the game's loader hands each block
+from its disk thread to the waiting thread with `Sleep(0)`, which the runtime turns into a 1 ms sleep
+once a thread has done nothing but yield for 2 ms -- and `Sleep(1)` lasts until the system's next timer
+tick. The tick is 1 ms only while Windows honours the process's `timeBeginPeriod(1)`, and Windows 11
+stops honouring it for a process whose window is hidden, minimised or covered: back to 15.6 ms, 15 ms a
+block. A new process loads in its first seconds, before that sets in; a process that has been up for a
+while does not. (It is also why some of my own runs above loaded in 3 s and some in 20 s, which I put
+down to other test games running at the time. That was wrong.)
+
+Two changes in the runtime: the process asks Windows to keep honouring its timer resolution when its
+window is not seen (`SetProcessInformation`, `ProcessPowerThrottling`, at `xbox_kernel_bridge_init`;
+the log says `Timer: 1 ms tick asked for; kept when the window is not seen: yes`), and the 1 ms sleep
+of the yield path is a high-resolution waitable timer, which does not depend on the tick
+(`xbox_short_sleep`, `kernel_thread.c`). Either alone is enough here; both are in.
+
+| Start Game -> level 1 up / level change -> cemetery up, hidden runs, same build | level 1 | cemetery |
+|---|---|---|
+| inside the process, before | 26.6 s, 26.3 s | 24.1 s, 23.9 s |
+| inside the process, sleeps turned off (`RECOMP_SPIN_OLD=1`: the proof) | 3.1 s | 4.2 s |
+| inside the process, now | 3.1 s | 3.8 s |
+| inside the process, the opt-out alone (`RECOMP_SLEEP1_OLD=1`) | 3.2 s | 3.8 s |
+| a new process (`BTVS_REBOOT=process`), from its log's first line | 4.4 s | 4.5 s |
+
+Not checked: a visible window (where Windows may never have dropped the tick), and Windows 10, which
+has no such rule and refuses the opt-out call (the waitable timer is there for it).
+
 **Found on the way** (all three made the run after a restart go wrong, and none could happen with a
 process per run): the runtime kept a block of the game's heap per thread for `GetExitCodeThread`'s
 answer and zeroed 512 bytes of it at each call -- after a restart that address was the game's;

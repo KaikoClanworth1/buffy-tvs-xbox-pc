@@ -206,7 +206,10 @@ numbers are of 24d9881; the full audit is what these lists are cut from.
     ten times a second: it needs to stand still from your function until the new run is up (it is safe
     from faults, not from logging nonsense).
   - `btvs_report_exact.c`: `X.mode = X_WAIT`, `X.seed_va = X.if_va = 0`, `X.f` closed and the file
-    started again, counters and `P` zero. **The runtime now takes the game thread's clock source away at
+    started again, counters and `P` zero. (**21 Nov late:** the 23-27 s loads Extras measured were not
+    this and not anything of Logs': the 1 ms sleeps of the game's loader ran at Windows' 15.6 ms tick in a
+    process whose window is not seen -- fixed in the runtime, `docs/graphics.md`, "Loads of 23 to 27 s".)
+    **The runtime now takes the game thread's clock source away at
     a restart** (`xbox_hal_reboot_reset`): left installed it stood still while the next run started up and
     made every load after the first about five times longer (20 s for 4 s). Install it again when the next
     level's frames begin, as at the first start. `paused_now()` reads game memory raw and is reached from

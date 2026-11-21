@@ -9788,7 +9788,14 @@ void xbox_RebootReset(const void *launch_page)
     xbox_thread_reboot_reset();
     {
         extern void xbox_hal_reboot_reset(void);    /* kernel_hal.c: this thread's IRQL and clock source */
+        /* ... and its priority: the title sets its threads' priorities as it
+         * goes, and a new process's first thread starts at normal. */
+        int was = GetThreadPriority(GetCurrentThread());
         xbox_hal_reboot_reset();
+        if (!getenv("RECOMP_REBOOT_KEEP_PRIORITY"))
+            SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
+        fprintf(stderr, "  [KERNEL] reboot: the first thread's priority was %d%s\n", was,
+                was != THREAD_PRIORITY_NORMAL ? ", back to normal" : "");
     }
 
     /* The first PsCreateSystemThreadEx is the title starting, again. */
@@ -9838,6 +9845,20 @@ void xbox_kernel_bridge_init(void)
     s_boot_tid = GetCurrentThreadId();
     if (!s_reboot_event)
         s_reboot_event = CreateEventA(NULL, TRUE, FALSE, NULL);
+    {
+        /* The title's sleeps and timed waits are in milliseconds: ask for
+         * the 1 ms timer tick, and ask Windows 11 to keep honouring that when
+         * the window is hidden, minimised or covered (it otherwise drops the
+         * process back to 15.6 ms: see xbox_short_sleep in kernel_thread.c).
+         * Older systems refuse the second call and need none. */
+        struct { ULONG Version, ControlMask, StateMask; } pt = { 1, 0x4 /* IGNORE_TIMER_RESOLUTION */, 0 };
+        typedef BOOL (WINAPI *SetPI)(HANDLE, int, LPVOID, DWORD);
+        HMODULE k32 = GetModuleHandleA("kernel32.dll");
+        SetPI set = k32 ? (SetPI)(void *)GetProcAddress(k32, "SetProcessInformation") : NULL;
+        int ok = set ? set(GetCurrentProcess(), 4 /* ProcessPowerThrottling */, &pt, sizeof pt) : 0;
+        timeBeginPeriod(1);
+        fprintf(stderr, "  Timer: 1 ms tick asked for; kept when the window is not seen: %s\n", ok ? "yes" : "not available");
+    }
 
     /* The thunk table lives in .rdata which is marked PAGE_READONLY.
      * Temporarily make it writable so we can patch the ordinals. */
