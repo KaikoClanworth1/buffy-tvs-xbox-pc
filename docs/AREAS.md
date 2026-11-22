@@ -35,10 +35,10 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   | | |
   |---|---|
   | File | `dist/Buffy-the-Vampire-Slayer-PC-v0.0.1-Windows-x64.zip` in the main checkout (`D:\Xbox Games Ports\Buffy The Vampire Slayer Xbox Port\dist\`; the same file is in the Extras worktree's `dist/`). `dist/` is ignored by git |
-  | Size | 105,711,005 bytes (101 MB; 243 MB unpacked) |
-  | SHA-256 | `41a95082cc6c903059bc9e7f760af8df79579c3eb3d26b1c409c86d23275b177` |
+  | Size | 105,728,746 bytes (101 MB; 243 MB unpacked) |
+  | SHA-256 | `5cbb112c84310e07ea5dfde0145809591f5b652477dcdf19b0fc9d43b5578ffd` |
   | Second file | `Buffy-the-Vampire-Slayer-PC-v0.0.1-Windows-x64.zip.sha256` beside it (`<hex>  <name>`; `sha256sum -c` says OK) |
-  | Built from | commit `81069ac` (the game's log says `commit 81069acfd0, built Nov 22 2026 10:16:55`). **Tag `v0.0.1` on that commit**; later commits are documents only |
+  | Built from | commit `76b5d42` on main (the game's log says `commit 76b5d4226a`). **Tag `v0.0.1` on that commit**; later commits are documents only. Do not take `dist/Buffy-the-Vampire-Slayer-PC-v0.0.1.zip` (an old test package from 21 Nov that lies beside it) |
   | Version | `0.0.1` everywhere: `BTVS_VERSION`, the zip's name, `build\kit.ini` (`Version=0.0.1`), `recomplauncher.json` (`prepare.version`), `"Buffy Launcher.exe" --version`. The updater compares the tag's numbers with that |
   | In the zip | one folder, `Buffy the Vampire Slayer PC\` (as X-Men Destiny's zip has one), holding `Buffy Launcher.exe`, `buffy_tvs.exe` (no game code; 3 MB) and its `.pdb`, `recomplauncher.json`, `Read Me.txt`, `SDL3.dll` with `SDL3-LICENSE.txt`, the three Visual C++ runtime DLLs, and `build\` (the kit: translate program, clang and lld-link with LLVM's licence, headers, import libraries) |
 
@@ -47,7 +47,12 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   Destiny started at `0.1.0`: if that is wanted here it is one line in `port/CMakeLists.txt`, a full
   rebuild and a new zip (about half an hour), and this entry's numbers change.
 
-  **Tried as a player gets it** (hidden, muted; compilers on CPUs 12-15, 4 at a time, at idle priority):
+  **Tried as a player gets it** (hidden, muted; compilers on CPUs 12-15, 4 at a time, at idle priority).
+  The zip was made twice from the same sources: first from a commit whose number changed when it was
+  rebased (`81069ac`, now `899d83e`), then again from `76b5d42` so that the commit the game names in its
+  log and reports is one that is on main. Everything below ran on the first; **the final zip was then
+  unzipped, installed and played again: its install was still running when this was written (the PC was busy: the translate step alone had taken 12 minutes instead of 5). The result is added here when it has finished.** RecompLauncher's commands were
+  not run a second time.
 
   - **Unzipped** with Windows' own `Expand-Archive` into an empty folder outside the repository (7 s).
   - **Installed** with `"Buffy Launcher.exe" --install <the disc image in Iso/> <another empty folder>`: exit

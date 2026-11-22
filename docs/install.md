@@ -178,11 +178,11 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
-## The first release's zip, v0.0.1 (22 Nov 2026, commit 81069ac)
+## The first release's zip, v0.0.1 (22 Nov 2026, commit 76b5d42)
 
-`dist/Buffy-the-Vampire-Slayer-PC-v0.0.1-Windows-x64.zip` (105,711,005 bytes, SHA-256
-`41a95082cc6c903059bc9e7f760af8df79579c3eb3d26b1c409c86d23275b177`) and its `.sha256`, made by
-`package.sh` from commit `81069ac`; the check passed. Unzipped outside the repository and installed
+`dist/Buffy-the-Vampire-Slayer-PC-v0.0.1-Windows-x64.zip` (105,728,746 bytes, SHA-256
+`5cbb112c84310e07ea5dfde0145809591f5b652477dcdf19b0fc9d43b5578ffd`) and its `.sha256`, made by
+`package.sh` from commit `76b5d42`; the check passed. Unzipped outside the repository and installed
 hidden from the disc image: 8 min 34 s; level 1 and one level change inside the process; RecompLauncher's
 prepare command (9 min 36 s) and start command in its folder layout. The whole record, and the list of
 what is still unverified for a public release, is in `docs/AREAS.md` under "Ready to use".
