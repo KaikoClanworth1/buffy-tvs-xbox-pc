@@ -178,6 +178,21 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
+## What was checked on 22 Nov 2026, 06:56 build (main at 817b25a): the icon
+
+`GAME/buffy_tvs.exe` reports commit `817b25ab94`, built Nov 22 2026 06:56:54. No regen was needed; no
+game was running from `GAME`. The owner's `btvs_settings.ini` and save files have the same checksums
+before and after.
+
+- `python port/icon/check_icon.py GAME/buffy_tvs.exe "GAME/Buffy Launcher.exe"`: icon group 1 with nine
+  images (16 to 256 px) in each, the same bytes as `port/icon/btvs.ico`.
+- In a hidden run, asked of Windows from outside: the classes of both game windows (`BuffySessionWindow`,
+  `BuffyRecompGpu`) have a 32 x 32 and a 16 x 16 icon (they had none before: the exe had no resource 1).
+- Through the launcher's Play path and without it: main menu, `m00_spanishmission_1` loaded (first frame
+  3.4 s after the restart), one game process and one game window, exit code 0.
+
+Not seen: the icon on a real screen, and the launcher's own window (not opened in a test). `docs/icon.md`.
+
 ## What was checked on 21 Nov 2026, 23:11 build (main at ff8d8b0)
 
 `GAME/buffy_tvs.exe` reports commit `ff8d8b0dde`, built Nov 21 2026 23:11:31 (Graphics' fix for the slow
