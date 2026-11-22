@@ -35,7 +35,9 @@
  * WHO    An install made through RecompLauncher (RECOMPLAUNCHER=1 at
  *        --install: btvs_install.ini says so) is updated by RecompLauncher:
  *        here nothing is checked, fetched or replaced. A developer's build
- *        (the game's code inside the exe) has no release to move to either.
+ *        (the game's code inside the exe, as in the owner's GAME folder) is
+ *        checked like any other, so the line shows there too, but it is not
+ *        replaced by a release: it is updated by building.
  *
  * (tests) BTVS_UPDATE_API=<url> asks there instead (http only to this PC),
  * BTVS_UPDATE_VERSION=<x.y.z> pretends this build is that version,
@@ -118,9 +120,15 @@ static const WCHAR *update_not_ours(void)
     GetPrivateProfileStringW(L"Install", L"Owner", L"", owner, 64, ini);
     if (!_wcsicmp(owner, L"RecompLauncher") || GetEnvironmentVariableW(L"RECOMPLAUNCHER", env, 8))
         return L"Updates for this copy come through RecompLauncher.";
-    if (has_program(dir) && !exe_needs_game_dll(dir))
-        return L"A developer's build (the game's code is inside the exe): it has no release to update to.";
     return NULL;
+}
+
+/* A developer's build: the game's code is inside the exe. It can look for a newer release, but a
+ * release cannot take its place (deploy.sh makes this folder). */
+static int update_dev_build(void)
+{
+    const WCHAR *dir = is_game_folder(s_game_dir) ? s_game_dir : s_launcher_dir;
+    return has_program(dir) && !exe_needs_game_dll(dir);
 }
 
 /* ── a little JSON reading (the text stays as it is; these find things) ── */
@@ -511,6 +519,9 @@ static void update_line(void)
         wcscpy_s(s_upd_line, 512, no);
     else if (s_upd_busy && !s_updating)
         wcscpy_s(s_upd_line, 512, L"Checking for updates...");
+    else if (s_upd.newer && update_dev_build())
+        swprintf_s(s_upd_line, 512, L"Version %s is available (you have %s). This is a developer's build: it is updated by "
+                                    L"building, not from the release.", s_upd.version, my_version());
     else if (s_upd.newer)
         swprintf_s(s_upd_line, 512, L"Version %s is available (you have %s).%s%s", s_upd.version, my_version(),
                    s_upd.summary[0] ? L" " : L"", s_upd.summary);
@@ -1127,7 +1138,7 @@ static DWORD WINAPI update_apply_thread(LPVOID unused)
 static void update_ask(void)
 {
     WCHAR t[2600], notes[1500];
-    if (!s_upd.newer || s_updating || s_installing)
+    if (!s_upd.newer || s_updating || s_installing || update_dev_build())
         return;
     if (game_running()) {
         set_status(1, L"Close the game before updating.");

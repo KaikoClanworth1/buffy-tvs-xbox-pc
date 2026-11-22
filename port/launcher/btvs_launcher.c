@@ -922,7 +922,7 @@ static void layout(void)
         add_btn(B_REINSTALL, K_LINK, X0 + 232, WIN_H - 36, 96, 22, !game_running(), L"Install again");
         if (!update_not_ours()) {
             add_btn(B_UPDCHECK, K_LINK, X0 + 344, WIN_H - 36, 126, 22, !s_upd_busy, L"Check for updates");
-            if (s_upd.newer)
+            if (s_upd.newer && !update_dev_build())
                 add_btn(B_UPDATE, K_SECOND, WIN_W - X0 - 150, 366, 150, 30, !game_running(), L"Update...");
         }
     }
@@ -1750,6 +1750,10 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
                     s_upd.summary);
             if (!wcscmp(argv[1], L"--check-update"))
                 return 0;
+            if (update_dev_build()) {
+                wprintf(L"a developer's build (the game's code is inside the exe): it is updated by building, not from a release\n");
+                return 11;
+            }
             if (!update_fetch(&s_upd)) {
                 fwprintf(stderr, L"update failed: %s\n", s_upd_msg);
                 return 1;
@@ -1845,6 +1849,22 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
                 s_view = VIEW_PLAY;
                 refresh_play();
                 update_line();
+            } else if (!wcscmp(argv[2], L"applying")) {
+                /* the new version's launcher, building the game again */
+                s_updating = 2;
+                s_permille = B_P_TRANSLATE + (B_P_COMPILE - B_P_TRANSLATE) * 30 / 46;
+                set_status(0, L"Building the game for this PC: %d of %d parts done, %lu:%02lu so far (%d at a time)",
+                           30, 46, 1ul, 5ul, 8);
+            } else if (!wcscmp(argv[2], L"updatefailed")) {
+                /* back in the old launcher after an update that was undone */
+                s_view = VIEW_PLAY;
+                refresh_play();
+                set_status(1, L"The update did not finish, and the version from before was put back: %s",
+                           L"Building the game failed at recomp_0012.c. The compiler's message is in install_log.txt in the game folder.");
+            } else if (!wcscmp(argv[2], L"updated")) {
+                s_view = VIEW_PLAY;
+                refresh_play();
+                set_status(0, L"Updated to version %s. Your saved games and settings are as they were.", L"0.2.0");
             } else if (!wcscmp(argv[2], L"updating")) {
                 memset(&s_upd, 0, sizeof s_upd);
                 wcscpy_s(s_upd.version, 32, L"0.2.0");
