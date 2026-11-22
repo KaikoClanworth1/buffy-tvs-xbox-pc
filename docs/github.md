@@ -118,8 +118,103 @@ X-Men: Destiny, built on your PC from your own copy. Early and unfinished."):
    README if the owner wants it (X-Men Destiny's README has none), and set the repository's homepage to
    the game's page (`mua3-native` has `https://recomplauncher.com`; X-Men Destiny has none).
 
+## Release conventions (for the launcher's updater and RecompLauncher), 22 Nov
+
+Proposed by the GitHub area for Extras' updater in `Buffy Launcher.exe`; the same list is in
+`docs/AREAS.md` for Extras to accept or change. Modelled on `x-men-destiny-pc` (tag `v0.1.0`, title
+"X-Men: Destiny PC Port v0.1.0", one file `XMenDestiny-v0.1.0-Windows-x64.zip`, SHA-256 as the last line
+of the notes) and on Chaos Bleeds' `launcher_update.inc`, which the updater is modelled on. **Nothing
+here has been tried: there is no release, and the repository is private.**
+
+| | Convention | Why |
+|---|---|---|
+| **Version** | `BTVS_VERSION` in `port/CMakeLists.txt`, three numbers `X.Y.Z`, the only place it is written. It only ever goes up. | The launcher, the game's log, `report.txt` and the zip all take it from there |
+| **Tag** | `v` + that version, exactly: `v0.0.1`. Made on the commit the zip was built from, never moved afterwards. A mistake gets a new version, not a new zip under the old tag. | The updater compares the tag with its own version, number by number (`0.10.0` is newer than `0.9.0`) |
+| **Release title** | `Buffy the Vampire Slayer PC Port v0.0.1` | As X-Men Destiny's |
+| **Which release counts** | The newest by version that is **not a draft, not a pre-release** and has the zip below. Not "latest by date". | A pre-release is a test build: RecompLauncher treats it as a beta too, and players stay on the full release |
+| **The zip** | Exactly one: `Buffy-the-Vampire-Slayer-PC-v0.0.1-Windows-x64.zip`. The updater takes the file whose name ends in `-Windows-x64.zip`. | RecompLauncher picks the download by the words `Windows` and `x64`; one rule for both |
+| **Inside the zip** | Everything directly at the top or under one folder (today `Buffy the Vampire Slayer PC/`): either works for RecompLauncher, the updater should accept both. `recomplauncher.json` beside `Buffy Launcher.exe`. **No `btvs_settings.ini`, no `launcher.ini`, no `XboxData`**: an update must never bring a file the player's install wrote. | An update unpacks over the folder; a settings file in a release would replace the player's |
+| **Checksum** | Two, the same value: GitHub's own SHA-256 of the file (the asset's `digest` field in the API, `sha256:<hex>`; what Chaos Bleeds' updater and RecompLauncher check), and a second file `Buffy-the-Vampire-Slayer-PC-v0.0.1-Windows-x64.zip.sha256` holding `<hex>  <file name>` (the form `sha256sum -c` reads). The updater checks the download against the `digest`, falls back to the `.sha256` file when the API gives none, and refuses the update when neither matches. The same value is the last line of the notes. | RecompLauncher never takes a `.sha256` file for the game |
+| **Other files in a release** | None. If symbols are ever published apart from the zip, the name has `pdb` or `symbols` in it; a source archive has `source`. | RecompLauncher skips those names |
+| **Release notes** | The form below. The **first paragraph is one or two plain sentences on what changed for the player**, with no markdown but bold: the updater may show it beside "Update". | |
+| **A rebuild after updating** | Every release so far changes the kit, so after an update the game's code is built again from the files already in the game folder (the launcher's `btvs_game.ok` check decides, not the notes). The notes say how long. | The player should know the first Play after an update takes minutes |
+| **Where the updater asks** | `https://api.github.com/repos/KaikoClanworth1/buffy-tvs-xbox-pc/releases?per_page=20`, no sign-in, no token in the program. | While the repository is private this answers 404: the updater must treat that as "no update" quietly, and it cannot be tested against this repository until it is public |
+
+### The launcher's updater and RecompLauncher on one install
+
+RecompLauncher downloads the newest release itself, unpacks it over its install folder, and (because
+`prepare.version` in `recomplauncher.json` changes with every release) runs the set-up step again. If the
+launcher's own updater also replaced files there, RecompLauncher would no longer know which release the
+folder holds. So one of them owns an install, decided when it is made:
+
+- RecompLauncher runs the set-up step and the game with **`RECOMPLAUNCHER=1`** in the environment (also
+  `RECOMPLAUNCHER_VERSION`, `RECOMPLAUNCHER_DATA`). When `--install` sees it, the launcher marks the game
+  folder as RecompLauncher's (a line in a file of Extras' choosing that stays with the game folder and is
+  not in the release zip).
+- In a folder marked so, `Buffy Launcher.exe` opened by hand **does not check, download or replace
+  anything**. It may say "Updates for this copy come through RecompLauncher".
+- An install made by the launcher's own window or by `--install` without that variable is the launcher's:
+  it updates itself, and RecompLauncher does not know it exists.
+- The mark is removed only by installing again without the variable. Neither side ever edits the other's
+  files beyond what unpacking a release does.
+
+Still open for RecompLauncher (only matter once it is tried there): its `keeps_copy` (building again
+after an update without asking for the disc image, from the disc files the game folder keeps) needs the
+image to be **one argument that can be left out**, such as `--image=<file>`; with today's
+`--install <image> <folder>` leaving the image out shifts the folder. Until then an update through
+RecompLauncher asks the player for the disc image again.
+
+### Release notes, the form
+
+```
+The first release of the Buffy the Vampire Slayer PC port. **Early and unfinished: expect faults, and please report them.**
+
+> **There is no game in this download.** You need your own copy of *Buffy the Vampire Slayer* (2002) for the original Xbox, European (PAL) release, as a disc image (`.iso`). The launcher builds the PC version from it, on your PC.
+
+## How to install
+1. Download `Buffy-the-Vampire-Slayer-PC-vX.Y.Z-Windows-x64.zip` below and unzip it anywhere.
+2. Open `Buffy Launcher.exe`, choose your disc image and where to install the game.
+3. Press **Install**. This takes about 8 minutes, once.
+4. Press **Play**.
+
+**Already installed?** (from the second release on; wording once the updater is in) ...
+
+**You need:** Windows 10 or 11 (64-bit), a graphics card with Direct3D 11, about 2.2 GB of free space (0.9 GB more while it builds). No other tools.
+
+## What's in        (first release)   /   ## What changed   (later ones)
+## Known limits     (from docs/STATUS.md; ends with a link to it)
+## Something wrong? (Report a Problem or F12, then an issue; install_log.txt if installing failed)
+
+SHA-256 of the zip: `<hex>`
+```
+
+## Release checklist
+
+Every step that publishes something (5 to 8) needs the owner's go-ahead for that release.
+
+1. **Version**: raise `BTVS_VERSION` in `port/CMakeLists.txt`; commit.
+2. **State**: `docs/STATUS.md` and the README's "What works today" say what is true of this build; the
+   README's "No release has been published yet" note goes with the first release.
+3. **Build and package** (Extras): `bash port/tools/build.sh`, `bash port/tools/package.sh`. The script's own
+   check must pass (no game data, no translated game code). Then by eye: the zip is named
+   `…-vX.Y.Z-Windows-x64.zip`; `recomplauncher.json` is in it with `prepare.version` equal to the version;
+   no settings, saves or `launcher.ini` in it; `"Buffy Launcher.exe" --version` from the unpacked zip says X.Y.Z.
+4. **Try the zip, not the build folder**: unpack it somewhere new, `--install` from the disc image into an
+   empty folder, `--play` hidden and muted (`docs/install.md`), exit code 0. From the second release on,
+   also: install the previous release, let the updater take this zip (from a local test address, since
+   nothing is published yet), and check that saves and `btvs_settings.ini` are untouched and the game is
+   built again.
+5. **Checksum file**: `sha256sum` of the zip into `<zip name>.sha256`.
+6. **Push** `main`, then tag that commit `vX.Y.Z` and push the tag.
+7. **Draft the release** on that tag with the title and notes above and both files; read the draft on
+   GitHub; compare the zip's SHA-256 with the one GitHub shows for the file.
+8. **Publish** (not as a pre-release, unless it is meant as a test build).
+9. **Afterwards**: an installed previous release offers the update; RecompLauncher, once the port is listed,
+   shows the new version (nothing to submit again: it reads the releases). Note the release in `docs/github.md`.
+
 ## Requests made to other areas
 
 In `docs/AREAS.md`, to Extras: the stale key table and "early development build" lines in
 `port/launcher/Read Me.txt`; `recomplauncher.json` in the zip; the zip's name; `progress` lines and
-separate exit codes for `--install`; a licence file for SDL in the release.
+separate exit codes for `--install`; a licence file for SDL in the release; the release conventions above
+for the updater.

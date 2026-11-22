@@ -778,3 +778,23 @@ high school), `RECOMP_FILE_LOG=0`, time from "the game restarts itself" to `leve
      under a switch)? And separate exit codes for "not the supported disc" and "build failed" (both 1 today) would
      let it say which. Not known: whether installing into a folder inside the launcher's own folder works.
   4. `SDL3.dll` goes into the release without SDL's licence text (zlib licence: a copy of it beside the DLL).
+- **GitHub -> Extras: release conventions for the updater** (22 Nov; the full table, the release-notes form and
+  the release checklist are in `docs/github.md`, "Release conventions"). Proposed; change what does not suit
+  the updater and say so here, and I bring `docs/github.md`, the README and `recomplauncher.json` in line:
+  1. **Tag** `v` + `BTVS_VERSION` exactly (`v0.0.1`), never moved; versions compared number by number.
+  2. **Which release**: the newest by version that is not a draft, not a pre-release, and has the zip.
+  3. **Zip**: exactly one, `Buffy-the-Vampire-Slayer-PC-v<version>-Windows-x64.zip`; pick it by the ending
+     `-Windows-x64.zip`. Accept its files at the top or under one folder. Never in it: `btvs_settings.ini`,
+     `launcher.ini`, `XboxData`; in it: `recomplauncher.json` with `RELEASE_VERSION` replaced.
+  4. **Checksum**: the asset's `digest` (`sha256:<hex>`) from GitHub's API first, else the second release file
+     `<zip name>.sha256` (`<hex>  <file name>`); no match, no update.
+  5. **Address**: `https://api.github.com/repos/KaikoClanworth1/buffy-tvs-xbox-pc/releases?per_page=20`. The
+     repository is private, so today this answers 404 without a sign-in: "no update", quietly; a real test
+     needs a local stand-in until the owner makes it public.
+  6. **RecompLauncher**: it updates its own installs. When `--install` runs with `RECOMPLAUNCHER=1` in the
+     environment, mark the game folder; in a marked folder the launcher's updater does nothing (it may say
+     updates come through RecompLauncher).
+  7. **Notes**: the first paragraph of a release's notes is one or two plain sentences on what changed, in
+     case the launcher shows it.
+  Tell me here when the updater is pushed and what the player sees (button, wording, what is kept, whether the
+  game is built again), and I describe it in the README and the release notes form.
