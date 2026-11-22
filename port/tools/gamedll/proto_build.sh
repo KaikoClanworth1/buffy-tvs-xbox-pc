@@ -76,7 +76,7 @@ IFS='|' read -ra LA <<< "$LIBS"
 ( cd build && LIB="$VCB/lib/x64;$KIT/um/x64;$KIT/ucrt/x64" bash ../tools/limit.sh "$VCB/bin/Hostx64/x64/link.exe" \
     /OUT:"$OUT/run/buffy_tvs.exe" /NOLOGO /SUBSYSTEM:WINDOWS /DEBUG /PDB:"$OUT/run/buffy_tvs.pdb" /MAP:"$OUT/run/buffy_tvs.map" \
     /DEF:"$OUT/exe.def" /IMPLIB:"$OUT/buffy_tvs_exe.lib" /OPT:REF /OPT:ICF /INCREMENTAL:NO \
-    buffy_tvs.dir/Release/*.obj "$OUT/btvs_game.lib" "${LA[@]}" )
+    buffy_tvs.dir/Release/*.obj buffy_tvs.dir/Release/*.res "$OUT/btvs_game.lib" "${LA[@]}" )
 
 echo "4/6 the header: registers read from the exe's thread-local block, the exe's globals imported"
 python "$HERE/patch_header.py" "$OUT/run/buffy_tvs.map" "$OUT/gen" "$MEMOFF"

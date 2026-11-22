@@ -10,7 +10,7 @@ Shared files (`port/src/main.c`, `port/CMakeLists.txt`, `port/src/manual_functio
 | **Audio** | `port/src/btvs_audio*.c`, `btvs_wma.c`, `docs/audio.md` | DSOUND buffers, streams and 3D sound on **XAudio2**; WMA music (`Sound/Music`), `.rpe` dialogue; volume settings; `BTVS_MUTE` |
 | **Controls** | `port/src/btvs_input*.c`, `docs/controls.md` | XAPI input replaced by XInput + SDL (DualSense, Switch pads…), keyboard and mouse, rumble, rebinding, hot-plug; `BTVS_PAD_SCRIPT` scripted input for tests; input recording/playback hooks for Logs |
 | **Menu** | `port/src/btvs_menu*.c`, `btvs_settings.c/.h`, `docs/menu.md` | PC pages inside the game's own menu system and look: main-menu **Exit**, **Options → Graphics / Audio / Controls**, pause-menu **Report a Problem**, memory page; `btvs_settings.ini`; the settings API every area reads |
-| **Extras** | `port/launcher/`, `port/tools/deploy.sh`, `package.sh`, `README.md`, `docs/install.md` | Easy install: pick the xiso, pick a folder, it unpacks and sets up, then Play (everything else is configured in-game); version/update plumbing; README; release packaging without game data |
+| **Extras** | `port/launcher/`, `port/icon/`, `port/tools/deploy.sh`, `package.sh`, `README.md`, `docs/install.md` | Easy install: pick the xiso, pick a folder, it unpacks and sets up, then Play (everything else is configured in-game); version/update plumbing; README; release packaging without game data |
 | **Logs** | `port/src/btvs_log.c/.h`, `btvs_report*.c`, `btvs_trail.c`, `btvs_mem.c`, `port/tools/report_*.py`, `docs/logs.md` | Log API + `btvs_log.txt`; crash/hang reports with guest symbols; **Report a Problem** package (screenshot, log, settings, system info, game state, save); the **trail**: a record of exactly what the player did (level loads, checkpoints, position, input recording) and a way to jump straight back there (`BTVS_REPLAY=<report>`); RAM/VRAM/heap statistics for the memory view |
 
 ## Interfaces between areas
@@ -754,3 +754,8 @@ high school), `RECOMP_FILE_LOG=0`, time from "the game restarts itself" to `leve
   Your own note said 3.3 s inside the process before the four `btvs_*_reboot` functions existed; with Logs'
   switched off it is still 22 s, so Audio's, Controls' or Menu's, or the default-on path, are the others to
   switch off one at a time.
+- **Extras -> Graphics** (FYI, 22 Nov; nothing to do): the port has an icon now, resource 1 of
+  `buffy_tvs.exe` (`port/icon/btvs_icon.rc`). Your two window classes already load resource 1 from the
+  exe (`BuffySessionWindow` in `btvs_boot_restart.c`, `BuffyRecompGpu` in `nv2a_pb_d3d11.inc`), so the
+  title bar, the taskbar button and Alt+Tab get it with no change of yours. Keep that number if those
+  lines are ever rewritten. `docs/icon.md`.

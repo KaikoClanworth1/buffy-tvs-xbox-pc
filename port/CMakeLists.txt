@@ -209,7 +209,10 @@ endif()
 add_executable(btvs_audio_test src/btvs_audio_test.c src/btvs_audio.c)
 
 # -- "Buffy Launcher.exe": install from the disc image, then Play (launcher/) --
-add_executable(buffy_tvs_launcher WIN32 launcher/btvs_launcher.c)
+add_executable(buffy_tvs_launcher WIN32 launcher/btvs_launcher.c icon/btvs_icon.rc)
+# The port's icon (icon/btvs.ico, drawn by icon/make_icon.py): resource 1 of both programs.
+target_sources(${PROJECT_NAME} PRIVATE icon/btvs_icon.rc)
+set_source_files_properties(icon/btvs_icon.rc PROPERTIES OBJECT_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/icon/btvs.ico)
 set_target_properties(buffy_tvs_launcher PROPERTIES OUTPUT_NAME "Buffy Launcher")
 target_compile_definitions(buffy_tvs_launcher PRIVATE UNICODE _UNICODE)
 target_link_libraries(buffy_tvs_launcher PRIVATE comdlg32 shell32 ole32 uuid dwmapi bcrypt)

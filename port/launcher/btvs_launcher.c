@@ -799,10 +799,9 @@ static void load_game_icon(void)
     s_icon = CreateIconIndirect(&ii);
     DeleteObject(mask);
     DeleteObject(color);
-    if (s_icon && s_wnd) {
-        SendMessageW(s_wnd, WM_SETICON, ICON_BIG, (LPARAM)s_icon);
-        SendMessageW(s_wnd, WM_SETICON, ICON_SMALL, (LPARAM)s_icon);
-    }
+    /* The window's own icon stays the port's (resource 1), the same as the
+     * game's and both programs' in Explorer; this picture from the player's
+     * disc is only drawn inside the window. */
 }
 
 /* ── the window ────────────────────────────────────────────────────────── */
@@ -1686,7 +1685,13 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.lpszClassName = L"BtvsLauncher";
-    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
+    /* the port's icon, resource 1 (port/icon): title bar, taskbar, Alt+Tab */
+    wc.hIcon = (HICON)LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON),
+                                 GetSystemMetrics(SM_CYICON), 0);
+    wc.hIconSm = (HICON)LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON),
+                                   GetSystemMetrics(SM_CYSMICON), 0);
+    if (!wc.hIcon)
+        wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
     RegisterClassExW(&wc);
     r.left = 0; r.top = 0; r.right = S(WIN_W); r.bottom = S(WIN_H);
     AdjustWindowRectExForDpi(&r, style, FALSE, 0, (UINT)s_dpi);

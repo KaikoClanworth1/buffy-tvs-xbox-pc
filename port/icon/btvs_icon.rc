@@ -1,0 +1,3 @@
+// The port's icon, resource 1 of both programs (the game's windows and the launcher load it by that number).
+// btvs.ico is written by make_icon.py; replace that one file to change the icon everywhere.
+1 ICON "btvs.ico"
