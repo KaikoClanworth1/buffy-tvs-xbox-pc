@@ -230,6 +230,39 @@ Noticed in the zip: its entries are named with backslashes (`Buffy the Vampire S
 Launcher.exe`). Windows' own unpacking handles that (Extras' test used it); other unpackers, RecompLauncher's
 among them, may not. Put to Extras in `docs/AREAS.md`.
 
+## Submitted to RecompLauncher (22 Nov 2026)
+
+Sent through `https://recomplauncher.com/submit?platform=pc` in the owner's Chrome, signed in as the owner's
+verified developer account there, on the owner's word ("Yes, tick and send"). The site answered: "Thanks!
+Buffy the Vampire Slayer PC Port is in. Reviews take 24 to 48 hours, usually less than a day." It is
+followed in the developer hub (`recomplauncher.com/dev`) and answered to the account's e-mail. **Not listed
+yet; nothing has been run in the RecompLauncher app.**
+
+What was sent:
+
+- Project `https://github.com/KaikoClanworth1/buffy-tvs-xbox-pc`, name "Buffy the Vampire Slayer PC Port",
+  version 0.0.1, console Xbox, copy "European (PAL) Xbox disc, as a disc image (.iso)", Windows build
+  `Buffy-the-Vampire-Slayer-PC-v*-Windows-x64.zip` (found by the site in v0.0.1).
+- Easy Setup: the site found `recomplauncher.json` in the v0.0.1 zip ("Yes, found in v0.0.1"); settings in
+  the launcher: no.
+- Achievements: not yet. Ticks: Widescreen, 4K, 60 FPS, 120 FPS and up, Unlocked frame rate, Controller
+  support, Keyboard and mouse. AI-assisted: yes (code, writing).
+- Summary, description, what players need and credits: the texts above, with the release's measured
+  numbers (2.4 GB, 1 GB more while building, 8 to 10 minutes).
+- Pictures: the icon is the disc's own title image (`$$XTIMAGE`, 128x128) scaled to 512x512, as X-Men
+  Destiny's icon is the game's own; three screenshots of the port in game (level 1 at 3840x2160, the
+  cemetery fight at 1080p, the high school). No backdrop and no logo were uploaded: the form says the site
+  finds art for those, and the note asks for the game's official art for cover, backdrop and logo. None of
+  these pictures is in the repository.
+- The note to RecompLauncher's developer: a separate port from the listed "Hellmouth"; official art
+  wanted; `recomplauncher.json` tried with its exact commands on the developer's PC but not inside the app.
+- The declaration ticked for the owner: "I made this, or I'm allowed to submit it. It doesn't include game
+  files or anything else copyrighted."
+
+Next, when it is listed: look at `recomplauncher.com/game/<id>` and the art the site chose; try the install
+from the RecompLauncher app itself (first real run of `recomplauncher.json`; the zip's backslash entry
+names and the one top folder are the things to watch); then the badge and homepage of step 6 above.
+
 ## Audit before going public (22 Nov, `main` at 88f3898)
 
 The owner's go-ahead (relayed 22 Nov): first release, repository public, submit to RecompLauncher.
