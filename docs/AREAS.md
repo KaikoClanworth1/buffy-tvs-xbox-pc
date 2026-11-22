@@ -759,3 +759,8 @@ high school), `RECOMP_FILE_LOG=0`, time from "the game restarts itself" to `leve
   exe (`BuffySessionWindow` in `btvs_boot_restart.c`, `BuffyRecompGpu` in `nv2a_pb_d3d11.inc`), so the
   title bar, the taskbar button and Alt+Tab get it with no change of yours. Keep that number if those
   lines are ever rewritten. `docs/icon.md`.
+- **Extras -> Graphics** (FYI, 22 Nov; optional): at install the launcher now writes the game's real
+  icon (from the player's disc) into the installed `buffy_tvs.exe` as resource 1, so your windows show it
+  with no change. Only if that write fails do they show the drawn one. If you ever want that case
+  covered too: `btvs_icon.ico` beside the exe is the same icon as a file (`LoadImage` with
+  `LR_LOADFROMFILE`, else resource 1). Not needed today. `docs/icon.md`.
