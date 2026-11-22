@@ -27,6 +27,92 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
 
 ## Ready to use
 
+- **The first release's zip, v0.0.1, built and tried as a player gets it** (Extras, 22 Nov; for the GitHub
+  area to publish). Nothing in it is game material: `package.sh`'s check passed (278 files: no disc file by
+  name, type or content, no translated game code in any form, no icon file, both programs carrying the
+  port's own drawn icon).
+
+  | | |
+  |---|---|
+  | File | `dist/Buffy-the-Vampire-Slayer-PC-v0.0.1-Windows-x64.zip` in the main checkout (`D:\Xbox Games Ports\Buffy The Vampire Slayer Xbox Port\dist\`; the same file is in the Extras worktree's `dist/`). `dist/` is ignored by git |
+  | Size | 105,711,005 bytes (101 MB; 243 MB unpacked) |
+  | SHA-256 | `41a95082cc6c903059bc9e7f760af8df79579c3eb3d26b1c409c86d23275b177` |
+  | Second file | `Buffy-the-Vampire-Slayer-PC-v0.0.1-Windows-x64.zip.sha256` beside it (`<hex>  <name>`; `sha256sum -c` says OK) |
+  | Built from | commit `81069ac` (the game's log says `commit 81069acfd0, built Nov 22 2026 10:16:55`). **Tag `v0.0.1` on that commit**; later commits are documents only |
+  | Version | `0.0.1` everywhere: `BTVS_VERSION`, the zip's name, `build\kit.ini` (`Version=0.0.1`), `recomplauncher.json` (`prepare.version`), `"Buffy Launcher.exe" --version`. The updater compares the tag's numbers with that |
+  | In the zip | one folder, `Buffy the Vampire Slayer PC\` (as X-Men Destiny's zip has one), holding `Buffy Launcher.exe`, `buffy_tvs.exe` (no game code; 3 MB) and its `.pdb`, `recomplauncher.json`, `Read Me.txt`, `SDL3.dll` with `SDL3-LICENSE.txt`, the three Visual C++ runtime DLLs, and `build\` (the kit: translate program, clang and lld-link with LLVM's licence, headers, import libraries) |
+
+  **The version number** (GitHub area: say if the owner wants another). Kept at `0.0.1`, the number your
+  conventions table and `recomplauncher.json` already carry; nothing had to be rebuilt for it. X-Men
+  Destiny started at `0.1.0`: if that is wanted here it is one line in `port/CMakeLists.txt`, a full
+  rebuild and a new zip (about half an hour), and this entry's numbers change.
+
+  **Tried as a player gets it** (hidden, muted; compilers on CPUs 12-15, 4 at a time, at idle priority):
+
+  - **Unzipped** with Windows' own `Expand-Archive` into an empty folder outside the repository (7 s).
+  - **Installed** with `"Buffy Launcher.exe" --install <the disc image in Iso/> <another empty folder>`: exit
+    code 0 in **8 min 34 s** (copy from the image about 20 s; translate with the release's own frozen
+    `btvs_translate.exe` 5 min 23 s; compile 46 files 2 min 52 s; link, shaders 1 s; the icon made from
+    the disc). `btvs_install.ini` says `Owner=Launcher`.
+  - **Played** (the installed `buffy_tvs.exe`, scripted input): main menu at 1.8 s, Start Game, level 1
+    (`m00_spanishmission_1`) loaded, first frame 3.5 s after the restart; then **one level change inside
+    the process** to `m03_cemetery_1` (asked for with `BTVS_TEST_RELAUNCH`, as no script plays a level to
+    its end), first frame 4.2 s after; one game process and one game window from start to end (watched
+    from outside); exit code 0. The exe's icon is the one made from the disc (nine images, same bytes).
+  - **RecompLauncher's layout and commands**: the zip's files in `<install>`, then exactly
+    `"Buffy Launcher.exe" --install <image> "<install>\Game" --quiet` with `RECOMPLAUNCHER=1` in the
+    environment and `<install>` as the working folder: exit code 0 in 9 min 36 s, nothing printed but
+    `installed`, both files of `prepare.done` there (`Game\buffy_tvs.exe`, `Game\btvs_game.ok`),
+    `Game\btvs_install.ini` says `Owner=RecompLauncher`. Then its start command, `Game/buffy_tvs.exe`
+    from `<install>`: main menu, level 1, the level change, exit code 0; saved games in
+    `Game\XboxData\HardDisk`. The launcher there with `RECOMPLAUNCHER=1`: "Updates for this copy come
+    through RecompLauncher.", no request made.
+  - **Found there, small:** started with `<install>` as the working folder (not `Game`), the game writes
+    three of its files into that folder instead of `Game`: `xbox_kernel.log` and the game's own
+    `Bug_<level>.Log`, one per level. Harmless; `btvs_log.txt`, the saves and the settings are in `Game`.
+    If `recomplauncher.json` can give the start command a working folder, `Game` is the right one;
+    otherwise it is the runtime's and Logs' to open those by the exe's folder.
+  - **RecompLauncher itself was not run**: its real unpacking, its environment and its screens are not
+    known here. Whether it strips the zip's one top folder is taken from X-Men Destiny's zip having one.
+  - **"UPDATING TO VERSION 0.0.1" in the applying picture is not a fault.** That view belongs to the *new*
+    release's launcher (it is the one that applies an update), which names its own version; the picture
+    was drawn by this 0.0.1 build. A real 0.2.0 launcher says 0.2.0 there. The first release has nothing
+    older to update from, so the view cannot appear until the second.
+
+  **Still unverified, for the notes' known issues** (plain wording for players in brackets):
+
+  1. **A second PC.** Every install and run was on the developer's PC, which has Visual Studio, LLVM and
+     Python installed. The compile is given none of them, but no PC without them has been tried.
+     (Installing has only been tried on one PC. If "Translating" or "Building" fails, please report it
+     with `install_log.txt`.)
+  2. **Windows 10.** Only Windows 11 was run. Nothing used is newer than Windows 10 by reading the
+     programs, not by running there. (Made on Windows 11; Windows 10 should work and is untested.)
+  3. **Processors and graphics cards**: one PC's. The built game code has no AVX instruction; the
+     compiler's and the translate program's own needs were not checked. Direct3D 11 card needed.
+  4. **The launcher's window** was only drawn off screen in tests: its buttons, the folder and file
+     pickers, the progress bar moving, the Yes / No question of an update and the hand-over between two
+     launcher versions have not been used by hand in this build. (The owner has used earlier builds'.)
+  5. **Sound**: every test run was muted. That it plays right was heard by the owner in earlier builds, not
+     in this one.
+  6. **A real controller, keyboard and mouse**: tests press buttons by script. Real pads were used by the
+     owner in earlier builds; rumble, hot-plugging and non-Xbox pads through `SDL3.dll` are untested here.
+  7. **A visible game window**: fullscreen, borderless, Alt+Enter, more than one monitor, display scaling
+     and Alt+Tab were not looked at in this build.
+  8. **Most of the game.** Scripts reach the main menu, level 1 and the cemetery, and change level once.
+     No level was played to its end by a test; later levels, cutscenes, saving and loading mid-game and
+     the ending are unseen by tests.
+  9. **Virus scanners.** The install makes a fresh unsigned `btvs_game.dll`, changes the icon inside
+     `buffy_tvs.exe`, and runs `build\btvs_translate.exe`, which unpacks itself into the temp folder.
+     Only this PC's Defender has seen them (nothing flagged). None of the programs is signed, so
+     SmartScreen may warn at the first start. (If your scanner removes a file, allow the folder.)
+  10. **Folders**: a path with letters outside the PC's language setting is refused by the launcher (the
+      game cannot start from one yet); `Program Files` and other protected folders will fail for lack of
+      rights; a long path was not tried.
+  11. **Disk and time**: 2.4 GB installed and about 1 GB more while building; 8 to 10 minutes on four
+      processors, of which five are one processor's work whatever the PC.
+  12. **Updates** have only run against a stand-in on this PC. With one release there is nothing to
+      update to; the check against the public repository is to be confirmed once it is up.
+  13. **The North American disc** is refused; only the European (PAL) release is supported.
 - **The game restarts inside the process: one process, one window for the session** (Graphics / runtime,
   21 Nov; `docs/graphics.md`, "One process for the session"). When the game launches itself again -- menu
   to level, level to level, back to the menu -- the process, the window, the Direct3D device, the sound

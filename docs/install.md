@@ -178,6 +178,18 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
+## The first release's zip, v0.0.1 (22 Nov 2026, commit 81069ac)
+
+`dist/Buffy-the-Vampire-Slayer-PC-v0.0.1-Windows-x64.zip` (105,711,005 bytes, SHA-256
+`41a95082cc6c903059bc9e7f760af8df79579c3eb3d26b1c409c86d23275b177`) and its `.sha256`, made by
+`package.sh` from commit `81069ac`; the check passed. Unzipped outside the repository and installed
+hidden from the disc image: 8 min 34 s; level 1 and one level change inside the process; RecompLauncher's
+prepare command (9 min 36 s) and start command in its folder layout. The whole record, and the list of
+what is still unverified for a public release, is in `docs/AREAS.md` under "Ready to use".
+
+For this release `Read Me.txt` was brought up to date (the build at install, today's keys, updates) and
+SDL's licence text goes into the zip beside `SDL3.dll` (`SDL3-LICENSE.txt`, from SDL's own package).
+
 ## What was checked on 22 Nov 2026, 09:10 build (main at 373cabb): the launcher with the updater
 
 `GAME/buffy_tvs.exe` reports commit `373cabb059`, built Nov 22 2026 09:10:50. No regen was needed; no
