@@ -13,17 +13,25 @@ Nothing of it is in the repository or in a release. `port/launcher/btvs_icon.inc
 
 | Picture | Where | What it is |
 |---|---|---|
-| title image | `$$XTIMAGE` in `Default.xbe`, 128 x 128, DXT1, no transparency (the same bytes as `UDATA/45410012/TitleImage.xbx`) | **the dashboard's icon**: the game's logo over a full moon on dark purple. Used. |
-| save image | `$$XSIMAGE`, 64 x 64, DXT1 (`SaveImage.xbx`) | what the dashboard showed beside a saved game: the logo's B in a ring. Not used. |
+| title image | `$$XTIMAGE` in `Default.xbe`, 128 x 128, DXT1, no transparency (the same bytes as `UDATA/45410012/TitleImage.xbx`) | **the dashboard's icon**: the game's logo over a full moon on dark purple. Used from 40 px up. |
+| save image | `$$XSIMAGE`, 64 x 64, DXT1 (`SaveImage.xbx`) | what the dashboard showed beside a saved game: the logo's B in a ring. Used at 16 to 32 px (the owner's choice, 22 Nov). |
 | `media/launch_buffy.xpr`, `launch_indyj.xpr` | 2 MB each | launch pictures for a demo disc's menu, not icons. Not looked into further. |
 
 **At install** (after the copy and the build; `disc_icon` in the launcher), and for the owner's `GAME`
 in `deploy.sh` through `"Buffy Launcher.exe" --make-icon <game folder>`:
 
-1. The title image is read from the game folder's `Default.xbe`.
+1. The title image and the save image are read from the game folder's `Default.xbe`.
 2. `btvs_icon.ico` is written beside the game: 16, 20, 24, 32, 40, 48, 64, 128, 256 px. 128 is the
-   disc's picture as it is. Smaller sizes are area averages of it (every new pixel is the mean of the
-   area it covers). 256 is a bicubic enlargement, stored as PNG.
+   title image as it is; 40, 48 and 64 are area averages of it (every new pixel is the mean of the
+   area it covers); 256 is a bicubic enlargement, stored as PNG. **16, 20, 24 and 32 px are the save
+   image's B**, averaged down from its 64 px. The switch is `ICON_B_UP_TO` (32) in `btvs_icon.inc`;
+   0 gives the title image at every size, and a disc without the save image gets that too.
+
+   Why between 32 and 40: 16 to 32 px are what the title bar, the taskbar button, Alt+Tab and
+   Explorer's lists and small icons use at 100 to 200 % display scaling, and there the title image's
+   words are a smudge while the B still reads; 32 and 16 are also exact halvings of the 64 px B. From
+   40 px (Explorer's medium icons are 48) the moon and the logo's shape show, and the title image is
+   the dashboard's icon.
 3. The same nine images are written into the installed `buffy_tvs.exe` as icon group 1, replacing the
    drawn icon's. That is the resource Explorer shows and both of the game's window classes load
    (`BuffySessionWindow`, `BuffyRecompGpu`), so Explorer, the title bar, the taskbar and Alt+Tab all
@@ -36,15 +44,14 @@ why (`icon: ...`). While the game runs the exe cannot be replaced; `deploy.sh` i
 
 **How it looks.** 128 and 64 px: as on the Xbox. 256 px: soft, the logo's letters readable, block edges
 from the disc's compression smoothed but visible up close; a smarter enlargement would not add detail
-the 128 px picture does not have, so none was tried. 48 and 32 px: the moon and the logo's shape, the
-words not readable. 16 px (title bar): a pale moon over a smudge on purple. A variant with the save
-image's B at 16 to 32 px reads better there and is on the sheet as row 2; it is not built (the request
-was the dashboard's icon).
+the 128 px picture does not have, so none was tried. 48 and 40 px: the moon and the logo's shape, the
+words not readable. 32 down to 16 px: the B in its ring, clear at 32, still a B at 16. Sheet of the
+built icon: `port/runs/shots/icon_real_built.png` (the earlier `icon_real.png` has both variants).
 
 Sheet: `python port/icon/ico_sheet.py port/runs/shots/icon_real.png "label=GAME/btvs_icon.ico" ...`
 shows the images stored in an `.ico` at 256, 48, 32 and 16 px on light and dark.
 
-**Checked** (22 Nov, build 72ba548):
+**Checked** (22 Nov, builds 72ba548 and, with the B at small sizes, 67b4927):
 
 - `python port/icon/check_icon.py GAME/buffy_tvs.exe --ico GAME/btvs_icon.ico`: nine images, each the
   same bytes as the generated file's. `GAME/Buffy Launcher.exe` still has the drawn icon's nine.

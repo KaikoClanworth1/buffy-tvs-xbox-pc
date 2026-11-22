@@ -178,6 +178,19 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
+## What was checked on 22 Nov 2026, 07:57 build (main at 67b4927): the B at small sizes
+
+`GAME/buffy_tvs.exe` reports commit `67b4927455`, built Nov 22 2026 07:57:27. The icon is the disc's
+title image from 40 px up and the save image's B at 16 to 32 px (`install_log.txt`: `icon:
+btvs_icon.ico made from the disc's title image (40 px and up) and save image (16 to 32 px)`). No regen
+was needed; no game was running from `GAME`; the owner's settings and saves have the same checksums
+before and after.
+
+- `check_icon.py GAME/buffy_tvs.exe --ico GAME/btvs_icon.ico`: nine images, the same bytes as the file's.
+- Through the launcher's Play path and without it: main menu, `m00_spanishmission_1` loaded, one game
+  process and one game window, both window classes with a 32 px and a 16 px icon, exit code 0.
+- Sheet from the built file: `port/runs/shots/icon_real_built.png`.
+
 ## What was checked on 22 Nov 2026, 07:51 build (main at 72ba548): the game's real icon
 
 `GAME/buffy_tvs.exe` reports commit `72ba548858`, built Nov 22 2026 07:51:43. No regen was needed; no
