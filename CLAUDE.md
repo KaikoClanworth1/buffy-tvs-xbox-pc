@@ -4,7 +4,7 @@ A static recompilation of the 2002 Xbox game (The Collective, "Slayer" engine; t
 XDK 4432) into a native Windows program. **No emulation**: the game's x86 code is translated to C by
 `xboxrecomp/` and the Xbox libraries it links (D3D8, DSOUND, XAPI input) are replaced by host code.
 
-This repository is **private** and holds **no game material**: no disc image, XBE, map file, game
+This repository is **public** (since 22 Nov 2026, the owner's decision) and holds **no game material**: no disc image, XBE, map file, game
 data or translated game code. Those are generated locally from the owner's disc. (One exception, the
 owner's on 22 Nov: pictures of the port running, for the README, in `docs/media/`.)
 
@@ -68,7 +68,7 @@ name (41,601 functions). Use it — `python port/tools/sym.py <addr>`, `python p
   by showing the window. Drive it with scripted input (`BTVS_PAD_SCRIPT`), not real input.
 - Test runs use `game_files/` as the game folder and never touch a player's saves.
 
-**Git**: the remote is private; keep it private. Never commit game material (see `.gitignore`).
+**Git**: the remote is public: everything pushed is published at once. Never commit game material (see `.gitignore`).
 Commit small and often, on `main` unless working in a worktree. Commit messages say what changed for
 the player or the developer, not how the session went.
 
