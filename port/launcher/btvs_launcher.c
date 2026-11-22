@@ -52,6 +52,9 @@
 #include <stdarg.h>
 #include <wchar.h>
 #include <math.h>
+#include <io.h>
+#include <ctype.h>
+#include <wctype.h>
 
 #include "btvs_release.h"
 
@@ -678,6 +681,12 @@ static int install_run(const WCHAR *image, const WCHAR *target_in)
     default_settings(target);
     if (has_program(target) && !build_game(target))
         return INSTALL_FAILED;          /* s_install_msg says where it stopped; installing again carries on */
+    {   /* whose install this is: RecompLauncher updates the ones it made, the launcher its own (btvs_update.inc) */
+        WCHAR ini[MAX_PATH], env[8];
+        join(ini, target, L"btvs_install.ini");
+        WritePrivateProfileStringW(L"Install", L"Owner", GetEnvironmentVariableW(L"RECOMPLAUNCHER", env, 8) ? L"RecompLauncher"
+                                                                                                            : L"Launcher", ini);
+    }
     if (has_program(target))
         disc_icon(target);              /* the game's real icon, from this disc; never fails the install */
     post_progress(1000, L"Installed.");
@@ -836,7 +845,8 @@ static void load_game_icon(void)
 #define C_ERROR    RGB(0xFF, 0x8A, 0x70)
 
 enum { VIEW_INSTALL, VIEW_PLAY };
-enum { B_NONE, B_IMAGE, B_TARGET, B_INSTALL, B_CANCEL, B_BACK, B_PLAY, B_REPORTS, B_FOLDER, B_REINSTALL };
+enum { B_NONE, B_IMAGE, B_TARGET, B_INSTALL, B_CANCEL, B_BACK, B_PLAY, B_REPORTS, B_FOLDER, B_REINSTALL,
+       B_UPDCHECK, B_UPDATE };
 enum { K_PRIMARY, K_SECOND, K_LINK };
 
 typedef struct {
@@ -867,6 +877,8 @@ static void set_status(int err, const WCHAR *fmt, ...)
         InvalidateRect(s_wnd, NULL, FALSE);
 }
 
+#include "btvs_update.inc"    /* updates from the port's GitHub releases */
+
 static void add_btn(int id, int kind, int x, int y, int w, int h, int enabled, const WCHAR *text)
 {
     Btn *b = &s_btn[s_nbtn++];
@@ -887,6 +899,12 @@ static void layout(void)
 {
     Btn *f;
     s_nbtn = 0;
+    if (s_updating) {                   /* an update under way: the bar, and Cancel while it downloads */
+        if (s_updating == 1)
+            add_btn(B_CANCEL, K_SECOND, WIN_W - X0 - 96, 290, 96, 34, !s_cancel, L"Cancel");
+        s_focus = s_updating == 1 ? B_CANCEL : B_NONE;
+        return;
+    }
     if (s_view == VIEW_INSTALL) {
         if (s_installing) {
             add_btn(B_CANCEL, K_SECOND, WIN_W - X0 - 96, 290, 96, 34, !s_cancel, L"Cancel");
@@ -902,6 +920,11 @@ static void layout(void)
         add_btn(B_REPORTS, K_LINK, X0, WIN_H - 36, 108, 22, 1, L"Reports folder");
         add_btn(B_FOLDER, K_LINK, X0 + 124, WIN_H - 36, 92, 22, 1, L"Game folder");
         add_btn(B_REINSTALL, K_LINK, X0 + 232, WIN_H - 36, 96, 22, !game_running(), L"Install again");
+        if (!update_not_ours()) {
+            add_btn(B_UPDCHECK, K_LINK, X0 + 344, WIN_H - 36, 126, 22, !s_upd_busy, L"Check for updates");
+            if (s_upd.newer)
+                add_btn(B_UPDATE, K_SECOND, WIN_W - X0 - 150, 366, 150, 30, !game_running(), L"Update...");
+        }
     }
     f = btn(s_focus);
     if (!f || !f->enabled) {
@@ -1014,7 +1037,21 @@ static void paint(HDC dc)
     fill(dc, S(X0), S(114), W - 2 * S(X0), 1, C_BLOOD);
     fill(dc, S(X0), S(114) + 1, W - 2 * S(X0), 1, C_BLOOD_LO);
 
-    if (s_view == VIEW_INSTALL) {
+    if (s_updating) {
+        int bw = WIN_W - 2 * X0 - 96 - 10;
+        WCHAR head[96];
+        swprintf_s(head, 96, L"UPDATING TO VERSION %s", s_updating == 1 ? s_upd.version : WIDEN(BTVS_VERSION));
+        SetTextCharacterExtra(dc, S(1));
+        text(dc, s_f_label, C_DIM, S(X0), S(158), W - 2 * S(X0), S(18), DT_LEFT | DT_SINGLELINE, head);
+        SetTextCharacterExtra(dc, 0);
+        text(dc, s_f_ui, C_FAINT, S(X0), S(184), W - 2 * S(X0), S(80), DT_LEFT | DT_WORDBREAK,
+             L"Your saved games, settings and reports are kept. If anything fails, the version you had is put back. "
+             L"Please leave this window open until it has finished.");
+        fill(dc, S(X0), S(298), S(bw), S(18), C_PANEL);
+        edge(dc, S(X0), S(298), S(bw), S(18), C_EDGE);
+        fill(dc, S(X0) + 2, S(298) + 2, (S(bw) - 4) * s_permille / 1000, S(18) - 4, C_BLOOD);
+        text(dc, s_f_ui, s_status_err ? C_ERROR : C_DIM, S(X0), S(346), W - 2 * S(X0), S(52), DT_LEFT | DT_WORDBREAK, s_status);
+    } else if (s_view == VIEW_INSTALL) {
         draw_path(dc, 158, L"1    YOUR XBOX DISC IMAGE", s_image, L"Choose the .iso of your own Buffy the Vampire Slayer disc");
         draw_path(dc, 228, L"2    INSTALL TO", s_target, L"Choose a folder for the game (about 2 GB)");
         if (s_installing) {
@@ -1032,6 +1069,9 @@ static void paint(HDC dc)
         text(dc, s_f_label, C_DIM, S(X0), S(326), S(300), S(18), DT_LEFT | DT_SINGLELINE, L"INSTALLED IN");
         SetTextCharacterExtra(dc, 0);
         text(dc, s_f_ui, C_DIM, S(X0), S(344), W - 2 * S(X0), S(20), DT_LEFT | DT_SINGLELINE | DT_PATH_ELLIPSIS, s_game_dir);
+        if (s_upd_line[0])              /* updates: one line; the Update button beside it when there is one */
+            text(dc, s_f_ui, s_upd.newer ? C_BONE : C_FAINT, S(X0), S(366), W - 2 * S(X0) - (s_upd.newer ? S(160) : 0), S(34),
+                 DT_LEFT | DT_WORDBREAK | DT_END_ELLIPSIS, s_upd_line);
         text(dc, s_f_ui, C_FAINT, S(X0 + 300), S(170), S(WIN_W - X0 - X0 - 300), S(60), DT_LEFT | DT_WORDBREAK,
              L"Graphics, sound and controls are set in the game's own Options menu.");
     }
@@ -1302,6 +1342,8 @@ static void action(int id)
         set_status(0, L"Cancelling...");
         layout();
         break;
+    case B_UPDCHECK:  update_check(1); break;
+    case B_UPDATE:    update_ask(); break;
     case B_BACK:      set_view(VIEW_PLAY); break;
     case B_PLAY:      play(); break;
     case B_REPORTS:   open_folder(REPORTS_DIR); break;
@@ -1453,7 +1495,53 @@ static LRESULT CALLBACK wndproc(HWND w, UINT m, WPARAM wp, LPARAM lp)
         InvalidateRect(w, NULL, FALSE);
         return 0;
     }
+    case WM_APP_UPDCHECK:
+        InterlockedExchange(&s_upd_busy, 0);
+        if (lp) {
+            s_upd = *(UpdateInfo *)lp;
+            free((void *)lp);
+            update_note_for_game(&s_upd);
+        }
+        update_line();
+        layout();
+        InvalidateRect(w, NULL, FALSE);
+        return 0;
+    case WM_APP_UPDREADY:               /* fetched and unpacked: hand over to the new version's launcher */
+        InterlockedExchange(&s_upd_busy, 0);
+        if (wp && update_start_applier(0, NULL)) {
+            free((void *)lp);
+            DestroyWindow(w);
+            return 0;
+        }
+        s_updating = 0;
+        set_status(1, L"The update did not start: %s", wp ? s_upd_msg : (lp ? (const WCHAR *)lp : L""));
+        free((void *)lp);
+        update_line();
+        layout();
+        return 0;
+    case WM_APP_UPDDONE: {              /* (the applier) done or undone: on to the launcher in the release folder */
+        WCHAR exe[MAX_PATH], cmd[MAX_PATH + 16];
+        STARTUPINFOW si;
+        PROCESS_INFORMATION pi;
+        join(exe, s_apply_release, LAUNCHER_EXE);
+        swprintf_s(cmd, MAX_PATH + 16, L"\"%s\"", exe);
+        memset(&si, 0, sizeof si);
+        si.cb = sizeof si;
+        if (CreateProcessW(exe, cmd, NULL, NULL, FALSE, 0, NULL, s_apply_release, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+        s_updating = 0;
+        DestroyWindow(w);
+        return 0;
+    }
     case WM_CLOSE:
+        if (s_updating == 2)
+            return 0;                   /* putting files in place: not to be stopped half-way */
+        if (s_updating == 1) {
+            s_cancel = 1;
+            return 0;
+        }
         if (s_installing) {
             if (MessageBoxW(w, L"The game is still being installed. Stop and close?", GAME_TITLE,
                             MB_YESNO | MB_ICONQUESTION) != IDYES)
@@ -1575,6 +1663,20 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
         *slash = 0;
     join(s_launcher_ini, s_launcher_dir, L"launcher.ini");
 
+    if (argc >= 5 && !wcscmp(argv[1], L"--apply-update") && !(argc >= 6 && !wcscmp(argv[5], L"--console"))) {
+        /* (the new release's launcher, started from update\unpack by the old one) with the window:
+         * wait for the old launcher to go, then show the bar while the files go in and the game is built */
+        HANDLE old = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)wcstoul(argv[4], NULL, 10));
+        if (old) {
+            WaitForSingleObject(old, 30000);
+            CloseHandle(old);
+        }
+        wcscpy_s(s_apply_release, MAX_PATH, argv[2]);
+        wcscpy_s(s_apply_game, MAX_PATH, wcscmp(argv[3], L"-") ? argv[3] : L"");
+        wcscpy_s(s_game_dir, MAX_PATH, s_apply_game);
+        join(s_launcher_ini, s_apply_release, L"launcher.ini");
+        s_updating = 2;
+    } else
     if (argc >= 2 && !wcsncmp(argv[1], L"--", 2) && wcscmp(argv[1], L"--capture")) {
         attach_console();
         if (!wcscmp(argv[1], L"--version")) {
@@ -1620,6 +1722,59 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
             GetExitCodeProcess(pi.hProcess, &code);
             wprintf(L"the game ended with code %lu\r\n", code);
             return (int)code;
+        }
+        if (!wcscmp(argv[1], L"--check-update") || !wcscmp(argv[1], L"--update")) {
+            /* The check, and the whole update, without the window (tests; also a way to script it).
+             * Exit code: 0 updated / a newer version exists, 10 nothing newer, 1 failed, 11 not this launcher's install. */
+            const WCHAR *no;
+            DWORD code = 1;
+            load_launcher_ini();
+            update_startup();
+            no = update_not_ours();
+            if (no) {
+                wprintf(L"%s\n", no);
+                return 11;
+            }
+            update_check_run(&s_upd);
+            update_note_for_game(&s_upd);
+            if (!s_upd.ok) {
+                wprintf(L"no check: %s%s\n", s_upd.error, s_upd.quiet ? L" (treated as: no update)" : L"");
+                return s_upd.quiet ? 10 : 1;
+            }
+            if (!s_upd.newer) {
+                wprintf(L"nothing newer than %s (newest release: %s)\n", my_version(), s_upd.version[0] ? s_upd.version : L"none");
+                return 10;
+            }
+            wprintf(L"version %s is available (this is %s): %s, %llu bytes, sha256 %s\nnotes: %s\n", s_upd.version, my_version(),
+                    s_upd.zip_name, (unsigned long long)s_upd.zip_size, s_upd.sha256[0] ? s_upd.sha256 : L"(from the .sha256 file)",
+                    s_upd.summary);
+            if (!wcscmp(argv[1], L"--check-update"))
+                return 0;
+            if (!update_fetch(&s_upd)) {
+                fwprintf(stderr, L"update failed: %s\n", s_upd_msg);
+                return 1;
+            }
+            if (argc >= 3 && !wcscmp(argv[2], L"--fetch-only"))
+                return 0;
+            fflush(stdout);
+            if (!update_start_applier(1, &code)) {
+                fwprintf(stderr, L"update failed: %s\n", s_upd_msg);
+                return 1;
+            }
+            return (int)code;
+        }
+        if (argc >= 5 && !wcscmp(argv[1], L"--apply-update") && argc >= 6 && !wcscmp(argv[5], L"--console")) {
+            /* (the new release's launcher, started from update\unpack by the old one) without a window */
+            int ok;
+            wcscpy_s(s_apply_release, MAX_PATH, argv[2]);
+            wcscpy_s(s_apply_game, MAX_PATH, wcscmp(argv[3], L"-") ? argv[3] : L"");
+            wcscpy_s(s_game_dir, MAX_PATH, s_apply_game);
+            ok = update_apply_run(s_apply_release, s_apply_game);
+            if (ok)
+                wprintf(L"updated to %s\n", WIDEN(BTVS_VERSION));
+            else
+                fwprintf(stderr, L"update failed and was undone: %s\n", s_upd_msg);
+            return ok ? 0 : 1;
         }
         if (argc >= 3 && !wcscmp(argv[1], L"--make-icon")) {
             /* what an install does for the icon, for a game folder that is already there (deploy.sh) */
@@ -1681,6 +1836,19 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
                 s_permille = B_P_TRANSLATE + (B_P_COMPILE - B_P_TRANSLATE) * 21 / 46;
                 set_status(0, L"Building the game for this PC: %d of %d parts done, %lu:%02lu so far (%d at a time)",
                            21, 46, 1ul, 12ul, 8);
+            } else if (!wcscmp(argv[2], L"update")) {
+                /* the Play view with a newer version found */
+                memset(&s_upd, 0, sizeof s_upd);
+                s_upd.ok = s_upd.newer = 1;
+                wcscpy_s(s_upd.version, 32, L"0.2.0");
+                wcscpy_s(s_upd.summary, 512, L"Cutscenes no longer flicker, and level loads are faster.");
+                update_line();
+            } else if (!wcscmp(argv[2], L"updating")) {
+                memset(&s_upd, 0, sizeof s_upd);
+                wcscpy_s(s_upd.version, 32, L"0.2.0");
+                s_updating = 1;
+                s_permille = 310;
+                set_status(0, L"Downloading version %s: %.0f of %.0f MB", L"0.2.0", 63.0, 101.0);
             } else if (!wcscmp(argv[2], L"translate")) {
                 s_installing = 1;
                 s_permille = B_P_COPY + (B_P_TRANSLATE - B_P_COPY) * 2 / 9;
@@ -1724,9 +1892,21 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
         return 1;
     DwmSetWindowAttribute(s_wnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof dark);
 
+    if (s_updating != 2)
+        update_startup();               /* an update that never finished is undone; leftovers tidied */
     /* installed already: straight to Play */
-    if (is_game_folder(s_game_dir)) {
+    if (s_updating == 2) {
         set_view(VIEW_PLAY);
+        s_permille = 600;
+        set_status(0, L"Putting version %s in place...", WIDEN(BTVS_VERSION));
+        layout();
+        CloseHandle(CreateThread(NULL, 0, update_apply_thread, NULL, 0, NULL));
+    } else if (is_game_folder(s_game_dir)) {
+        set_view(VIEW_PLAY);
+        update_show_result();
+        update_line();
+        if (GetPrivateProfileIntW(L"Launcher", L"CheckUpdates", 1, s_launcher_ini) && !GetEnvironmentVariableW(L"BTVS_NO_UPDATE_CHECK", NULL, 0))
+            update_check(0);            /* in the background; Play does not wait for it */
     } else {
         if (s_image[0])
             set_image(s_image);

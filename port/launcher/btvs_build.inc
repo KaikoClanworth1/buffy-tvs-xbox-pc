@@ -30,6 +30,7 @@
 #define GAME_DLL       L"btvs_game.dll"
 #define GAME_DLL_OK    L"btvs_game.ok"       /* holds the kit's Id the DLL was built with */
 #define WORK_DIR       L"build_work"
+#define KEPT_DIR       L"translated"         /* the translated C of the last build, kept for an update (177 MB) */
 #define INSTALL_LOG    L"install_log.txt"
 #define BUILD_MAX_JOBS 32
 #define BUILD_MAX_SRC  256
@@ -73,6 +74,15 @@ static int kit_id(WCHAR *id, DWORD cap)
         return 0;
     GetPrivateProfileStringW(L"Kit", L"Id", L"", id, cap, ini);
     return id[0] != 0;
+}
+
+/* Which translate program and function list the kit has ("" for a kit from
+ * before this was written down). The same value means the same translated C. */
+static void kit_translate_id(WCHAR *id, DWORD cap)
+{
+    WCHAR ini[MAX_PATH];
+    kit_path(ini, L"kit.ini");
+    GetPrivateProfileStringW(L"Kit", L"Translate", L"", id, cap, ini);
 }
 
 static int read_small(const WCHAR *path, WCHAR *out, DWORD cap)
@@ -274,6 +284,28 @@ static int build_translate(const WCHAR *target, const WCHAR *work)
     if (file_exists(ok)) {
         blog(L"translate: already done");
         return 1;
+    }
+    {   /* the last build's translated C, when this kit's translate program is the same one: only the
+         * header that ties the code to this exact exe is new (an update then costs the compile only) */
+        WCHAR kept[MAX_PATH], idf[MAX_PATH], have[128], want[128], gen[MAX_PATH], h_src[MAX_PATH], h_dst[MAX_PATH];
+        join(kept, target, KEPT_DIR);
+        join(idf, kept, L"translated.id");
+        join(gen, work, L"gen");
+        kit_translate_id(want, 128);
+        if (want[0] && read_small(idf, have, 128) && !wcscmp(have, want)) {
+            remove_tree(gen);
+            kit_path(h_src, L"btvs_game_tls.h");
+            join(h_dst, gen, L"btvs_game_tls.h");
+            if (move_patiently(kept, gen, 0) && CopyFileW(h_src, h_dst, FALSE)) {
+                join(idf, gen, L"translated.id");
+                DeleteFileW(idf);
+                blog(L"translate: not needed, the translated code of the last build is used (translate program %s)", want);
+                write_small(ok, L"ok");
+                return 1;
+            }
+            blog(L"translate: the kept code could not be used (error %lu): translating", GetLastError());
+            remove_tree(gen);
+        }
     }
     join(xbe, target, L"Default.xbe");
     join(map, target, L"final.map");
@@ -646,6 +678,17 @@ static int build_game(const WCHAR *target)
         join(p, target, GAME_DLL_OK);
         write_small(p, id);
         build_shaders(target);
+        {   /* keep the translated C for the next build (see build_translate) */
+            WCHAR kept[MAX_PATH], gen[MAX_PATH], tid[128];
+            join(kept, target, KEPT_DIR);
+            join(gen, work, L"gen");
+            kit_translate_id(tid, 128);
+            remove_tree(kept);
+            if (tid[0] && move_patiently(gen, kept, 0)) {
+                join(gen, kept, L"translated.id");
+                write_small(gen, tid);
+            }
+        }
         remove_tree(work);
         blog(L"done in %lu s", (GetTickCount() - t0) / 1000);
         post_progress(1000, L"Installed.");

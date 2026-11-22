@@ -111,7 +111,12 @@ if [ -n "${BTVS_GAMEDLL_KIT:-}" ]; then
     [ -f "${BTVS_TRANSLATE_EXE:-}" ] && cp "$BTVS_TRANSLATE_EXE" "$B/btvs_translate.exe" \
         || echo "note: no btvs_translate.exe in the kit (BTVS_TRANSLATE_EXE=<file>): the launcher needs BTVS_TRANSLATE_CMD"
     ID="$(sha256sum "$KIT/buffy_tvs.exe" | cut -c1-16)-$("$LLVM/clang.exe" --version | sed -n '1s/.*version \([0-9.]*\).*/\1/p')"
-    printf '[Kit]\r\nId=%s\r\n' "$ID" > "$B/kit.ini"
+    # Version: which release this is (the updater checks a download against it).
+    # Translate: which translate program and function list; the same value means the same translated C,
+    # so an update can keep the player's (a newly frozen btvs_translate.exe is a new value: freeze only when the tools change).
+    VERSION="$(sed -n 's/^set(BTVS_VERSION "\(.*\)")/\1/p' CMakeLists.txt)"
+    TRID=""; [ -f "$B/btvs_translate.exe" ] && TRID="$(cat "$B/btvs_translate.exe" "$B/manual_functions.json" | sha256sum | cut -c1-16)"
+    printf '[Kit]\r\nId=%s\r\nVersion=%s\r\nTranslate=%s\r\n' "$ID" "${BTVS_KIT_VERSION:-$VERSION}" "$TRID" > "$B/kit.ini"
     echo "kit $ID in $KIT"; du -sh "$B" | cut -f1
     exit 0
 fi

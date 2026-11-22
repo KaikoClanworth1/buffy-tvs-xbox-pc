@@ -4,7 +4,10 @@
 # which also translates and builds the game's code on their PC
 # (launcher/btvs_build.inc, docs/install-build.md).
 #   bash port/tools/package.sh [--allow-incomplete]
-#     -> dist/Buffy the Vampire Slayer PC/  and  dist/Buffy-the-Vampire-Slayer-PC-v<version>.zip
+#     -> dist/Buffy the Vampire Slayer PC/  and  dist/Buffy-the-Vampire-Slayer-PC-v<version>-Windows-x64.zip
+#        and  <that zip>.sha256  ("<hex>  <zip name>", what sha256sum -c reads): the second file of a release.
+#        The launcher's updater takes the zip by that ending and checks it against GitHub's digest or this file;
+#        the release says which version it is in build/kit.ini ([Kit] Version) and recomplauncher.json.
 # The version is BTVS_VERSION in port/CMakeLists.txt.
 #
 # What goes in: the launcher; buffy_tvs.exe linked WITHOUT the game's code
@@ -32,7 +35,7 @@ NAME="Buffy the Vampire Slayer PC"
 OUT="$ROOT/dist/$NAME"
 VER="$(sed -n 's/^set(BTVS_VERSION "\(.*\)")/\1/p' "$PORT/CMakeLists.txt")"
 [ -n "$VER" ] || { echo "no BTVS_VERSION in port/CMakeLists.txt"; exit 1; }
-ZIP="Buffy-the-Vampire-Slayer-PC-v$VER.zip"
+ZIP="Buffy-the-Vampire-Slayer-PC-v$VER-Windows-x64.zip"
 ALLOW_MISSING=0
 [ "${1:-}" = "--allow-incomplete" ] && ALLOW_MISSING=1
 WORK="$PORT/build/gamedll"
@@ -62,6 +65,8 @@ tail -1 "$WORK.log"
 S="$(pick "SDL3.dll")"   # controllers other than XInput (Controls area)
 [ -n "$S" ] && cp -f "$S" "$OUT/" || echo "note: no SDL3.dll beside the build"
 cp -f "$PORT/launcher/Read Me.txt" "$OUT/Read Me.txt"
+# RecompLauncher reads this from the release (the GitHub area's file; the version filled in).
+[ -f "$ROOT/recomplauncher.json" ] && sed "s/RELEASE_VERSION/$VER/" "$ROOT/recomplauncher.json" > "$OUT/recomplauncher.json"
 # Visual C++ runtime, app-local, for PCs without the redistributable.
 CRT="$(ls -d "/c/Program Files (x86)/Microsoft Visual Studio/2019/BuildTools/VC/Redist/MSVC/"*/x64/Microsoft.VC142.CRT 2>/dev/null | tail -1 || true)"
 if [ -n "$CRT" ]; then
@@ -78,7 +83,7 @@ bash "$PORT/tools/limit.sh" powershell -NoProfile -Command "Compress-Archive -Pa
 if ! python - "$ZIP" "$NAME" "$BTVS_MAIN/game_files" "$PORT/icon/btvs.ico" <<'EOF'
 import hashlib, os, struct, sys, zipfile
 zip_path, top, game = sys.argv[1:4]
-allowed = {"buffy launcher.exe", "buffy_tvs.exe", "buffy_tvs.pdb", "read me.txt", "not a release.txt",
+allowed = {"buffy launcher.exe", "buffy_tvs.exe", "buffy_tvs.pdb", "read me.txt", "not a release.txt", "recomplauncher.json",
            "sdl3.dll", "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"}
 # the build kit: these files, the port's headers, and LLVM's two programs, headers and licence
 kit_files = {"kit.ini", "btvs_translate.exe", "game_dll.c", "btvs_game_tls.h", "game_link.def", "manual_functions.json",
@@ -164,7 +169,10 @@ print("checked %d files in %s: %s" % (len([i for i in z.infolist() if not i.file
 sys.exit(1 if bad else 0)
 EOF
 then
-    rm -f "$ZIP"
+    rm -f "$ZIP" "$ZIP.sha256"
     echo "the zip was deleted"; exit 1
 fi
-echo "packaged v$VER: dist/$NAME ($(du -sh "$NAME" | cut -f1)), dist/$ZIP ($(du -h "$ZIP" | cut -f1))"
+# The release's second file: the zip's SHA-256 in the form "sha256sum -c" reads (the updater's fallback check).
+rm -f "$ZIP.sha256"
+sha256sum "$ZIP" | sed "s/ \*/  /" > "$ZIP.sha256"
+echo "packaged v$VER: dist/$NAME ($(du -sh "$NAME" | cut -f1)), dist/$ZIP ($(du -h "$ZIP" | cut -f1)), dist/$ZIP.sha256"
