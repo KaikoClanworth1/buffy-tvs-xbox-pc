@@ -2,7 +2,9 @@
  * Part of btvs_launcher.c (included after btvs_build.inc).
  *
  * The disc's Default.xbe carries the picture the Xbox dashboard showed for the
- * game ($$XTIMAGE, 128 x 128). Nothing of it is in a release: at install the
+ * game ($$XTIMAGE, 128 x 128: the logo over the moon) and the one it showed
+ * beside a saved game ($$XSIMAGE, 64 x 64: the logo's B in a ring). The icon is
+ * the title image from 40 px up and the B at 16 to 32 px (ICON_B_UP_TO). Nothing of it is in a release: at install the
  * launcher reads it from the game folder, makes btvs_icon.ico there (256 down
  * to 16 px) and writes the same images into the installed buffy_tvs.exe as its
  * icon resource 1 -- the resource Explorer shows and both of the game's window
@@ -19,6 +21,14 @@
 #define ICON_FILE L"btvs_icon.ico"
 static const int k_icon_sizes[] = { 16, 20, 24, 32, 40, 48, 64, 128, 256 };
 #define ICON_COUNT ((int)_countof(k_icon_sizes))
+
+/* Up to this size the save image's B is used, above it the title image (the
+ * owner's choice, 22 Nov). 16 to 32 px are the title bar, the taskbar button,
+ * Alt+Tab and Explorer's lists and small icons at 100 to 200 % scaling: there
+ * the title image's words are a smudge and the B still reads. 32 and 16 are
+ * also exact halvings of the 64 px B. From 40 px (Explorer's medium icons are
+ * 48) the moon and the logo's shape show. 0 = the title image at every size. */
+#define ICON_B_UP_TO 32
 
 /* ── resampling: 0xAARRGGBB, top row first ───────────────────────────────── */
 
@@ -194,14 +204,17 @@ static void icon_set_free(IconSet *s)
     memset(s, 0, sizeof *s);
 }
 
-static int icon_set_make(const uint32_t *px128, IconSet *s)
+/* px64 may be NULL (a disc without the save image): the title image at every size. */
+static int icon_set_make(const uint32_t *px128, const uint32_t *px64, IconSet *s)
 {
     uint32_t *tmp = malloc(256 * 256 * 4);
     int i, ok = tmp != NULL;
     memset(s, 0, sizeof *s);
     for (i = 0; ok && i < ICON_COUNT; i++) {
         int n = k_icon_sizes[i];
-        if (n == 128)
+        if (px64 && n <= ICON_B_UP_TO)
+            icon_shrink(px64, 64, tmp, n);
+        else if (n == 128)
             memcpy(tmp, px128, 128 * 128 * 4);
         else if (n < 128)
             icon_shrink(px128, 128, tmp, n);
@@ -337,7 +350,8 @@ static int icon_into_exe(const WCHAR *exe, const IconSet *s)
  * Returns 0 nothing done, 1 the .ico only, 2 the .ico and the exe. */
 static int disc_icon(const WCHAR *target)
 {
-    static uint32_t px[128 * 128];
+    static uint32_t px[128 * 128], small[64 * 64];
+    int have_b;
     WCHAR ico[MAX_PATH], exe[MAX_PATH];
     IconSet s;
     int done = 0, own_log = 0;
@@ -351,13 +365,15 @@ static int disc_icon(const WCHAR *target)
         blog(L"icon: no title image in this disc's Default.xbe; the port's own icon stays");
         goto out;
     }
-    if (!icon_set_make(px, &s))
+    have_b = xbe_image(target, "$$XSIMAGE", 64, small);
+    if (!icon_set_make(px, have_b ? small : NULL, &s))
         goto out;
     join(ico, target, ICON_FILE);
     join(exe, target, GAME_EXE);
     if (icon_write_file(ico, &s)) {
         done = 1;
-        blog(L"icon: %s made from the disc's title image", ICON_FILE);
+        blog(have_b && ICON_B_UP_TO ? L"icon: %s made from the disc's title image (40 px and up) and save image (16 to 32 px)"
+                                    : L"icon: %s made from the disc's title image", ICON_FILE);
         if (file_exists(exe) && icon_into_exe(exe, &s)) {
             done = 2;
             blog(L"icon: written into %s", GAME_EXE);

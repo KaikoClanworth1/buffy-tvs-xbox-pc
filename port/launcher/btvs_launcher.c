@@ -728,7 +728,9 @@ static void dxt1_block(const uint8_t *b, uint32_t out[16])
         out[i] = pal[(bits >> (i * 2)) & 3];
 }
 
-static int icon_pixels(const WCHAR *game_dir, uint32_t *px)
+/* One of the XBE's pictures: "$$XTIMAGE" (128 px, the dashboard's icon for the
+ * game) or "$$XSIMAGE" (64 px, shown beside a saved game). dim x dim pixels. */
+static int xbe_image(const WCHAR *game_dir, const char *section, int dim, uint32_t *px)
 {
     WCHAR p[MAX_PATH];
     uint8_t *x;
@@ -752,19 +754,20 @@ static int icon_pixels(const WCHAR *game_dir, uint32_t *px)
             memcpy(&rsz, x + sec + i * 56 + 16, 4);
             memcpy(&name, x + sec + i * 56 + 20, 4);
             name -= base;
-            if ((uint64_t)name + 10 > n || memcmp(x + name, "$$XTIMAGE", 10))
+            if ((uint64_t)name + 10 > n || memcmp(x + name, section, 10))
                 continue;
-            if ((uint64_t)raw + rsz > n || rsz < 0x800 + 8192)
+            if ((uint64_t)raw + rsz > n || rsz < 0x800 + (uint32_t)(dim * dim / 2))
                 break;
             img = x + raw;
-            if (memcmp(img, "XPR0", 4) || img[0x19] != 0x0C)     /* DXT1 */
+            if (memcmp(img, "XPR0", 4) || img[0x19] != 0x0C      /* DXT1 */
+                    || 1 << (img[0x1A] >> 4) != dim || 1 << (img[0x1B] & 15) != dim)
                 break;
-            for (by = 0; by < 32; by++)
-                for (bx = 0; bx < 32; bx++) {
+            for (by = 0; by < dim / 4; by++)
+                for (bx = 0; bx < dim / 4; bx++) {
                     uint32_t blk[16];
-                    dxt1_block(img + 0x800 + (by * 32 + bx) * 8, blk);
+                    dxt1_block(img + 0x800 + (by * (dim / 4) + bx) * 8, blk);
                     for (k = 0; k < 16; k++)
-                        px[(by * 4 + k / 4) * 128 + bx * 4 + k % 4] = blk[k];
+                        px[(by * 4 + k / 4) * dim + bx * 4 + k % 4] = blk[k];
                 }
             found = 1;
             break;
@@ -772,6 +775,11 @@ static int icon_pixels(const WCHAR *game_dir, uint32_t *px)
     }
     free(x);
     return found;
+}
+
+static int icon_pixels(const WCHAR *game_dir, uint32_t *px)
+{
+    return xbe_image(game_dir, "$$XTIMAGE", 128, px);
 }
 
 #include "btvs_icon.inc"      /* that picture as btvs_icon.ico and as the installed exe's icon */
