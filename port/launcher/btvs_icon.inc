@@ -350,7 +350,7 @@ static int icon_into_exe(const WCHAR *exe, const IconSet *s)
  * Returns 0 nothing done, 1 the .ico only, 2 the .ico and the exe. */
 static int disc_icon(const WCHAR *target)
 {
-    static uint32_t px[128 * 128], small[64 * 64];
+    static uint32_t px[128 * 128], px_b[64 * 64];
     int have_b;
     WCHAR ico[MAX_PATH], exe[MAX_PATH];
     IconSet s;
@@ -365,8 +365,8 @@ static int disc_icon(const WCHAR *target)
         blog(L"icon: no title image in this disc's Default.xbe; the port's own icon stays");
         goto out;
     }
-    have_b = xbe_image(target, "$$XSIMAGE", 64, small);
-    if (!icon_set_make(px, have_b ? small : NULL, &s))
+    have_b = xbe_image(target, "$$XSIMAGE", 64, px_b);
+    if (!icon_set_make(px, have_b ? px_b : NULL, &s))
         goto out;
     join(ico, target, ICON_FILE);
     join(exe, target, GAME_EXE);
