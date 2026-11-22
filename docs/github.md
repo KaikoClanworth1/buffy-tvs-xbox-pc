@@ -15,7 +15,7 @@ has **no release and no tag**, and this area changes neither.
 | Description "Unofficial native PC port of X-Men: Destiny (Xbox 360). Bring your own disc." | Set: "Unofficial native PC port of Buffy the Vampire Slayer (Xbox, 2002). Bring your own disc." |
 | Topics: none there (`wwe-svr2011-pc` has `pc-port, static-recompilation, ...`) | Set: `pc-port`, `static-recompilation`, `xbox`, `buffy-the-vampire-slayer`, `windows` |
 | No homepage, no social preview picture | None set |
-| `LICENSE` (MIT for the port's own work, with a "what this covers" part and a credit request) | **Not added**: the owner's decision (below) |
+| `LICENSE` (MIT for the port's own work, with a "what this covers" part and a credit request) | Added 22 Nov on the owner's word ("anyone can use or modify my code so long as credit is given"): the same form |
 | `.gitattributes` | Not added: it would change line endings in other areas' files |
 
 House style, seen in all three public ports: the "no game in this repository" box at the top, "Bring your
@@ -233,8 +233,7 @@ other branch), not just the newest files:
 
 **Result: nothing found that must stay private.** Not covered: this is a search by name, type and pattern,
 not a reading of all 157 commits' text; the area notes quote log lines and describe the game's inner
-workings in detail, as the public ports' notes do. Still open and unchanged: no `LICENSE` for the port's
-own code (the owner has not answered; the README makes no licence statement).
+workings in detail, as the public ports' notes do. The `LICENSE` for the port's own code was added after this audit (MIT, as on the other ports).
 
 ## How X-Men Destiny's RecompLauncher artwork is done
 
