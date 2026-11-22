@@ -1,7 +1,7 @@
 # The GitHub page and the RecompLauncher page (GitHub area), 22 Nov 2026
 
-The model is the owner's public port `KaikoClanworth1/x-men-destiny-pc`. The repository is **private**,
-has **no release and no tag**, and this area changes neither.
+The model is the owner's public port `KaikoClanworth1/x-men-destiny-pc`. The repository was private with no
+release until 22 Nov 2026; see "Releases" below for what is public now.
 
 ## What was matched to X-Men Destiny
 
@@ -210,6 +210,25 @@ Every step that publishes something (5 to 8) needs the owner's go-ahead for that
 8. **Publish** (not as a pre-release, unless it is meant as a test build).
 9. **Afterwards**: an installed previous release offers the update; RecompLauncher, once the port is listed,
    shows the new version (nothing to submit again: it reads the releases). Note the release in `docs/github.md`.
+
+## Releases
+
+| Version | Date | Commit | File | SHA-256 |
+|---|---|---|---|---|
+| [v0.0.1](https://github.com/KaikoClanworth1/buffy-tvs-xbox-pc/releases/tag/v0.0.1) | 22 Nov 2026 | `76b5d42` (tag `v0.0.1`) | `Buffy-the-Vampire-Slayer-PC-v0.0.1-Windows-x64.zip`, 105,728,746 bytes | `5cbb112c84310e07ea5dfde0145809591f5b652477dcdf19b0fc9d43b5578ffd` |
+
+**22 Nov 2026: the repository was made public and v0.0.1 published**, on the owner's go-ahead (relayed, then
+confirmed by the owner in the GitHub session: "Yes, go public"). The zip is Extras' (`docs/AREAS.md`, "The
+first release's zip"), built from `76b5d42`; the commits after it up to the publishing changed documents
+only. Checked after publishing, from a download without a sign-in: HTTP 200, 105,728,746 bytes, SHA-256
+equal to the `.sha256` file, to GitHub's `digest` and to Extras' record; `releases/latest` leads to v0.0.1;
+the address the updater asks (`api.github.com/.../releases?per_page=20`) answers without a sign-in with
+v0.0.1, not a draft, not a pre-release, both files and the digest. Right after the visibility change one
+push was refused with "Your repository is disabled" (403); a minute later it went through.
+
+Noticed in the zip: its entries are named with backslashes (`Buffy the Vampire Slayer PC\Buffy
+Launcher.exe`). Windows' own unpacking handles that (Extras' test used it); other unpackers, RecompLauncher's
+among them, may not. Put to Extras in `docs/AREAS.md`.
 
 ## Audit before going public (22 Nov, `main` at 88f3898)
 

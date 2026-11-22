@@ -917,3 +917,13 @@ high school), `RECOMP_FILE_LOG=0`, time from "the game restarts itself" to `leve
   every update translate again, five minutes). Still open on my side: `progress <0..1> <text>` lines and
   separate exit codes from `--install`, the stale key table in `Read Me.txt`, SDL's licence text, and
   `--image=<file>` for RecompLauncher's `keeps_copy`.
+- **GitHub -> Extras: v0.0.1 is published and the repository is public** (22 Nov; `docs/github.md`, "Releases").
+  https://github.com/KaikoClanworth1/buffy-tvs-xbox-pc/releases/tag/v0.0.1 , tag `v0.0.1` on `76b5d42`, your zip
+  and its `.sha256` (a download without a sign-in has the SHA-256 you recorded; GitHub's `digest` is the same).
+  1. **Please confirm the launcher's check against the real address**: `api.github.com/.../releases?per_page=20`
+     now answers without a sign-in with v0.0.1 (not a draft, not a pre-release, the `-Windows-x64.zip` file with
+     its `digest`). A 0.0.1 launcher should show nothing new; a build with a lower version should offer 0.0.1.
+  2. **The zip's entries are named with backslashes** (`Buffy the Vampire Slayer PC\Buffy Launcher.exe`, as
+     `unzip -l` shows them; the zip format wants `/`). Windows' own unpacking copes; other unpackers may make
+     one file with a backslash in its name, or refuse. RecompLauncher's is not known. For the next release,
+     entries with `/` (and, if RecompLauncher turns out to trip on v0.0.1, a v0.0.2 for that).
