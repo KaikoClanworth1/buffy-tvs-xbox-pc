@@ -178,6 +178,135 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
+## Updates from GitHub (22 Nov 2026)
+
+`Buffy Launcher.exe` can bring an install up to the newest release of
+`KaikoClanworth1/buffy-tvs-xbox-pc`. `port/launcher/btvs_update.inc`, modelled on the Chaos Bleeds
+launcher's updater; the release conventions are the GitHub area's (`docs/github.md`, "Release
+conventions": tag `v` + `BTVS_VERSION`, the zip ending in `-Windows-x64.zip`, its SHA-256, which release
+counts), accepted as proposed.
+
+**Needs the owner:** the repository is private, so GitHub answers 404 and the launcher finds nothing,
+quietly. Updates start working when the repository is public and has a second release. Everything
+below was run against a stand-in for GitHub on this PC, never against GitHub.
+
+### What the player sees
+
+- **The check.** When the launcher's window opens, in the background (Play never waits; switch it off
+  with `CheckUpdates=0` under `[Launcher]` in `launcher.ini`), and from the link **Check for updates**
+  at the bottom. One request, with nothing about the player or the PC in it (the only thing sent is the
+  program's name and version, `BuffyTVS-Launcher/0.0.1`). No connection, a 404 or an unreadable answer
+  show nothing at start; after a click on the link they show one grey line.
+- **A newer version**: one line above the links, "Version 0.2.0 is available (you have 0.1.0)." with
+  the first paragraph of the release's notes, and a button **Update...**. Nothing is downloaded yet.
+- **Update...** asks first: the version, the notes, the download's size, what is kept, that a rebuild
+  can take minutes and that a failure puts the old version back. Yes / No.
+- **The update**: a bar ("Downloading version 0.2.0: 63 of 101 MB", Cancel while it downloads), then
+  the new version's own launcher takes over with the same bar ("Putting version ... in place", then the
+  build's lines as at install), then the launcher opens again with "Updated to version 0.2.0. Your saved
+  games and settings are as they were." or, in red, "The update did not finish, and the version from
+  before was put back: <why>".
+- Pictures of the two views, drawn off screen: `--capture update|updating <out.bmp> [game folder]`.
+
+### How it works
+
+1. **Check**: `GET https://api.github.com/repos/KaikoClanworth1/buffy-tvs-xbox-pc/releases?per_page=20`.
+   The newest version (numbers compared one by one: 0.10.0 is newer than 0.9.0) that is not a draft, not
+   a pre-release and has a file ending in `-Windows-x64.zip`.
+2. **Download** into `update\download.part` beside the launcher. A connection that drops is taken up
+   again where it stopped (four tries in one go); a stopped download carries on when the same update is
+   asked for again. The file must have the release's size and SHA-256: GitHub's own (`digest` in its
+   answer) or, without one, the release's second file `<zip>.sha256`. No checksum, or a wrong one: nothing
+   is used and the download is thrown away. Only `https` addresses are accepted (plain `http` only to
+   this PC, for the tests).
+3. **Unpack** into `update\unpack` (the launcher's own zip reader). The release must say it is the
+   version that was asked for (`build\kit.ini`, `[Kit] Version`).
+4. **Apply** is done by **the new release's own launcher**, started from `update\unpack` with
+   `--apply-update <release folder> <game folder> <pid>`. It knows what its release holds and how its
+   game is built; the old launcher only fetched it, so an old version never has to understand a new one.
+   - the release folder (where the launcher and `build\` are): each file and folder the new release has
+     is put in place, the one from before moved to `update\backup` (a move, also for the running launcher);
+   - the game folder, when it is another folder: `buffy_tvs.exe`, its `.pdb`, `SDL3.dll`, the runtime
+     DLLs, `Read Me.txt` and the launcher's copy;
+   - **the game's code**: `btvs_game.dll` fits one exact `buffy_tvs.exe`. When the new release's kit has
+     another Id than the one in `btvs_game.ok`, the DLL is built again. The translated C of the last
+     build is now kept in the game folder (`translated\`, 177 MB) and is used again when the new kit's
+     translate program and function list are the same (`[Kit] Translate` in `kit.ini`): then an update
+     costs the compile and link, not the five minutes of translating. A release whose exe did not change
+     (same kit Id) builds nothing;
+   - the shaders are prepared again (`--prepare-shaders`) and the icon is made again (the exe is a new file).
+5. **Undo.** Every move and copy is written to `update\apply.journal` before it is made. If any step
+   fails, the journal is undone backwards and the install is the one from before, byte for byte. If the
+   PC goes off half-way, the journal is still there: the next launcher start undoes it and hands over to
+   the launcher that was put back.
+
+**Never touched**, whatever a zip holds: `btvs_settings.ini`, `launcher.ini`, `XboxData\` (saved games),
+`reports\`, `crashes\`, logs, `ShaderCache\`, the disc's files, `translated\`. Only names a release has
+are replaced, and those names are refused.
+
+**Who updates what.** An install made through RecompLauncher (`RECOMPLAUNCHER=1` in the environment at
+`--install`; `btvs_install.ini` in the game folder then says `Owner=RecompLauncher`) is RecompLauncher's
+to update: the launcher shows "Updates for this copy come through RecompLauncher." and checks, fetches
+and replaces nothing. The same when the launcher itself runs with that variable. A developer's build
+(the game's code inside the exe, as in the owner's `GAME\`) has no release to move to: one line says so,
+and there is no check and no button there.
+
+**For the game's menu** (Menu area): after each check the launcher writes `btvs_update.ini` in the game
+folder; `btvs_update_available()` (`port/src/btvs_update.h`) reads it. The game itself never goes online.
+
+**Without the window**: `"Buffy Launcher.exe" --check-update` (exit code 0 a newer version exists, 10
+nothing newer or no answer, 11 not this launcher's install to update, 1 failed) and `--update` (0 updated,
+1 failed and undone). Test switches: `BTVS_UPDATE_API=<address>`, `BTVS_UPDATE_VERSION=<x.y.z>`,
+`BTVS_UPDATE_FAIL_AT=swap|build|end|crash`, `BTVS_NO_UPDATE_CHECK=1`.
+
+**`package.sh`** now makes `Buffy-the-Vampire-Slayer-PC-v<version>-Windows-x64.zip`, beside it
+`<zip>.sha256` (`<hex>  <name>`, the release's second file), puts `recomplauncher.json` into the release
+with the version filled in, and writes `Version=` and `Translate=` into `build\kit.ini`. Freeze
+`btvs_translate.exe` again only when the translate tools change: a newly frozen one is a new `Translate`
+value and costs every player the five minutes at their next update.
+
+### Checked (hidden, this PC, a stand-in for GitHub on 127.0.0.1)
+
+A release packaged from this build (0.0.1) was installed from the disc image into an empty folder, the
+game run once to make saved games; the "newer release" was the same files with another kit Id and
+`Version=0.0.2` (so the game's code had to be built again), zipped as
+`Buffy-the-Vampire-Slayer-PC-v0.0.2-Windows-x64.zip` (109 MB). The list also held a draft 0.0.9 and a
+pre-release 0.0.8.
+
+| Case | Result |
+|---|---|
+| Developer's build (`port/build/Release`) | "A developer's build ...", exit 11, no request made |
+| Nothing listening (offline) | "No connection", treated as no update, exit 10 |
+| The server answers 404 (the private repository today) | treated as no update, exit 10 |
+| The list with 0.0.9 draft, 0.0.8 pre-release, 0.0.2, 0.0.1 | "version 0.0.2 is available (this is 0.0.1)", the zip picked by its ending, notes' first paragraph; `btvs_update.ini` written |
+| This build pretending to be 0.0.2 | "nothing newer", exit 10 |
+| A plain `http` address that is not this PC | refused ("Not a secure address") |
+| What the server received | `GET /releases`, `User-Agent: BuffyTVS-Launcher/0.0.1`, no other header about the player |
+| A wrong SHA-256 in the release | "The download is damaged ...", thrown away, nothing unpacked, exit 1 |
+| No `digest` in the answer | the `.sha256` file is fetched and used |
+| The connection cut after 30 MB | taken up in the same run with `Range: bytes=30000000-`, checksum right, unpacked |
+| A `.part` of 50 MB left by an earlier run | carried on with `Range: bytes=50000000-`, checksum right, unpacked |
+| Made to fail at the build | undone in 6 s; every checksum as before (settings, 44 save files, exe, DLL, `.ok`, icon, launcher, kit) |
+| The applier ended half-way (files of both versions in place, journal left) | the next launcher start undid it; every checksum as before |
+| Made to fail at the very end, after the game's code had been built again for the new exe (10 min 22 s in all, the compile slow that time: 598 s) | undone: every checksum as before, the old DLL back, `translated\` still there |
+| **The update, nothing made to fail** | exit 0 in 3 min 28 s: download and check 4 s, files in place, "translate: not needed, the translated code of the last build is used", compile 197 s (4 at a time on 4 processors), link, shaders, icon. Settings and the 44 save files: same checksums. `btvs_game.ok` has the new kit's Id. The game then run hidden: main menu, level 1 loaded, exit code 0; the exe's icon is the generated one. The launcher's next start removed `update\backup` and `update\unpack` |
+| Marked `Owner=RecompLauncher` | "Updates for this copy come through RecompLauncher.", exit 11, no request made |
+
+**Not checked:**
+
+- **GitHub itself** (the repository is private): the real answer's fields, the redirect of a real
+  download address, GitHub's rate limit message. The fields used are the ones Chaos Bleeds' updater reads
+  from the same API.
+- **The window**: the update line, the Yes / No question and the bar were only drawn off screen
+  (`--capture`); the hand-over between the old launcher's window and the new one's was run in the
+  console form only.
+- **A truly newer program**: the stand-in release was this build with another kit Id, so "new launcher
+  applies itself" ran with the same launcher code on both sides, and afterwards the launcher still calls
+  itself 0.0.1.
+- A release whose translate program changed (the full five minutes) and one whose exe did not change
+  (nothing built) were not run as updates; both are the install's own paths.
+- An update while the disk is nearly full, in a protected folder, or with a virus scanner holding files.
+
 ## What was checked on 22 Nov 2026, 07:57 build (main at 67b4927): the B at small sizes
 
 `GAME/buffy_tvs.exe` reports commit `67b4927455`, built Nov 22 2026 07:57:27. The icon is the disc's

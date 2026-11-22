@@ -39,8 +39,8 @@
  *
  * (tests) BTVS_UPDATE_API=<url> asks there instead (http only to this PC),
  * BTVS_UPDATE_VERSION=<x.y.z> pretends this build is that version,
- * BTVS_UPDATE_FAIL_AT=swap|build|end makes the apply fail at that point,
- * BTVS_UPDATE_DROP... is the mock server's, not ours. */
+ * BTVS_UPDATE_FAIL_AT=swap|build|end makes the apply fail at that point
+ * (crash: the applier ends there without undoing anything). */
 
 #include <winhttp.h>
 #include "unzip.h"
@@ -662,7 +662,7 @@ static int update_fetch(const UpdateInfo *u)
         DeleteFileW(part);
         write_small(info, want);
     }
-    for (tries = 0; tries < 4 && !ok; tries++) {
+    for (tries = 0; tries < 4; tries++) {      /* a connection that drops is taken up again where it stopped */
         from = file_size_of(part);
         if (from > u->zip_size) {
             DeleteFileW(part);
@@ -683,8 +683,9 @@ static int update_fetch(const UpdateInfo *u)
         CloseHandle(f);
         if (!ok && s_cancel)
             return 0;
-        if (!ok)
-            Sleep(1500);
+        if (file_size_of(part) == u->zip_size)
+            break;
+        Sleep(1500);
     }
     if (file_size_of(part) != u->zip_size) {
         if (!s_upd_msg[0] || ok)
@@ -841,6 +842,8 @@ static int update_rollback(const WCHAR *release)
 static int update_fail_at(const WCHAR *where)
 {
     WCHAR e[32];
+    if (GetEnvironmentVariableW(L"BTVS_UPDATE_FAIL_AT", e, 32) && !_wcsicmp(e, L"crash") && !wcscmp(where, L"swap"))
+        ExitProcess(3);                 /* (test) as if the PC went off with the files half in place */
     if (GetEnvironmentVariableW(L"BTVS_UPDATE_FAIL_AT", e, 32) && !_wcsicmp(e, where)) {
         swprintf_s(s_upd_msg, 1024, L"(test) made to fail at \"%s\"", where);
         return 1;
@@ -1056,13 +1059,16 @@ static int update_start_applier(int quiet, DWORD *code)
     return 1;
 }
 
-/* At every start: an apply that never finished is undone; what the last one left is tidied. */
-static void update_startup(void)
+/* At every start: an apply that never finished is undone; what the last one left is tidied.
+ * 1 when something was undone: the launcher in this folder is then another file than this
+ * running program, which should hand over to it. */
+static int update_startup(void)
 {
     WCHAR p[MAX_PATH], upd[MAX_PATH];
+    int undone = 0;
     join(upd, s_launcher_dir, UPDATE_DIR);
     if (!dir_exists(upd))
-        return;
+        return 0;
     join(p, upd, L"apply.journal");
     if (file_exists(p)) {
         WCHAR logp[MAX_PATH];
@@ -1076,11 +1082,13 @@ static void update_startup(void)
         s_blog = NULL;
         join(p, upd, L"last_result.txt");
         write_small(p, L"failed The update was interrupted. The version from before was put back.");
+        undone = 1;
     }
     join(p, upd, L"unpack");
     remove_tree(p);
     join(p, upd, L"backup");
     remove_tree(p);
+    return undone;
 }
 
 /* The last apply's result, once: into the status line. */

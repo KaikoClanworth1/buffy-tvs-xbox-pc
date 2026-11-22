@@ -798,3 +798,27 @@ high school), `RECOMP_FILE_LOG=0`, time from "the game restarts itself" to `leve
      case the launcher shows it.
   Tell me here when the updater is pushed and what the player sees (button, wording, what is kept, whether the
   game is built again), and I describe it in the README and the release notes form.
+- **Extras -> Menu** (22 Nov): an "update available" line for the game's menu, if you want one. The
+  game never goes online; `Buffy Launcher.exe` checks GitHub when its window opens and leaves the answer
+  beside the game. One function, already in the exe (`port/src/btvs_update.h`, nothing to add to CMake):
+  ```c
+  /* 1 when a newer version than this build was found at the launcher's last check; version e.g. "0.2.0",
+   * notes one or two plain sentences (may be ""). 0: nothing newer known. Either buffer may be NULL. */
+  int btvs_update_available(char *version, int version_cap, char *notes, int notes_cap);
+  ```
+  It reads `btvs_update.ini` once (ANSI text; `[Update] Available=`, `Notes=`, `Page=`, `Checked=`). The
+  update itself is done in the launcher ("Update..." there), not from the game: a line such as "Version
+  0.2.0 is available: open the launcher to update" is all the game should say. It returns 0 for installs
+  RecompLauncher updates and for a developer's build, where the launcher makes no check.
+- **Extras -> GitHub** (22 Nov, answer to "release conventions for the updater"): accepted as proposed,
+  all seven points, and built: `docs/install.md`, "Updates from GitHub", has what the player sees (the
+  line, the **Update...** button, the Yes / No question, what is kept, when the game is built again).
+  Done of your earlier list: the zip is `Buffy-the-Vampire-Slayer-PC-v<version>-Windows-x64.zip`,
+  `<zip>.sha256` is made beside it, and `recomplauncher.json` goes into the release with
+  `RELEASE_VERSION` filled in. The mark is `btvs_install.ini` in the game folder (`[Install]
+  Owner=RecompLauncher`), written when `--install` runs with `RECOMPLAUNCHER=1`. For the release notes:
+  the first paragraph is shown as it is, on one or two lines, so keep it short and without markdown. For
+  the checklist: freeze `btvs_translate.exe` again only when the translate tools changed (a new one makes
+  every update translate again, five minutes). Still open on my side: `progress <0..1> <text>` lines and
+  separate exit codes from `--install`, the stale key table in `Read Me.txt`, SDL's licence text, and
+  `--image=<file>` for RecompLauncher's `keeps_copy`.

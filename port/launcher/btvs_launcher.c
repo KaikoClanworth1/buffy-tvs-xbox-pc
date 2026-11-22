@@ -1842,6 +1842,8 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
                 s_upd.ok = s_upd.newer = 1;
                 wcscpy_s(s_upd.version, 32, L"0.2.0");
                 wcscpy_s(s_upd.summary, 512, L"Cutscenes no longer flicker, and level loads are faster.");
+                s_view = VIEW_PLAY;
+                refresh_play();
                 update_line();
             } else if (!wcscmp(argv[2], L"updating")) {
                 memset(&s_upd, 0, sizeof s_upd);
@@ -1892,8 +1894,22 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
         return 1;
     DwmSetWindowAttribute(s_wnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof dark);
 
-    if (s_updating != 2)
-        update_startup();               /* an update that never finished is undone; leftovers tidied */
+    if (s_updating != 2 && update_startup()) {
+        /* an update that never finished was undone: this program was the new version's; on to the one put back */
+        WCHAR exe[MAX_PATH], cmd[MAX_PATH + 4];
+        STARTUPINFOW si;
+        PROCESS_INFORMATION pi;
+        join(exe, s_launcher_dir, LAUNCHER_EXE);
+        swprintf_s(cmd, MAX_PATH + 4, L"\"%s\"", exe);
+        memset(&si, 0, sizeof si);
+        si.cb = sizeof si;
+        if (CreateProcessW(exe, cmd, NULL, NULL, FALSE, 0, NULL, s_launcher_dir, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            DestroyWindow(s_wnd);
+            return 0;
+        }
+    }
     /* installed already: straight to Play */
     if (s_updating == 2) {
         set_view(VIEW_PLAY);
