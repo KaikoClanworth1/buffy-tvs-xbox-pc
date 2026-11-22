@@ -36,6 +36,10 @@ for f in "buffy_tvs.exe" "buffy_tvs.pdb" "SDL3.dll" "Buffy Launcher.exe"; do
     fi
 done
 cp -f "$PORT/launcher/Read Me.txt" "$DST/Read Me.txt"
+# The game's real icon, from this disc: btvs_icon.ico and the copied exe's icon (as an install does).
+if [ "$missing" = 0 ] && [ -f "$DST/Default.xbe" ]; then
+    ( cd "$DST" && "./Buffy Launcher.exe" --make-icon . ) || echo "the exe keeps the port's drawn icon"
+fi
 if [ ! -e "$DST/btvs_settings.ini" ]; then
     printf '%s\r\n' "; Buffy the Vampire Slayer - PC settings. The game's Options menu writes this file." \
         "[display]" "mode=1" "width=0" "height=0" "vsync=1" \

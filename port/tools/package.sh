@@ -75,8 +75,8 @@ rm -f "$ZIP"
 bash "$PORT/tools/limit.sh" powershell -NoProfile -Command "Compress-Archive -Path '$NAME' -DestinationPath '$ZIP'"
 
 # The check: only our own files, nothing from the disc, no translated game code.
-if ! python - "$ZIP" "$NAME" "$BTVS_MAIN/game_files" <<'EOF'
-import hashlib, os, sys, zipfile
+if ! python - "$ZIP" "$NAME" "$BTVS_MAIN/game_files" "$PORT/icon/btvs.ico" <<'EOF'
+import hashlib, os, struct, sys, zipfile
 zip_path, top, game = sys.argv[1:4]
 allowed = {"buffy launcher.exe", "buffy_tvs.exe", "buffy_tvs.pdb", "read me.txt", "not a release.txt",
            "sdl3.dll", "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"}
@@ -98,6 +98,13 @@ else:
     print("note: no game_files/ here, so content was checked by name and type only")
 bad = []
 seen_licence = False
+# the port's own drawn icon: every image of it must be in both programs as shipped. An exe whose icon
+# was replaced on a PC with the game's real one (made from a disc at install) has none of them.
+ico = open(sys.argv[4], "rb").read()
+own_icons = []
+for k in range(struct.unpack_from("<H", ico, 4)[0]):
+    size, off = struct.unpack_from("<II", ico, 6 + 16 * k + 8)
+    own_icons.append(ico[off:off + size])
 z = zipfile.ZipFile(zip_path)
 for i in z.infolist():
     n = i.filename.replace("\\", "/")
@@ -111,6 +118,14 @@ for i in z.infolist():
             or base.endswith((".obj", ".o")) or (base.endswith(".c") and low != top.lower() + "/build/game_dll.c"):
         bad.append(n + ": translated game code (or an object or source file that could be)")
         continue
+    if base.endswith((".ico", ".icon.tmp", ".xbx")):
+        bad.append(n + ": an icon file (the game's real icon is made on the player's PC and never ships)")
+        continue
+    if base in ("buffy_tvs.exe", "buffy launcher.exe") and len(parts) == 2:
+        data = z.read(i)
+        if not all(b in data for b in own_icons):
+            bad.append(n + ": its icon is not the port's own drawn one (port/icon/btvs.ico)")
+            continue
     if base == "buffy_tvs.exe":
         data = z.read(i)
         if i.file_size > EXE_MAX or b"btvs_game.dll" not in data:

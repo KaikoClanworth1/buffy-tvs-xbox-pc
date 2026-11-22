@@ -51,6 +51,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <wchar.h>
+#include <math.h>
 
 #include "btvs_release.h"
 
@@ -606,6 +607,8 @@ static uint64_t space_needed(Disc *d, const WCHAR *target)
     return need;
 }
 
+static int disc_icon(const WCHAR *target);      /* btvs_icon.inc */
+
 static int install_run(const WCHAR *image, const WCHAR *target_in)
 {
     Disc d;
@@ -675,6 +678,8 @@ static int install_run(const WCHAR *image, const WCHAR *target_in)
     default_settings(target);
     if (has_program(target) && !build_game(target))
         return INSTALL_FAILED;          /* s_install_msg says where it stopped; installing again carries on */
+    if (has_program(target))
+        disc_icon(target);              /* the game's real icon, from this disc; never fails the install */
     post_progress(1000, L"Installed.");
     if (!has_program(target)) {
         wcscpy_s(s_install_msg, 1024, L"The game's files are installed, but there is no " GAME_EXE L" beside the "
@@ -768,6 +773,8 @@ static int icon_pixels(const WCHAR *game_dir, uint32_t *px)
     free(x);
     return found;
 }
+
+#include "btvs_icon.inc"      /* that picture as btvs_icon.ico and as the installed exe's icon */
 
 static void load_game_icon(void)
 {
@@ -1605,6 +1612,14 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show)
             GetExitCodeProcess(pi.hProcess, &code);
             wprintf(L"the game ended with code %lu\r\n", code);
             return (int)code;
+        }
+        if (argc >= 3 && !wcscmp(argv[1], L"--make-icon")) {
+            /* what an install does for the icon, for a game folder that is already there (deploy.sh) */
+            int r = disc_icon(argv[2]);
+            wprintf(r == 2 ? L"icon: " ICON_FILE L" made and written into " GAME_EXE L"\n"
+                    : r == 1 ? L"icon: " ICON_FILE L" made; " GAME_EXE L" not changed (missing, or in use)\n"
+                    : L"icon: nothing made (no Default.xbe with a title image in that folder)\n");
+            return r == 2 ? 0 : 1;
         }
         if (argc >= 3 && !wcscmp(argv[1], L"--identify"))
             return identify(argv[2]);

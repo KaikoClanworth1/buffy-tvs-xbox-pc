@@ -40,6 +40,9 @@ build_log.txt
 ShaderCache/
 buffy_settings.ini
 launcher.ini
+# The game's real icon, made on the player's PC from their disc (never in the repository or a release)
+btvs_icon.ico
+*.icon.tmp
 
 # Local only
 _local/
