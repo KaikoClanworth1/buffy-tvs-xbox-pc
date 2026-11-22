@@ -106,7 +106,7 @@ moon's centre and radius are put on the pixel grid; the `slayer` below 24 px los
 the stake stands beside her; the `graveyard` below 24 px is only the moon and the cross, its bars a
 whole number of pixels wide. The 256 px image is stored as PNG, the others as 32-bit bitmaps.
 
-## Where a player sees it
+## Where the drawn icon shows (until an install puts the real one into the game)
 
 | Place | How | Checked |
 |---|---|---|
