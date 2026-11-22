@@ -15,7 +15,7 @@ Written 22 Nov 2026, from the notes each area keeps in this folder. Those notes 
 | **7. Fullscreen, borderless, windowed** | 🔧 In. Switching between them hasn't been checked by hand. |
 | **8. Report a Problem** that records what the player did | ✅ In. Hidden runs only. |
 | **9. PC pages in the game's own menus** | ✅ Exit, Graphics, PC Audio, PC Controls, Memory, Report a Problem. Hidden runs only. |
-| **10. Easy install** from the player's disc image | 🔧 Works on the developer's PC. No release yet. |
+| **10. Easy install** from the player's disc image | 🔧 First release out (v0.0.1). Installing has only been tried on the developer's PC. |
 | **11. Memory view** | ✅ In. |
 
 ## What works
@@ -33,7 +33,8 @@ Written 22 Nov 2026, from the notes each area keeps in this folder. Those notes 
 
 - **No level has been played through**, and going from one level to the next by playing hasn't been done.
 - **Only the European (PAL) release** of the disc is supported. The North American disc is refused; it needs its own build.
-- **No release yet.** The launcher can update from GitHub releases, tried only against a stand-in on the developer's PC. The install has run on the developer's PC only, never on a PC without developer tools installed.
+- **Updates** from the launcher have only been tried against a stand-in on the developer's PC: with one release there is nothing to update to yet.
+- **One PC.** The install has run on the developer's PC only (Windows 11), never on Windows 10 or on a PC without developer tools installed. None of the programs is signed, so Windows may warn at the first start.
 - **Picture faults**: levels are dark at the game's default brightness (the game's own brightness setting cures it); menu and on-screen text is blocky at 4K; the faint sheen on characters and props doesn't shift as it should; the game's own screen captures aren't drawn; dark corners on the pause backdrop in widescreen; in cut-scenes a flame can show one wrong frame.
 - **Some physics objects jump about.** The cause hasn't been found.
 - **Sound**: scratchy voices and repeating sound were heard by hand and have been corrected, but the correction hasn't been listened to yet. No reverb, Doppler or headphone 3D. The mix can clip at full master volume. Lip movement and fights haven't been checked.

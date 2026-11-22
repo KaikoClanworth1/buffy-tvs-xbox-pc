@@ -39,9 +39,8 @@ stale elsewhere and were **not** repeated: the old key table (the defaults chang
    exception to "no game material": pictures for the README only. `docs/media/banner.svg` (drawn for the
    port) is kept for a social preview or a header. Still worth replacing with pictures taken while playing
    by hand: a cut-scene, the high school, a PlayStation pad's button pictures.
-2. **A licence for the port's own code.** The other ports have a top-level `LICENSE` (MIT, plus what it
-   does not cover: the game, and third-party parts). There is none here; only `xboxrecomp/` carries one.
-   The README's Legal paragraph therefore makes no licence statement about the port's own code.
+2. ~~A licence for the port's own code.~~ Added 22 Nov on the owner's word: `LICENSE`, MIT in the form of
+   the other ports'.
 3. **Going public.** RecompLauncher installs from public GitHub releases, so the page there needs it.
    Before that: this file's point 2, and a look at the history for anything that should not be public
    (this area did not audit it).

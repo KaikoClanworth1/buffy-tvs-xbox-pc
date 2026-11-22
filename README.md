@@ -13,7 +13,7 @@
 > **There is no game in this repository.** You need your **own copy** of *Buffy the Vampire Slayer* for the original Xbox, as a disc image. The launcher builds the PC version from it, on your PC.
 
 > [!WARNING]
-> **Work in progress.** The game starts and levels can be played, but the port isn't finished and no level has been played through to its end yet. There is no release to download yet. Expect faults, and please report them.
+> **Work in progress.** The game starts and levels can be played, but the port isn't finished and no level has been played through to its end yet. This is an early release: expect faults, and please report them.
 
 ---
 
@@ -50,26 +50,23 @@ All pictures are of this port running, taken by the game itself in test runs.
 - ✅ **Report a Problem**: in *Options*, in the pause menu, or with **F12**. It saves a report that records what you did, so the same spot can be found again.
 - ✅ **A launcher that installs the game** from your own disc image and builds it on your PC. No other tools are needed.
 
-**Not there yet:** a first release, and support for discs other than the European (PAL) one. Most of the port has been checked by automated runs with the window hidden and the sound off; much less has been seen, heard and played by hand, and nothing has been tried on a second PC. Known faults include levels that look dark until you raise the game's own brightness setting, and some objects that jump about. The full list is in [docs/STATUS.md](docs/STATUS.md).
+**Not there yet:** support for discs other than the European (PAL) one. Most of the port has been checked by automated runs with the window hidden and the sound off; much less has been seen, heard and played by hand, and nothing has been tried on a second PC. Known faults include levels that look dark until you raise the game's own brightness setting, and some objects that jump about. The full list is in [docs/STATUS.md](docs/STATUS.md).
 
 ---
 
 ## How to install
 
-> [!NOTE]
-> No release has been published yet. These are the steps for when there is one.
-
 **You need**
 
 - Your own *Buffy the Vampire Slayer* (2002) **Xbox** game as a disc image (`.iso` / xiso). Only the **European (PAL) release** is supported for now; the launcher checks your image and tells you if it's another release or another game.
 - Windows 10 or 11 (64-bit) and a graphics card with Direct3D 11.
-- About **2.2 GB** of free space for the game, and about 0.9 GB more while it is being built.
+- About **2.4 GB** of free space for the game, and about 1 GB more while it is being built.
 
 **Steps**
 
-1. **Download** the latest `Buffy-the-Vampire-Slayer-PC-….zip` from [Releases](../../releases/latest) and unzip it anywhere.
+1. **Download** the latest `Buffy-the-Vampire-Slayer-PC-…-Windows-x64.zip` from [Releases](../../releases/latest) and unzip it anywhere.
 2. **Open `Buffy Launcher.exe`** and choose your disc image and where to install the game.
-3. Press **Install**. The launcher copies the game's files from your image, translates the game to PC code, compiles it and prepares the shaders. This took about 8 minutes on the developer's PC, once.
+3. Press **Install**. The launcher copies the game's files from your image, translates the game to PC code, compiles it and prepares the shaders. This takes about 8 to 10 minutes on the developer's PC, once.
 4. Press **Play**.
 
 <p align="center">
