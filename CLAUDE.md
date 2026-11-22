@@ -5,7 +5,8 @@ XDK 4432) into a native Windows program. **No emulation**: the game's x86 code i
 `xboxrecomp/` and the Xbox libraries it links (D3D8, DSOUND, XAPI input) are replaced by host code.
 
 This repository is **private** and holds **no game material**: no disc image, XBE, map file, game
-data or translated game code. Those are generated locally from the owner's disc.
+data or translated game code. Those are generated locally from the owner's disc. (One exception, the
+owner's on 22 Nov: pictures of the port running, for the README, in `docs/media/`.)
 
 ## Goals (the owner's list)
 

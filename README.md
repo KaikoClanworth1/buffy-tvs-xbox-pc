@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/banner.svg" alt="Buffy the Vampire Slayer (Xbox, 2002): PC port" width="100%">
+  <img src="docs/media/main-menu.jpg" alt="The main menu of the PC port" width="100%">
 </p>
 
 > [!IMPORTANT]
@@ -19,12 +19,22 @@
 
 ## Pictures
 
-<!-- PICTURES: slot for pictures of the port running (main menu, a level, a fight, Options -> Graphics,
-     the Report a Problem page), as docs/media/<name>.jpg in a two-column table like the launcher
-     pictures below. Waiting on the owner's decision about game pictures in the repository:
-     docs/github.md. -->
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/level.jpg" alt="The first level in widescreen"><br><sub><b>In a level</b>, in widescreen</sub></td>
+    <td width="50%"><img src="docs/media/fight.jpg" alt="A fight in the cemetery"><br><sub><b>A fight</b></sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/graphics-options.jpg" alt="The Graphics page in Options"><br><sub><b>Options → Graphics</b>, new in the game's own menu</sub></td>
+    <td><img src="docs/media/controls-keyboard.jpg" alt="The Controls page showing keyboard and mouse"><br><sub><b>Controls</b>, with keyboard and mouse pictures</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/report-saved.jpg" alt="The Report a Problem page after saving a report"><br><sub><b>Report a Problem</b>: saved on your PC, sent nowhere</sub></td>
+    <td></td>
+  </tr>
+</table>
 
-Pictures of the port running will be added here. The banner above is drawn for the port; it isn't from the game.
+All pictures are of this port running, taken by the game itself in test runs.
 
 ---
 
@@ -125,4 +135,4 @@ Please don't attach the report's `.zip` or its `save` folder: they hold your sav
 
 ## Legal
 
-This is an unofficial fan project, not affiliated with or endorsed by The Collective, Electronic Arts, Fox Interactive or Microsoft. *Buffy the Vampire Slayer* and all related names and characters belong to their owners. No game material is included: no disc image, game data or game code, original or translated. The recompiler toolkit in `xboxrecomp/` is under the MIT licence, with the parts named in its `NOTICE` under LGPL-2.1-or-later.
+This is an unofficial fan project, not affiliated with or endorsed by The Collective, Electronic Arts, Fox Interactive or Microsoft. *Buffy the Vampire Slayer* and all related names and characters belong to their owners. No game material is included: no disc image, game data or game code, original or translated; the pictures above show the port running and what they show belongs to the game's owners. The recompiler toolkit in `xboxrecomp/` is under the MIT licence, with the parts named in its `NOTICE` under LGPL-2.1-or-later.

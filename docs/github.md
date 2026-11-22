@@ -7,7 +7,7 @@ has **no release and no tag**, and this area changes neither.
 
 | X-Men Destiny | Here |
 |---|---|
-| `README.md`: centred title, one-line pitch, "By KaikoClanworth", a wide picture, the IMPORTANT (no game) and WARNING (work in progress) boxes, then Pictures, What works today, How to install, Keys, Something wrong?, More, Credits, Legal | The same order and wording style, with this port's facts. The wide picture is `docs/media/banner.svg`, drawn for the port (the moon and stake of `port/icon/make_icon.py`), because no game picture is in the repository yet |
+| `README.md`: centred title, one-line pitch, "By KaikoClanworth", a wide picture, the IMPORTANT (no game) and WARNING (work in progress) boxes, then Pictures, What works today, How to install, Keys, Something wrong?, More, Credits, Legal | The same order and wording style, with this port's facts. The wide picture is the main menu, then a table of five more (`docs/media/`) |
 | `docs/STATUS.md` (goals table, what works, what doesn't) | `docs/STATUS.md`, a summary of the areas' notes; says for each thing whether it was checked in hidden runs or by hand |
 | `docs/BUILDING.md` | `docs/BUILDING.md` (the build steps that were in the old README) |
 | `.github/ISSUE_TEMPLATE/bug_report.yml` + `config.yml` (blank issues off) | The same form, asking for the files of a Report a Problem folder; tells the player not to attach the report's `.zip` or `save` folder |
@@ -29,18 +29,21 @@ stale elsewhere and were **not** repeated: the old key table (the defaults chang
 
 ## Waiting on the owner
 
-1. **Pictures of the port running.** X-Men Destiny's README shows game pictures (`docs/images/*.jpg`,
-   1280x720, ten of them: main menu, a level, a fight, a cut-scene, the Graphics page, the mod menu and four
-   of the setup). Here the rule is no game material in the repository, so none was added. If the owner
-   allows the same here: put them in `docs/media/` as `.jpg`, replace the marked `PICTURES` comment in
-   `README.md` with X-Men Destiny's two-column table, make the first one (the main menu) the wide picture at
-   the top, and add its sentence to Legal: "the pictures above show the port running and what they show
-   belongs to the game's owners". The banner then moves out or stays as a smaller header.
+1. ~~Pictures of the port running.~~ **Allowed by the owner on 22 Nov**, as in X-Men Destiny. Six are in
+   `docs/media/` (1280x720 `.jpg`): `main-menu` (the wide picture at the top), `level`, `fight`,
+   `graphics-options`, `controls-keyboard`, `report-saved`. They are frame dumps the game wrote itself in
+   hidden test runs (`port/runs/shots/`: `1000_menu3_1080_wide_after_main_menu`,
+   `0300_level1_gameplay_3840x2160_true_widescreen`, `1208_wide1080_hud_weapon_after`,
+   `1000_menu3_1080_wide_after_graphics_page`, `btn_keys2_controls_page_after_1080p`,
+   `0251_menu2_report_saved_short_place`), scaled down; the 4:3 ones have black sides. This is the one
+   exception to "no game material": pictures for the README only. `docs/media/banner.svg` (drawn for the
+   port) is kept for a social preview or a header. Still worth replacing with pictures taken while playing
+   by hand: a cut-scene, the high school, a PlayStation pad's button pictures.
 2. **A licence for the port's own code.** The other ports have a top-level `LICENSE` (MIT, plus what it
    does not cover: the game, and third-party parts). There is none here; only `xboxrecomp/` carries one.
    The README's Legal paragraph therefore makes no licence statement about the port's own code.
 3. **Going public.** RecompLauncher installs from public GitHub releases, so the page there needs it.
-   Before that: this file's point 1 and 2, and a look at the history for anything that should not be public
+   Before that: this file's point 2, and a look at the history for anything that should not be public
    (this area did not audit it).
 4. **The first release.** Not published; the zip stays local by the owner's choice.
 
