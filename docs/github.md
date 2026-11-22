@@ -212,6 +212,59 @@ Every step that publishes something (5 to 8) needs the owner's go-ahead for that
 9. **Afterwards**: an installed previous release offers the update; RecompLauncher, once the port is listed,
    shows the new version (nothing to submit again: it reads the releases). Note the release in `docs/github.md`.
 
+## Audit before going public (22 Nov, `main` at 88f3898)
+
+The owner's go-ahead (relayed 22 Nov): first release, repository public, submit to RecompLauncher.
+What was looked at, over **every commit of the only branch on GitHub** (`main`, 157 commits; no tags, no
+other branch), not just the newest files:
+
+| Looked for | How | Found |
+|---|---|---|
+| Game files | every file name and type that was ever committed (1,003 blobs) | None. No `.iso`, `.xbe` of the game, `.map`, `.xmv`, `.pak`, `.dds`, `.wav`, `.bin`, `.dmp`, `.rec`, `.zip`, `.dll`, `.exe`; nothing ever under `game_files/`, `GAME/`, `dist/`, `port/runs/`, `port/src/recomp/gen/`, `reports/`, `crashes/`, `ShaderCache/` |
+| Binary files at all | the same list | `port/icon/btvs.ico` (the drawn icon), `docs/launcher-build.png` (the launcher's window), the six README pictures in `docs/media/` (allowed by the owner), and two of xboxrecomp's own test files: `xboxrecomp/tools/conformance/test.xbe` (4 KB, a test program, also in the public Chaos Bleeds repository) and `xboxrecomp/tests/wma_decoder/fixtures/sine.wma` (a sine tone) |
+| Translated game code, data tables | largest files; C files with dense tables of bytes | None. The only table is `port/src/btvs_native_shader_keys.h`: the port's list of texture-stage set-ups (render states, not game code; Graphics' note in `docs/AREAS.md`) |
+| The disc's real icon or title image | file list; `docs/icon.md` | Not in the repository: made on the player's PC at install |
+| From `final.map` | by reading | Function names and addresses of the game appear where the port hooks them (`port/src/manual_functions.json`, the `btvs_*.c` files, the area notes). That is the same in the owner's public ports; the map itself was never committed |
+| Secrets | every commit: GitHub, AWS, OpenAI-style and Slack tokens, private keys, `password=` / `api_key=` with a value | None |
+| E-mail addresses | every commit's files; all commit messages | None in files. Messages carry only `Co-Authored-By: Claude ... <noreply@anthropic.com>` |
+| The owner's e-mail, Windows user name, `C:\Users\...` paths | every commit's files and messages | None. Paths under `D:\Xbox Games Ports\...` appear (no user name in them) |
+| Who the commits say they are from | author and committer of all 157 | Only `KaikoClanworth1 <KaikoClanworth1@users.noreply.github.com>`, the same as on `x-men-destiny-pc`, `buffy-chaos-bleeds-pc` and `wwe-svr2011-pc`. Nothing new is exposed |
+| Submodules | `.gitmodules` | Four, all public: KhronosGroup/Vulkan-Headers, GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator, zeux/volk, KhronosGroup/glslang |
+
+**Result: nothing found that must stay private.** Not covered: this is a search by name, type and pattern,
+not a reading of all 157 commits' text; the area notes quote log lines and describe the game's inner
+workings in detail, as the public ports' notes do. Still open and unchanged: no `LICENSE` for the port's
+own code (the owner has not answered; the README makes no licence statement).
+
+## How X-Men Destiny's RecompLauncher artwork is done
+
+- **Nothing of it is in the repository.** `x-men-destiny-pc` holds only port screenshots (`docs/images/`,
+  ten 1280x720 `.jpg`) and `recomplauncher.json`. So no official artwork goes into this repository either.
+- **The page's pictures live on RecompLauncher's own server**, named in its catalogue
+  (`https://recomplauncher.com/pc-catalog.json`, entry `x-men-destiny-pc`): `icon` (512x512 PNG), `cover`
+  (the box-art shape, JPEG), `hero` (a wide backdrop, JPEG), `logo` (the game's logo on a clear
+  background, PNG; 798x300 there), all under `recompstore.com/media/pc-<id>-...`. They are given on the
+  site (the submission, then the owner's developer account there), not taken from GitHub.
+- The catalogue entry also has: `name`, `game`, `origin` (`xbox`), `blurb` (one line), `description`
+  (three short paragraphs), `needs`, `credits`, `features` (a list of lines), `tags`, `genre`, and
+  `assets.windows` (the pattern for the release file, `XMenDestiny-*-Windows-x64.zip` there). The site adds
+  the game's facts itself from IGDB (`about`: this game is IGDB 5760).
+- **Where X-Men Destiny's four pictures were taken from is not recorded** anywhere in that repository or
+  on this PC, so this cannot be copied blindly: the owner picks the official cover, backdrop and logo when
+  submitting (the other listed port of this game, "Hellmouth", already shows official ones on the site).
+
+Text ready for the submission, in the catalogue's fields:
+
+- `name`: Buffy the Vampire Slayer PC Port ("Hellmouth" is the other one)
+- `game`: Buffy the Vampire Slayer; `origin`: xbox; `genre`: action
+- `blurb`: Native Windows port of the 2002 Xbox game Buffy the Vampire Slayer, built on your PC from your own disc image. Early and unfinished.
+- `description`: This is a native Windows port of Buffy the Vampire Slayer, the 2002 Xbox game. It is not an emulator. The download holds no game, so you need your own Xbox disc of the European (PAL) release as an .iso. The included launcher reads that image and builds the PC version on your own machine, which takes about 8 minutes the first time; the compiler it needs comes in the download. / The port is early. The game starts and its first levels can be played, at resolutions up to 4K, in widescreen, at 60 fps and above, with controller, keyboard and mouse. No level has been played through to its end yet, and it has only run on the developer's PC. / If something goes wrong, choose Options > Report a Problem or press F12, and report it with the files it saves.
+- `needs`: Your own Buffy the Vampire Slayer (2002) Xbox disc image (.iso), European (PAL) release; Windows 10/11 64-bit; a Direct3D 11 graphics card; about 2.2 GB free (0.9 GB more while it builds). No build tools.
+- `credits`: KaikoClanworth: project lead, direction and testing. / Claude Code (Anthropic's AI coding assistant) wrote most of the port's code, tools and docs. / Built on xboxrecomp by sp00nz (the recompiler and Xbox runtime; parts derive from xemu), SDL and LLVM.
+- `features`: Up to 4K, windowed, borderless or fullscreen / Widescreen with a wider view in the levels / 60 fps and above, with a limit you choose / Xbox, PlayStation and Switch pads, keyboard and mouse, rebinding, button pictures that follow your device / PC options in the game's own menu: Graphics, PC Audio, PC Controls, Memory, Exit / Report a Problem (F12) that records what you did / Updates from the launcher
+- `tags`: 4K, Widescreen, High FPS, Controller
+- `assets.windows`: `Buffy-the-Vampire-Slayer-PC-*-Windows-x64.zip`
+
 ## Requests made to other areas
 
 In `docs/AREAS.md`, to Extras: the stale key table and "early development build" lines in

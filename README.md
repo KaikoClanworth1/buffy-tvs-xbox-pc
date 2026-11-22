@@ -50,7 +50,7 @@ All pictures are of this port running, taken by the game itself in test runs.
 - ✅ **Report a Problem**: in *Options*, in the pause menu, or with **F12**. It saves a report that records what you did, so the same spot can be found again.
 - ✅ **A launcher that installs the game** from your own disc image and builds it on your PC. No other tools are needed.
 
-**Not there yet:** a first release, an update check, and support for discs other than the European (PAL) one. Most of the port has been checked by automated runs with the window hidden and the sound off; much less has been seen, heard and played by hand, and nothing has been tried on a second PC. Known faults include levels that look dark until you raise the game's own brightness setting, and some objects that jump about. The full list is in [docs/STATUS.md](docs/STATUS.md).
+**Not there yet:** a first release, and support for discs other than the European (PAL) one. Most of the port has been checked by automated runs with the window hidden and the sound off; much less has been seen, heard and played by hand, and nothing has been tried on a second PC. Known faults include levels that look dark until you raise the game's own brightness setting, and some objects that jump about. The full list is in [docs/STATUS.md](docs/STATUS.md).
 
 ---
 
@@ -78,6 +78,8 @@ All pictures are of this port running, taken by the game itself in test runs.
 </p>
 
 **No build tools to install.** The game is built on your PC, and the compiler it needs comes inside the download.
+
+**Updates.** The launcher looks for a newer release when it opens and offers **Update…**; it asks before it downloads anything, and your saves and settings are kept. (Until a second release exists this has only been tried against a stand-in on the developer's PC.)
 
 Your disc image is only read, never changed. Your saves are kept in `XboxData\HardDisk` inside the game folder and your settings in `btvs_settings.ini`. Installing again leaves both alone. To uninstall, delete the game folder: nothing is written anywhere else on your PC.
 
