@@ -1,132 +1,128 @@
-# Buffy the Vampire Slayer (Xbox, 2002) for Windows
+<h1 align="center">Buffy the Vampire Slayer — PC Port</h1>
 
-A native Windows port of the 2002 Xbox game by The Collective, made by **static recompilation**:
-the game's own x86 code is translated to C and compiled for Windows, and the Xbox libraries it
-used (Direct3D 8, DirectSound, controller input) are replaced by PC code. There is **no emulator**
-inside.
+<p align="center">
+  The 2002 Xbox game, running natively on Windows. Not an emulator.<br>
+  <b>By KaikoClanworth</b>
+</p>
 
-**This repository contains no game material.** No disc image, no game files, no game code. You need
-your own Xbox disc of the game, as an image file; the launcher installs the game from it.
+<p align="center">
+  <img src="docs/media/banner.svg" alt="Buffy the Vampire Slayer (Xbox, 2002): PC port" width="100%">
+</p>
 
-> **Status: in development (21 Nov 2026).** The game starts, plays its logos and intro, shows its
-> menus and loads the first level. So far all of that has been checked only by automated runs
-> with the window hidden and the sound off: **nobody has played it yet** with a visible window,
-> speakers and a real controller. Expect faults.
+> [!IMPORTANT]
+> **There is no game in this repository.** You need your **own copy** of *Buffy the Vampire Slayer* for the original Xbox, as a disc image. The launcher builds the PC version from it, on your PC.
+
+> [!WARNING]
+> **Work in progress.** The game starts and levels can be played, but the port isn't finished and no level has been played through to its end yet. There is no release to download yet. Expect faults, and please report them.
+
+---
+
+## Pictures
+
+<!-- PICTURES: slot for pictures of the port running (main menu, a level, a fight, Options -> Graphics,
+     the Report a Problem page), as docs/media/<name>.jpg in a two-column table like the launcher
+     pictures below. Waiting on the owner's decision about game pictures in the repository:
+     docs/github.md. -->
+
+Pictures of the port running will be added here. The banner above is drawn for the port; it isn't from the game.
+
+---
 
 ## What works today
 
-"Checked hidden" means: seen in automated test runs (window hidden, sound muted, scripted
-controller) through the game's own frame dumps, sound dumps and logs. Each area's notes in
-`docs/` list exactly what was and was not checked.
+- ✅ **The game starts and plays**: logos, intro movie, menus and levels. The first levels (the Spanish mission, the high school, the Bronze) have been played on a real screen. No level has been played through to its end yet.
+- ✅ **Sharper picture**: any resolution up to 4K, drawn natively through Direct3D 11. Windowed, borderless or fullscreen.
+- ✅ **Widescreen**: a wider view in the levels. The menus, the on-screen display and the movies keep their 4:3 shape, with black sides.
+- ✅ **High frame rates**: 60 fps and above, with a limit you choose (30 to 240, or none).
+- ✅ **Sound** through XAudio2: music, effects, speech and movie sound, each with its own volume.
+- ✅ **Controllers, keyboard and mouse**: Xbox pads, and PlayStation and Switch pads through SDL. Keys and buttons can be changed in the game, and the button pictures follow the device you use.
+- ✅ **PC options in the game's own menu**: *Options → Graphics*, *PC Audio*, *PC Controls* and *Memory*, and *Exit* on the main menu.
+- ✅ **Report a Problem**: in *Options*, in the pause menu, or with **F12**. It saves a report that records what you did, so the same spot can be found again.
+- ✅ **A launcher that installs the game** from your own disc image and builds it on your PC. No other tools are needed.
 
-| | State |
-|---|---|
-| Launcher: choose the disc image, choose a folder, install, Play | **Works** in windowless test runs: install checked against the real disc image, and Play starts the game in its folder ([docs/install.md](docs/install.md)). The window itself has not been used by hand |
-| Checks that the image is this game and the supported release | **Works** |
-| Boot: logos, intro movie, title, menus, new game, first level | Checked hidden ([docs/graphics.md](docs/graphics.md)) |
-| Graphics: the game's Direct3D 8 drawn natively through Direct3D 11, no emulation | Checked hidden in the menus and the first level, at 640x480, 1080p and 4K sizes; 60 FPS once a level has loaded. Later levels not looked at |
-| Borderless / fullscreen / windowed, VSync | Wired to the settings; **never seen on a real screen** |
-| Widescreen | Picture shape only (4:3 with bars, or stretched). A wider view is planned |
-| Sound (XAudio2: music, effects, movie sound) | Checked from sound dumps of muted runs; **never listened to**. Breaks up when the game hitches ([docs/audio.md](docs/audio.md)) |
-| Controllers (XInput, others through SDL3), keyboard and mouse, rebinding | Checked hidden with scripted input; **no real controller, key or mouse has been tried** ([docs/controls.md](docs/controls.md)) |
-| Options in the game's own menus: Graphics, PC Audio, PC Controls, Memory, Exit | Checked hidden ([docs/menu.md](docs/menu.md)) |
-| Report a Problem (Options and pause menu; F12) | Checked hidden: saves a report with picture, log, what you did, settings, input recording ([docs/logs.md](docs/logs.md)) |
-| Memory view (RAM, VRAM, the game's heap) | Checked hidden |
-| Starting `buffy_tvs.exe` by itself (not through the launcher) | Works (checked hidden); it ended itself a second after starting in builds before 21 Nov 03:25 ([docs/install.md](docs/install.md)) |
-| Update check, icons for the exes in Explorer | Planned |
+**Not there yet:** a first release, an update check, and support for discs other than the European (PAL) one. Most of the port has been checked by automated runs with the window hidden and the sound off; much less has been seen, heard and played by hand, and nothing has been tried on a second PC. Known faults include levels that look dark until you raise the game's own brightness setting, and some objects that jump about. The full list is in [docs/STATUS.md](docs/STATUS.md).
 
-## What you need
+---
 
-- Windows 10 or 11, 64-bit
-- Your own **Xbox** disc of *Buffy the Vampire Slayer* (2002) as an image file (`.iso` / xiso).
-  Both a bare xiso and a full disc image work.
-- The **European (PAL) release, version 2**. This build is made from that release and runs only
-  that one; the launcher tells you if your image is another release (or another game). See
-  [docs/install.md](docs/install.md#releases).
-- About 2.2 GB of disk space
+## How to install
 
-## Install and play
+> [!NOTE]
+> No release has been published yet. These are the steps for when there is one.
 
-1. Unpack the release zip anywhere.
-2. Start **Buffy Launcher.exe**.
-3. **Browse** to your disc image. The launcher says whether it is the right game.
-4. **Browse** to where the game should go, and press **Install**. Your image is only read, never
-   changed.
-5. Press **Play**.
+**You need**
 
-Next time the launcher opens straight on Play. Your saved games live in `XboxData\HardDisk\` in
-the game folder; installing again or updating never touches `XboxData\` or your settings.
+- Your own *Buffy the Vampire Slayer* (2002) **Xbox** game as a disc image (`.iso` / xiso). Only the **European (PAL) release** is supported for now; the launcher checks your image and tells you if it's another release or another game.
+- Windows 10 or 11 (64-bit) and a graphics card with Direct3D 11.
+- About **2.2 GB** of free space for the game, and about 0.9 GB more while it is being built.
 
-## Settings and controls
+**Steps**
 
-Everything is set **inside the game**, in its own Options menu: Graphics (display mode,
-resolution, VSync, picture shape, FPS limit), PC Audio (volumes), PC Controls (sensitivity,
-invert, rumble, key bindings), Memory, Report a Problem. The launcher has no settings on purpose.
-The game first starts borderless at the desktop's resolution with sound on
-(`btvs_settings.ini` in the game folder holds the settings).
+1. **Download** the latest `Buffy-the-Vampire-Slayer-PC-….zip` from [Releases](../../releases/latest) and unzip it anywhere.
+2. **Open `Buffy Launcher.exe`** and choose your disc image and where to install the game.
+3. Press **Install**. The launcher copies the game's files from your image, translates the game to PC code, compiles it and prepares the shaders. This took about 8 minutes on the developer's PC, once.
+4. Press **Play**.
 
-Default controls (provisional; rebind in Options → PC Controls):
+<p align="center">
+  <img src="docs/launcher-build.png" alt="The launcher building the game" width="70%"><br>
+  <sub>The launcher while it builds the game</sub>
+</p>
 
-| Xbox pad | PC pad | Keyboard / mouse |
+**No build tools to install.** The game is built on your PC, and the compiler it needs comes inside the download.
+
+Your disc image is only read, never changed. Your saves are kept in `XboxData\HardDisk` inside the game folder and your settings in `btvs_settings.ini`. Installing again leaves both alone. To uninstall, delete the game folder: nothing is written anywhere else on your PC.
+
+---
+
+## Keys
+
+An Xbox controller works as on the console; on other pads the buttons are in the same places. Every key and button can be changed in **Options → PC Controls**.
+
+| Xbox pad | What it does | Keyboard / mouse |
 |---|---|---|
-| A | A / Cross | Space |
-| B | B / Circle | Backspace, middle mouse |
-| X | X / Square | E, left mouse |
-| Y | Y / Triangle | Q, right mouse |
-| Black / White | LB / RB | Z / C |
-| Triggers | LT / RT | Left Shift / F, Right Shift |
-| Start / Back | Start / Back | Enter / Escape |
-| D-pad | D-pad | arrow keys |
-| Left stick | left stick | W A S D |
-| Right stick | right stick | I J K L, and the mouse |
+| **A** | Kick | Right mouse button, Enter |
+| **B** | Jump | Space, Backspace |
+| **X** | Punch | Left mouse button, Q |
+| **Y** | Use | E |
+| **Black** / **White** (the bumpers) | Ammo swap / inventory | R / Tab |
+| **Left trigger** | Look and aim | Left Ctrl, F |
+| **Right trigger** | Target | Left Shift, middle mouse button |
+| **Start** | Pause, skip a cut-scene | Escape |
+| **D-pad** | Choose a weapon | Arrow keys |
+| **Left stick** / **Right stick** | Move / camera | W A S D / the mouse, I J K L |
 
-Alt+Enter or F11 switches fullscreen; F12 (or a click of the left stick) makes a problem report.
-To leave the game: main menu → Exit.
+The port adds these keys:
 
-## Building from source
+| Key | What it does |
+|---|---|
+| **F11**, or **Alt+Enter** | Fullscreen on / off |
+| **F12**, or a click of the left stick | Make a problem report |
 
-You need Visual Studio Build Tools 2019 (MSVC x64), CMake 3.20 or newer, Git Bash, Python 3.12
-with `capstone`, and your own disc unpacked into `game_files/` (`Default.xbe`, `final.map`,
-`pak/`, `media/`, ...).
+Picture, sound and control settings are in the game: **Options**. To leave the game: main menu → **Exit**.
 
-```bash
-bash port/tools/regen.sh
-```
+---
 
-```bash
-bash port/tools/build.sh
-```
+## Something wrong?
 
-```bash
-bash port/tools/deploy.sh
-```
+1. In the game, choose **Options → Report a Problem** (it is in the pause menu too), or press **F12**.
+2. Open an [issue](../../issues/new/choose) and attach the files the form asks for, from the new folder in `reports` inside the game folder.
 
-```bash
-bash port/tools/package.sh
-```
+Please don't attach the report's `.zip` or its `save` folder: they hold your saved games and other data of the game. Nothing is sent anywhere by the game itself.
 
-- `regen.sh` translates `game_files/Default.xbe` to C in `port/src/recomp/gen/` (takes minutes;
-  the result is never committed).
-- `build.sh` builds `buffy_tvs.exe` and `Buffy Launcher.exe` in `port/build/Release/`.
-- `deploy.sh` makes a playable `GAME/` folder: the build plus the disc's files, hard-linked from
-  `game_files/`, and a default `btvs_settings.ini` if there is none. Start
-  `GAME/Buffy Launcher.exe` and press Play.
-- `package.sh` makes the release zip in `dist/` (launcher, game exe, pdb, Read Me) and checks that
-  nothing from the disc is in it.
+---
 
-The game's translated code is compiled into `buffy_tvs.exe`, so the exe belongs to one release of
-the disc. It checks the installed `Default.xbe` at start and refuses another release with a clear
-message. A build for another release: [docs/install.md](docs/install.md#releases).
+## More
 
-More: [CLAUDE.md](CLAUDE.md) (layout and working rules), [docs/AREAS.md](docs/AREAS.md),
-[docs/install.md](docs/install.md).
+- [State of the port](docs/STATUS.md): what works, what doesn't, what has been checked and how.
+- [Building from source](docs/BUILDING.md): for developers.
+- Notes per area: [graphics](docs/graphics.md), [audio](docs/audio.md), [controls](docs/controls.md), [menus](docs/menu.md), [reports and logs](docs/logs.md), [install](docs/install.md).
+
+## Credits
+
+- **KaikoClanworth**: project lead, direction and testing.
+- **[Claude Code](https://claude.com/claude-code)** (Anthropic's AI coding assistant) wrote most of the port's code, tools and docs.
+- **[xboxrecomp](https://github.com/sp00nznet/xboxrecomp)** by sp00nz: the recompiler and Xbox runtime the port is built on. Parts of its sound and graphics code derive from **[xemu](https://github.com/xemu-project/xemu)**.
+- **[SDL](https://github.com/libsdl-org/SDL)** for controllers, and **[LLVM](https://llvm.org)** (clang and lld), which builds the game on your PC.
 
 ## Legal
 
-This is an unofficial fan project, not affiliated with or endorsed by the game's developers,
-publishers or rights holders. *Buffy the Vampire Slayer* and everything in the game belong to
-their owners.
-
-The repository and the release zip contain only the port's own code. They include **no** disc
-image, game data, or original game executable; the game cannot be played without your own
-legally obtained copy. The recompiler toolkit in `xboxrecomp/` is MIT-licensed.
+This is an unofficial fan project, not affiliated with or endorsed by The Collective, Electronic Arts, Fox Interactive or Microsoft. *Buffy the Vampire Slayer* and all related names and characters belong to their owners. No game material is included: no disc image, game data or game code, original or translated. The recompiler toolkit in `xboxrecomp/` is under the MIT licence, with the parts named in its `NOTICE` under LGPL-2.1-or-later.

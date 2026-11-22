@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 240" width="960" height="240" role="img" aria-label="Buffy the Vampire Slayer (Xbox, 2002): PC port">
+  <!-- Drawn for the port (the moon and stake of port/icon/make_icon.py). Nothing here comes from the game, its box or the show. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3e186e"/>
+      <stop offset="1" stop-color="#18092e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.55" stop-color="#9668d6" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#9668d6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="moon" cx="0.4" cy="0.35" r="0.75">
+      <stop offset="0" stop-color="#f6f0da"/>
+      <stop offset="1" stop-color="#d6ccac"/>
+    </radialGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e2a55f"/>
+      <stop offset="0.55" stop-color="#d69852"/>
+      <stop offset="1" stop-color="#a86f34"/>
+    </linearGradient>
+  </defs>
+  <rect width="960" height="240" rx="20" fill="url(#bg)"/>
+  <rect x="1.5" y="1.5" width="957" height="237" rx="18.5" fill="none" stroke="#9668d6" stroke-opacity="0.6" stroke-width="3"/>
+
+  <!-- the moon -->
+  <circle cx="128" cy="116" r="104" fill="url(#glow)"/>
+  <circle cx="128" cy="116" r="72" fill="url(#moon)"/>
+  <circle cx="100" cy="92" r="13" fill="#ded5b8"/>
+  <circle cx="156" cy="128" r="10" fill="#ded5b8"/>
+  <circle cx="112" cy="146" r="7" fill="#ded5b8"/>
+  <circle cx="150" cy="82" r="6" fill="#ded5b8"/>
+
+  <!-- the stake -->
+  <g transform="translate(128 124) rotate(42)">
+    <polygon points="-15,96 15,96 15,-52 0,-112 -15,-52" fill="#140824"/>
+    <polygon points="-11,92 11,92 11,-50 0,-100 -11,-50" fill="url(#wood)"/>
+    <line x1="-4" y1="84" x2="-4" y2="20" stroke="#8a5a2b" stroke-width="2" stroke-linecap="round"/>
+    <line x1="3" y1="84" x2="3" y2="44" stroke="#8a5a2b" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <text x="262" y="92" font-family="Georgia, 'Times New Roman', serif" font-size="44" fill="#f6f0da">Buffy the Vampire Slayer</text>
+  <text x="264" y="134" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="23" fill="#e3d6f5">The 2002 Xbox game, running natively on Windows</text>
+  <text x="264" y="172" font-family="'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" fill="#b9a3d6">Not an emulator  ·  Bring your own disc  ·  Built on your PC from your own copy</text>
+</svg>

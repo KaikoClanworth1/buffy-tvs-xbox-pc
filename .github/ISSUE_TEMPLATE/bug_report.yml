@@ -1,0 +1,85 @@
+name: Problem report
+description: "Something in the port is wrong: a crash, a picture or sound fault, a control that does not work."
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. What makes a fault findable is the game's own **problem report**.
+
+        **Make a report.** While the fault is on screen, choose **Options → Report a Problem** (it is in the pause
+        menu too), or press **F12**. The port writes a folder `reports\<date>-<time>\` inside the game folder
+        (the launcher's **Reports folder** button opens it). Attach these files from it (drag them into the box below):
+        `screenshot.png`, `report.txt`, `replay.txt`, `btvs_log.txt`, `btvs_trail.txt`, `settings.ini`, `memory.txt`.
+
+        **Do not attach the report's `.zip` or its `save` folder.** They hold your saved games and other data of the
+        game, which must not be posted here.
+
+        **After a crash**, also the newest `crash_….txt` (or `hang_….txt`) from the `crashes` folder. Not the `.dmp` file.
+        **If installing failed**, attach `install_log.txt` from the game folder instead.
+
+        Logs show your Windows user name inside folder paths. Look through them, and replace it if you want it kept private.
+
+        Never attach game files, disc images or saves.
+  - type: dropdown
+    id: area
+    attributes:
+      label: What kind of problem is it?
+      options:
+        - Picture (wrong colours, missing things, flicker, too dark)
+        - Sound (missing, crackle, wrong volume)
+        - Controls (controller, keyboard, mouse, rumble, button pictures)
+        - Menus and settings (Options pages, Exit)
+        - Crash, freeze or will not start
+        - Speed (stutter, low frame rate, long loading)
+        - Installing or building (the launcher)
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Where in the game (level, cut-scene, menu page), and what you did just before.
+    validations:
+      required: true
+  - type: textarea
+    id: repeat
+    attributes:
+      label: Can you make it happen again? How?
+      placeholder: "Every time / sometimes / once. Steps: 1. ... 2. ..."
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Port version
+      description: The first lines of `report.txt` say it, and the launcher shows it in its bottom right corner.
+    validations:
+      required: true
+  - type: input
+    id: pc
+    attributes:
+      label: Your PC
+      placeholder: "Windows 11, Ryzen 5 5600, RTX 3060 (driver 566.14), 16 GB"
+    validations:
+      required: true
+  - type: input
+    id: input
+    attributes:
+      label: Controller or keyboard
+      placeholder: "Xbox Series pad over USB / DualSense over Bluetooth / keyboard and mouse"
+  - type: textarea
+    id: files
+    attributes:
+      label: Report files
+      description: "Drag in: screenshot.png, report.txt, replay.txt, btvs_log.txt, btvs_trail.txt, settings.ini, memory.txt, and the crash file if there is one. Not the .zip, not the save folder."
+    validations:
+      required: true
+  - type: checkboxes
+    id: own
+    attributes:
+      label: Before you send
+      options:
+        - label: I use my own copy of the game, and I attached no game files, no saves and no report `.zip`.
+          required: true

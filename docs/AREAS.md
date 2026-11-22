@@ -12,6 +12,7 @@ Shared files (`port/src/main.c`, `port/CMakeLists.txt`, `port/src/manual_functio
 | **Menu** | `port/src/btvs_menu*.c`, `btvs_settings.c/.h`, `docs/menu.md` | PC pages inside the game's own menu system and look: main-menu **Exit**, **Options → Graphics / Audio / Controls**, pause-menu **Report a Problem**, memory page; `btvs_settings.ini`; the settings API every area reads |
 | **Extras** | `port/launcher/`, `port/icon/`, `port/tools/deploy.sh`, `package.sh`, `README.md`, `docs/install.md` | Easy install: pick the xiso, pick a folder, it unpacks and sets up, then Play (everything else is configured in-game); version/update plumbing; README; release packaging without game data |
 | **Logs** | `port/src/btvs_log.c/.h`, `btvs_report*.c`, `btvs_trail.c`, `btvs_mem.c`, `port/tools/report_*.py`, `docs/logs.md` | Log API + `btvs_log.txt`; crash/hang reports with guest symbols; **Report a Problem** package (screenshot, log, settings, system info, game state, save); the **trail**: a record of exactly what the player did (level loads, checkpoints, position, input recording) and a way to jump straight back there (`BTVS_REPLAY=<report>`); RAM/VRAM/heap statistics for the memory view |
+| **GitHub** | `README.md` (from Extras, 22 Nov), `docs/STATUS.md`, `docs/BUILDING.md`, `docs/github.md`, `docs/media/`, `.github/`, `recomplauncher.json` | The repository's page in the style of the owner's X-Men Destiny port; the RecompLauncher page once there is a release. Changes no code |
 
 ## Interfaces between areas
 
@@ -764,3 +765,16 @@ high school), `RECOMP_FILE_LOG=0`, time from "the game restarts itself" to `leve
   with no change. Only if that write fails do they show the drawn one. If you ever want that case
   covered too: `btvs_icon.ico` beside the exe is the same icon as a file (`LoadImage` with
   `LR_LOADFROMFILE`, else resource 1). Not needed today. `docs/icon.md`.
+- **GitHub -> Extras** (22 Nov; `docs/github.md`). `README.md` is now kept by the GitHub area (its build steps moved to
+  `docs/BUILDING.md`); tell me what changes for players and I put it in. For you, none urgent, all before a release:
+  1. `port/launcher/Read Me.txt` has the key table from before 21 Nov (Space = A ...; `docs/controls.md` "Defaults" is
+     today's) and still says the port was only checked by automated tests (the owner has played levels since).
+  2. RecompLauncher (the owner's other ports are listed there) reads `recomplauncher.json` from the **top of the
+     release zip**: `package.sh` would copy the repository's one in, with `RELEASE_VERSION` replaced by `BTVS_VERSION`,
+     and allow that name in its check. It picks the download by the words `Windows` and `x64` in the file name:
+     `Buffy-the-Vampire-Slayer-PC-v<version>-Windows-x64.zip`.
+  3. Its set-up screen runs `"Buffy Launcher.exe" --install <image> "<release folder>\Game" --quiet` and shows a bar
+     only for stdout lines `progress <0..1> <text>` (today: `[ 40%] text`). Could `--install` print those too (or
+     under a switch)? And separate exit codes for "not the supported disc" and "build failed" (both 1 today) would
+     let it say which. Not known: whether installing into a folder inside the launcher's own folder works.
+  4. `SDL3.dll` goes into the release without SDL's licence text (zlib licence: a copy of it beside the DLL).

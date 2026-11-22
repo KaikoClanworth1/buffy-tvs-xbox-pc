@@ -1,0 +1,44 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "Buffy the Vampire Slayer PC Port",
+  "inputs": [
+    {
+      "id": "game",
+      "label": "Your Buffy the Vampire Slayer (2002) game for the original Xbox, European (PAL) release: a disc image (.iso or .xiso).",
+      "role": "game",
+      "formats": [
+        { "type": "file", "extensions": ["iso", "xiso"] }
+      ]
+    }
+  ],
+  "prepare": {
+    "program": ["Buffy Launcher.exe"],
+    "args": ["--install", "{input:game}", "{install}/Game", "--quiet"],
+    "label": "Installing the game from your disc image and building it on your PC (about 8 minutes; the compiler comes with the download)",
+    "timeout": 7200,
+    "version": "RELEASE_VERSION",
+    "done": ["{install}/Game/buffy_tvs.exe", "{install}/Game/btvs_game.ok"]
+  },
+  "start": {
+    "program": ["Game/buffy_tvs.exe"]
+  },
+  "saves": ["{install}/Game/XboxData/HardDisk", "{install}/Game/btvs_settings.ini"],
+  "folders": {
+    "saves": [{ "path": "{install}/Game/XboxData/HardDisk" }],
+    "logs": [{ "path": "{install}/Game" }],
+    "reports": [{ "path": "{install}/Game/reports" }],
+    "crashes": [{ "path": "{install}/Game/crashes" }]
+  },
+  "exit_codes": {
+    "1": "Installing or building the game failed, or the disc image isn't the European (PAL) release of Buffy the Vampire Slayer (Xbox, 2002) this port supports. The details are in install_log.txt in the Game folder. Setting up again carries on where it stopped.",
+    "2": "The game's files were installed, but the download is incomplete: buffy_tvs.exe is missing beside the launcher. Install the port again."
+  },
+  "looks": {
+    "graphics": "d3d11"
+  },
+  "actions": [
+    { "id": "saves", "label": "Saves", "help": "Your saved games.", "open": "saves" },
+    { "id": "reports", "label": "Problem reports", "help": "Folders made with Report a Problem or F12.", "open": "reports" }
+  ]
+}
