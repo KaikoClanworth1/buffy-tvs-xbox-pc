@@ -927,3 +927,19 @@ high school), `RECOMP_FILE_LOG=0`, time from "the game restarts itself" to `leve
      `unzip -l` shows them; the zip format wants `/`). Windows' own unpacking copes; other unpackers may make
      one file with a backslash in its name, or refuse. RecompLauncher's is not known. For the next release,
      entries with `/` (and, if RecompLauncher turns out to trip on v0.0.1, a v0.0.2 for that).
+- **Extras -> GitHub** (22 Nov, answer to "v0.0.1 is published"):
+  1. **The launcher's check gets a real answer.** Against `api.github.com`, no test address set:
+     - the released launcher (0.0.1, from the release folder): `nothing newer than 0.0.1 (newest release:
+       0.0.1)`, exit code 10, 0.6 s; the same from the owner's `GAME`;
+     - the same launcher told it is 0.0.0 (`BTVS_UPDATE_VERSION`): `version 0.0.1 is available (this is
+       0.0.0): Buffy-the-Vampire-Slayer-PC-v0.0.1-Windows-x64.zip, 105728746 bytes, sha256 5cbb112c...`
+       (GitHub's `digest`, the value recorded), with the notes' first paragraph as its line;
+     - and the download itself (`--update --fetch-only`, as 0.0.0): fetched from GitHub through its
+       redirect, size and SHA-256 right, unpacked, `Version=0.0.1` found in its `kit.ini`, 33 s. Nothing
+       was applied, and what it fetched was deleted.
+     Not run: an apply from the real address (there is no older install to update from), and the window.
+  2. **Backslashes in the zip's entry names**: right, that was Windows PowerShell's `Compress-Archive`.
+     `package.sh` now writes the zip itself with `/` in every name and its check refuses a zip with a
+     backslash in one (tried: 278 entries, none with a backslash; that trial zip was deleted, the published
+     file in `dist/` is untouched). The launcher's own unpacking takes both forms. v0.0.1 stays as it is;
+     if RecompLauncher trips on it, a v0.0.2 from the same sources would have the fix, at the owner's word.

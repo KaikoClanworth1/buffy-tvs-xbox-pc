@@ -80,7 +80,18 @@ fi
 
 cd "$ROOT/dist"
 rm -f "$ZIP"
-bash "$PORT/tools/limit.sh" powershell -NoProfile -Command "Compress-Archive -Path '$NAME' -DestinationPath '$ZIP'"
+# Entry names with "/", as the zip format wants (Windows PowerShell's Compress-Archive writes "\\", which
+# unpackers other than Windows' own may turn into one oddly named file: v0.0.1 was made that way).
+bash "$PORT/tools/limit.sh" python - "$NAME" "$ZIP" <<'PYZIP'
+import os, sys, zipfile
+top, out = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+    for d, dirs, files in os.walk(top):
+        dirs.sort()
+        for f in sorted(files):
+            p = os.path.join(d, f)
+            z.write(p, p.replace(os.sep, "/"))
+PYZIP
 
 # The check: only our own files, nothing from the disc, no translated game code.
 if ! python - "$ZIP" "$NAME" "$BTVS_MAIN/game_files" "$PORT/icon/btvs.ico" <<'EOF'
@@ -106,6 +117,8 @@ else:
     print("note: no game_files/ here, so content was checked by name and type only")
 bad = []
 seen_licence = False
+if any("\\" in i.filename for i in zipfile.ZipFile(zip_path).infolist()):
+    bad.append("an entry is named with a backslash (the zip format wants /)")
 # the port's own drawn icon: every image of it must be in both programs as shipped. An exe whose icon
 # was replaced on a PC with the game's real one (made from a disc at install) has none of them.
 ico = open(sys.argv[4], "rb").read()
