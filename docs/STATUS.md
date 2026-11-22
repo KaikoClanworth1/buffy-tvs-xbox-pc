@@ -33,7 +33,7 @@ Written 22 Nov 2026, from the notes each area keeps in this folder. Those notes 
 
 - **No level has been played through**, and going from one level to the next by playing hasn't been done.
 - **Only the European (PAL) release** of the disc is supported. The North American disc is refused; it needs its own build.
-- **No release, no update check.** The install has run on the developer's PC only, never on a PC without developer tools installed.
+- **No release yet.** The launcher can update from GitHub releases, tried only against a stand-in on the developer's PC. The install has run on the developer's PC only, never on a PC without developer tools installed.
 - **Picture faults**: levels are dark at the game's default brightness (the game's own brightness setting cures it); menu and on-screen text is blocky at 4K; the faint sheen on characters and props doesn't shift as it should; the game's own screen captures aren't drawn; dark corners on the pause backdrop in widescreen; in cut-scenes a flame can show one wrong frame.
 - **Some physics objects jump about.** The cause hasn't been found.
 - **Sound**: scratchy voices and repeating sound were heard by hand and have been corrected, but the correction hasn't been listened to yet. No reverb, Doppler or headphone 3D. The mix can clip at full master volume. Lip movement and fights haven't been checked.
