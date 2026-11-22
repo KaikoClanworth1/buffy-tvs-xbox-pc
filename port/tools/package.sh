@@ -64,6 +64,9 @@ tail -1 "$WORK.log"
 [ "$INCOMPLETE" = 1 ] && echo "NOT A RELEASE: the translate program or LLVM's licence is missing" > "$OUT/NOT A RELEASE.txt"
 S="$(pick "SDL3.dll")"   # controllers other than XInput (Controls area)
 [ -n "$S" ] && cp -f "$S" "$OUT/" || echo "note: no SDL3.dll beside the build"
+# SDL's licence (zlib) goes with its DLL: the text from SDL's own package, which the build downloaded.
+SL=""; for d in "$PORT/build/sdl3" "$BTVS_MAIN/port/build/sdl3"; do [ -f "$d/LICENSE.txt" ] && SL="$d/LICENSE.txt" && break; done
+if [ -n "$S" ]; then [ -n "$SL" ] && cp -f "$SL" "$OUT/SDL3-LICENSE.txt" || { echo "SDL3.dll without SDL's LICENSE.txt (port/build/sdl3)"; [ "$ALLOW_MISSING" = 1 ] || exit 1; }; fi
 cp -f "$PORT/launcher/Read Me.txt" "$OUT/Read Me.txt"
 # RecompLauncher reads this from the release (the GitHub area's file; the version filled in).
 [ -f "$ROOT/recomplauncher.json" ] && sed "s/RELEASE_VERSION/$VER/" "$ROOT/recomplauncher.json" > "$OUT/recomplauncher.json"
@@ -83,7 +86,7 @@ bash "$PORT/tools/limit.sh" powershell -NoProfile -Command "Compress-Archive -Pa
 if ! python - "$ZIP" "$NAME" "$BTVS_MAIN/game_files" "$PORT/icon/btvs.ico" <<'EOF'
 import hashlib, os, struct, sys, zipfile
 zip_path, top, game = sys.argv[1:4]
-allowed = {"buffy launcher.exe", "buffy_tvs.exe", "buffy_tvs.pdb", "read me.txt", "not a release.txt", "recomplauncher.json",
+allowed = {"buffy launcher.exe", "buffy_tvs.exe", "buffy_tvs.pdb", "read me.txt", "not a release.txt", "recomplauncher.json", "sdl3-license.txt",
            "sdl3.dll", "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"}
 # the build kit: these files, the port's headers, and LLVM's two programs, headers and licence
 kit_files = {"kit.ini", "btvs_translate.exe", "game_dll.c", "btvs_game_tls.h", "game_link.def", "manual_functions.json",

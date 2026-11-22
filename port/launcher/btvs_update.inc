@@ -894,7 +894,7 @@ static int update_never(const WCHAR *name)
 static int update_apply_run(const WCHAR *release, const WCHAR *game)
 {
     static const WCHAR *programs[] = { GAME_EXE, L"buffy_tvs.pdb", L"Read Me.txt", LAUNCHER_EXE,
-                                       L"SDL3.dll", L"vcruntime140.dll", L"vcruntime140_1.dll", L"msvcp140.dll" };
+                                       L"SDL3.dll", L"SDL3-LICENSE.txt", L"vcruntime140.dll", L"vcruntime140_1.dll", L"msvcp140.dll" };
     static const WCHAR *built[] = { GAME_DLL, L"btvs_game.pdb", GAME_DLL_OK };
     WCHAR upd[MAX_PATH], back_r[MAX_PATH], back_g[MAX_PATH], src_root[MAX_PATH], pat[MAX_PATH], a[MAX_PATH], b[MAX_PATH], c[MAX_PATH];
     WCHAR jp[MAX_PATH], logp[MAX_PATH];

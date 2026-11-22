@@ -4,10 +4,9 @@ BUFFY THE VAMPIRE SLAYER (Xbox, 2002) - PC port
 This is an unofficial PC version of the 2002 Xbox game. It contains no game
 data: you need your own Xbox disc of the game, as an image file (.iso).
 
-THIS IS AN EARLY DEVELOPMENT BUILD. The game starts, shows its menus and
-loads the first level, but so far that has only been checked by automated
-tests with the window hidden and the sound off. Expect faults, and please
-report them (see REPORT A PROBLEM).
+THIS IS AN EARLY VERSION. The menus and the first levels have been played,
+but most of the game has only been checked by automated tests. Expect
+faults, and please report them (see REPORT A PROBLEM).
 
 
 INSTALL
@@ -15,9 +14,17 @@ INSTALL
 1. Start "Buffy Launcher.exe".
 2. Under "Your Xbox disc image", press Browse and choose the .iso of your
    disc. The launcher tells you if it is the right game.
-3. Under "Install to", press Browse and choose a folder (about 2.2 GB).
-4. Press INSTALL and wait for the bar to finish.
+3. Under "Install to", press Browse and choose a folder of your own, such
+   as C:\Games\Buffy (about 2.4 GB; not inside "Program Files").
+4. Press INSTALL and wait for the bar to finish. It copies the game from
+   your disc image and then builds the game for your PC, which takes some
+   minutes (8 to 10 on a 4-core PC, less on a faster one). Everything it
+   needs comes with this download; nothing else is installed on your PC.
+   If it is stopped, INSTALL again carries on where it was.
 5. Press PLAY.
+
+Keep this unpacked folder: the launcher in it is the one that can build the
+game again after an update.
 
 Your disc image is only read. It is never changed, and you can delete it or
 move it away after installing.
@@ -48,17 +55,33 @@ The game first starts borderless, at your desktop's resolution, sound on.
 An Xbox controller works as on the console. Other controllers (PlayStation,
 Switch) go through SDL3.dll. Keyboard and mouse:
 
-  Move            W A S D            Camera        mouse, or I J K L
-  A               Space              B             Backspace
-  X               E / left mouse     Y             Q / right mouse
-  Black / White   Z / C              Triggers      Left Shift / F
-  Start           Enter              Back          Escape
-  Menus           arrow keys, Space to choose, Backspace to go back
+  Move        W A S D                  Camera      mouse, or I J K L
+  Kick        right mouse, Enter       Punch       left mouse, Q
+  Jump        Space                    Use         E
+  Target      Left Shift, middle mouse Look / aim  Left Ctrl, F
+  Weapon      arrow keys, mouse wheel  Inventory   Tab
+  Ammo swap   R                        Pause       Escape
+  Menus       arrow keys; Enter or Space to choose; Escape or Backspace
+              to go back
+
+Every key can be changed in Options, PC Controls. The pictures and tips in
+the game follow what you last used, controller or keyboard.
 
   Alt+Enter or F11   fullscreen on / off
   F12                make a problem report
 
 To leave the game: main menu, Exit.
+
+
+UPDATES
+-------
+The launcher looks for a newer version of the port when it opens, and says
+so in one line if there is one. Nothing is downloaded until you press
+"Update..." and answer Yes. Your saved games, settings and reports are
+kept; if the update fails, the version you had is put back. After some
+updates the game is built again for your PC, which takes a few minutes.
+"Check for updates" at the bottom of the launcher looks again. If you
+installed through RecompLauncher, it does the updating instead.
 
 
 SAVES
@@ -83,8 +106,14 @@ IF SOMETHING GOES WRONG
 - "This is another release of the game": see WHICH DISC above.
 - "Default.xbe has been changed or damaged": the image was modified
   (patched, trained, or a bad copy). Use an unmodified image of your disc.
-- "Not enough free space": the game needs about 2.2 GB on the drive you
-  chose.
+- "Not enough free space": the game needs about 2.4 GB on the drive you
+  chose, and about 1 GB more while it is being built.
+- The install stops while "Translating" or "Building": press INSTALL again;
+  what is done is kept. install_log.txt in the game folder has the details.
+  A virus scanner can hold up or remove the freshly built btvs_game.dll or
+  build\btvs_translate.exe: allow the game folder and this folder in it.
+- "The game cannot run from that folder": choose a folder whose name has
+  only ordinary letters and digits.
 - The game closes or will not start: the launcher says so. The game folder
   ("Game folder" in the launcher) holds btvs_log.txt and btvs_console.txt,
   which record what the game did, and "crashes" if it wrote a crash report.
@@ -100,3 +129,8 @@ Nothing is written anywhere else on your PC.
 
 This is a fan project, not affiliated with or endorsed by the makers or
 owners of the game. No game material is included.
+
+Other people's work in this download, each under its own licence:
+SDL3.dll (controllers; zlib licence, SDL3-LICENSE.txt) and, in "build",
+clang and lld-link from the LLVM project (Apache-2.0 with LLVM exceptions,
+build\llvm\LICENSE.TXT).

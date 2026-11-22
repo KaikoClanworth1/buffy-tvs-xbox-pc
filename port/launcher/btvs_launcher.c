@@ -539,7 +539,7 @@ static void copy_program(const WCHAR *target)
     /* The Visual C++ runtime may ship beside the exe (app-local), for PCs
      * without the redistributable installed. */
     static const WCHAR *files[] = { GAME_EXE, L"buffy_tvs.pdb", L"Read Me.txt", LAUNCHER_EXE,
-                                    L"SDL3.dll", L"vcruntime140.dll", L"vcruntime140_1.dll", L"msvcp140.dll" };
+                                    L"SDL3.dll", L"SDL3-LICENSE.txt", L"vcruntime140.dll", L"vcruntime140_1.dll", L"msvcp140.dll" };
     WCHAR src[MAX_PATH], dst[MAX_PATH], full_a[MAX_PATH], full_b[MAX_PATH];
     int i;
     GetFullPathNameW(target, MAX_PATH, full_a, NULL);
