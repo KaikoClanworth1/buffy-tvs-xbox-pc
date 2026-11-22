@@ -178,6 +178,26 @@ For tests and scripts. Nothing is shown and no focus is taken.
 - **Other releases** of the disc (above).
 - **Install-time conversions** (above): none known to be needed yet.
 
+## What was checked on 22 Nov 2026, 09:10 build (main at 373cabb): the launcher with the updater
+
+`GAME/buffy_tvs.exe` reports commit `373cabb059`, built Nov 22 2026 09:10:50. No regen was needed; no
+game was running from `GAME`. The owner's `btvs_settings.ini` and save files have the same checksums
+before and after. The exe's icon is the generated one (nine images, same bytes).
+
+- **The update check against GitHub itself**, from `GAME`'s launcher (`--check-update`, three times): the
+  private repository answers 404, "treated as: no update", exit code 10, in 435, 157 and 182 ms. Nothing
+  was written to `GAME` (no `btvs_update.ini`, no `update` folder). In the window that request runs on
+  its own thread, so Play does not wait for it, and after a 404 at start the launcher shows nothing
+  about updates (picture 6 of the sheet, drawn off screen). After a click on **Check for updates** it
+  says "No newer version was found."
+- Through the launcher's Play path and without it: main menu, `m00_spanishmission_1` loaded, one game
+  process and one game window, exit code 0.
+- The updater's views, drawn off screen by `GAME`'s launcher: `port/runs/shots/launcher_update_views.png`
+  (and one file each, `launcher_update_*.png`, `launcher_game_*.png`).
+
+Not seen: the launcher's window itself. It cannot be opened hidden, so "starts and reaches Play" stands
+on the console form of the same check, the off-screen picture and `--play`.
+
 ## Updates from GitHub (22 Nov 2026)
 
 `Buffy Launcher.exe` can bring an install up to the newest release of
@@ -206,7 +226,8 @@ below was run against a stand-in for GitHub on this PC, never against GitHub.
   build's lines as at install), then the launcher opens again with "Updated to version 0.2.0. Your saved
   games and settings are as they were." or, in red, "The update did not finish, and the version from
   before was put back: <why>".
-- Pictures of the two views, drawn off screen: `--capture update|updating <out.bmp> [game folder]`.
+- Pictures of the views, drawn off screen: `--capture update|updating|applying|updated|updatefailed <out.bmp>
+  [game folder]`; a sheet of all of them is `port/runs/shots/launcher_update_views.png`.
 
 ### How it works
 
@@ -248,8 +269,10 @@ are replaced, and those names are refused.
 `--install`; `btvs_install.ini` in the game folder then says `Owner=RecompLauncher`) is RecompLauncher's
 to update: the launcher shows "Updates for this copy come through RecompLauncher." and checks, fetches
 and replaces nothing. The same when the launcher itself runs with that variable. A developer's build
-(the game's code inside the exe, as in the owner's `GAME\`) has no release to move to: one line says so,
-and there is no check and no button there.
+(the game's code inside the exe, as in the owner's `GAME\`) is checked like any install, so the line
+shows there too, but a release cannot take its place: the line then ends "This is a developer's build:
+it is updated by building, not from the release." and there is no **Update...** button (`--update`
+ends with code 11).
 
 **For the game's menu** (Menu area): after each check the launcher writes `btvs_update.ini` in the game
 folder; `btvs_update_available()` (`port/src/btvs_update.h`) reads it. The game itself never goes online.
@@ -275,7 +298,7 @@ pre-release 0.0.8.
 
 | Case | Result |
 |---|---|
-| Developer's build (`port/build/Release`) | "A developer's build ...", exit 11, no request made |
+| Developer's build (`port/build/Release`, `GAME`) | at first it made no check at all (exit 11); since 373cabb it checks like any install and only refuses to apply |
 | Nothing listening (offline) | "No connection", treated as no update, exit 10 |
 | The server answers 404 (the private repository today) | treated as no update, exit 10 |
 | The list with 0.0.9 draft, 0.0.8 pre-release, 0.0.2, 0.0.1 | "version 0.0.2 is available (this is 0.0.1)", the zip picked by its ending, notes' first paragraph; `btvs_update.ini` written |
