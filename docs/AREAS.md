@@ -51,7 +51,11 @@ Declared in `port/src/btvs.h` (create it if missing; add, don't rewrite):
   The zip was made twice from the same sources: first from a commit whose number changed when it was
   rebased (`81069ac`, now `899d83e`), then again from `76b5d42` so that the commit the game names in its
   log and reports is one that is on main. Everything below ran on the first; **the final zip was then
-  unzipped, installed and played again: its install was still running when this was written (the PC was busy: the translate step alone had taken 12 minutes instead of 5). The result is added here when it has finished.** RecompLauncher's commands were
+  unzipped, installed and played again: install exit code 0 in 16 min 48 s (the PC was busy: translating took
+  12 min 26 s that time instead of 5 min 23 s, the compile 3 min 56 s); the game says `commit 76b5d4226a`,
+  main menu, level 1 (first frame 3.9 s after the restart), the level change to the cemetery inside the
+  process (5.8 s), one game process and one window, exit code 0; the exe's icon is the one made from the
+  disc.** RecompLauncher's commands were
   not run a second time.
 
   - **Unzipped** with Windows' own `Expand-Archive` into an empty folder outside the repository (7 s).
